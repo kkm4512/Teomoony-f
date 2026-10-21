@@ -2701,40 +2701,44 @@ app.get('/api/lawds/:lawd/geo', async (req, res) => {
 app.get('/api/applyhome', async (req, res) => {
   const cid = Number(req.query.complex_id) || null;
   const kapt = req.query.kapt_code ? String(req.query.kapt_code).slice(0, 20) : null;
-  if (!cid && !kapt) return res.status(400).json({ error: 'complex_id 또는 kapt_code 가 필요합니다' });
+  /* ★ 2026-10-22: house=관리번호 — 단지에 안 이어진 공고(지도의 '분양' 핀)를 그 자리에서 연다. 연결과 상관없이 그 주택의 공고 전부 */
+  const house = req.query.house ? String(req.query.house).replace(/[^0-9A-Za-z]/g, '').slice(0, 20) : null;
+  if (!cid && !kapt && !house) return res.status(400).json({ error: 'complex_id · kapt_code · house 중 하나가 필요합니다' });
   try {
     const pool = await getPool();
-    const r = await pool.request().input('cid', sql.Int, cid).input('k', sql.VarChar(20), kapt).query(`
+    const r = await pool.request().input('cid', sql.Int, cid).input('k', sql.VarChar(20), kapt).input('hm', sql.VarChar(20), house).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('tempdb..#ahkey') IS NOT NULL DROP TABLE #ahkey;
+      SELECT DISTINCT x.house_manage_no, x.pblanc_no INTO #ahkey FROM (
+        SELECT l.house_manage_no, l.pblanc_no FROM gold.applyhome_link l
+         WHERE (@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k)
+        UNION SELECT p.house_manage_no, p.pblanc_no FROM silver.applyhome_pblanc p WHERE @hm IS NOT NULL AND p.house_manage_no = @hm) x;
       SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.hssply_adres, p.house_secd_nm, p.house_dtl_secd_nm, p.rent_secd_nm,
              p.tot_suply, p.rcrit_pblanc_de, p.rcept_bgnde, p.przwner_de, p.mvn_prearnge_ym, p.cnstrct_entrps_nm, p.pblanc_url,
-             l.근거, l.거리m
-        FROM gold.applyhome_link l
-        JOIN silver.applyhome_pblanc p ON p.house_manage_no = l.house_manage_no AND p.pblanc_no = l.pblanc_no
-       WHERE (@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k)
+             p.공고종류, l.근거, l.거리m
+        FROM #ahkey a
+        JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no
+        LEFT JOIN gold.applyhome_link l ON l.house_manage_no = p.house_manage_no AND l.pblanc_no = p.pblanc_no
        ORDER BY p.rcrit_pblanc_de DESC;
       SELECT m.house_manage_no, m.pblanc_no, m.model_no, m.house_ty, m.전용m2, m.suply_ar,
              공급 = ISNULL(m.suply_hshldco, 0) + ISNULL(m.spsply_hshldco, 0), m.suply_hshldco, m.spsply_hshldco,
              최고원 = m.top_amount_man * 10000
         FROM silver.applyhome_mdl m
-        JOIN gold.applyhome_link l ON l.house_manage_no = m.house_manage_no AND l.pblanc_no = m.pblanc_no
-       WHERE (@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k)
+        JOIN #ahkey a ON a.house_manage_no = m.house_manage_no AND a.pblanc_no = m.pblanc_no
        ORDER BY m.house_manage_no, m.전용m2, m.model_no;
       /* ★ 2026-10-21 밤: 분양권·입주권 전매 실거래(SILV_TRADE, 291)를 **지번(PNU)으로** 붙인다 — 이름으로 잇지 않는다.
          지번 = 공고 지번(사업 전) ∪ 이어진 K-apt 지번 ∪ 이어진 단지 필지. 첫 모집공고일 **이후** 계약만(같은 땅의 옛 사업을 막는다).
          취소된 거래는 빼고 몇 건인지만 센다. */
       IF OBJECT_ID('tempdb..#ahpn') IS NOT NULL DROP TABLE #ahpn;
       SELECT DISTINCT x.pnu INTO #ahpn FROM (
-        SELECT p.pnu FROM gold.applyhome_link l
-          JOIN silver.applyhome_pblanc p ON p.house_manage_no = l.house_manage_no AND p.pblanc_no = l.pblanc_no
-         WHERE ((@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k)) AND p.pnu IS NOT NULL
-        UNION SELECT k.pnu FROM gold.applyhome_link l JOIN silver.kapt_complex k ON k.kapt_code = l.kapt_code AND k.is_current = 1
-         WHERE ((@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k)) AND k.pnu IS NOT NULL
-        UNION SELECT cp.pnu FROM gold.applyhome_link l JOIN gold.complex_pnu cp ON cp.complex_id = l.complex_id
-         WHERE ((@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k))) x;
-      DECLARE @첫 CHAR(8) = (SELECT REPLACE(MIN(p.rcrit_pblanc_de), '-', '') FROM gold.applyhome_link l
-          JOIN silver.applyhome_pblanc p ON p.house_manage_no = l.house_manage_no AND p.pblanc_no = l.pblanc_no
-         WHERE (@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k));
+        SELECT p.pnu FROM #ahkey a JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no
+         WHERE p.pnu IS NOT NULL
+        UNION SELECT k.pnu FROM #ahkey a JOIN gold.applyhome_link l ON l.house_manage_no = a.house_manage_no AND l.pblanc_no = a.pblanc_no
+          JOIN silver.kapt_complex k ON k.kapt_code = l.kapt_code AND k.is_current = 1 WHERE k.pnu IS NOT NULL
+        UNION SELECT cp.pnu FROM #ahkey a JOIN gold.applyhome_link l ON l.house_manage_no = a.house_manage_no AND l.pblanc_no = a.pblanc_no
+          JOIN gold.complex_pnu cp ON cp.complex_id = l.complex_id) x;
+      DECLARE @첫 CHAR(8) = (SELECT REPLACE(MIN(p.rcrit_pblanc_de), '-', '') FROM #ahkey a
+          JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no);
       SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
              구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn
         FROM silver.rtms_trade t
@@ -2751,6 +2755,38 @@ app.get('/api/applyhome', async (req, res) => {
       주택형: 주택형.filter(m => m.house_manage_no === p.house_manage_no && m.pblanc_no === p.pblanc_no) })),
       분양권: 분양권 || [], 분양권수: (분양권수 || [])[0] || {} });
   } catch (e) { fail(res, e, 'applyhome'); }
+});
+
+/* ---------- 지도의 '분양' 핀 (2026-10-22, 사장님 "1,2,3 ㄱㄱ") ----------
+   ★ 단지에 **안 이어진** 공고만(이어진 것은 단지 상세의 분양 칸에 있다). 같은 주택(관리번호)의 공고 중 하나라도 이어졌으면 뺀다.
+   ★ 자리 = 공고 지번 필지의 경계상자 가운데(연속지적도). 필지를 못 찾은 공고는 핀이 없다 — 동 가운데에 찍으면 **틀린 자리**가 된다.
+     그래서 몇 건이 자리를 못 찾았는지 같이 준다. */
+app.get('/api/applyhome/pins', async (req, res) => {
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (b.length !== 4 || b.some(v => !Number.isFinite(v))) return res.status(400).json({ error: 'bbox=서,남,동,북' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3]).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      WITH p AS (
+        SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.house_dtl_secd_nm, p.tot_suply, p.rcrit_pblanc_de, p.mvn_prearnge_ym,
+               lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2
+          FROM silver.applyhome_pblanc p
+          JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
+         WHERE NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no))
+      SELECT TOP 600 * FROM p WHERE lng BETWEEN @x0 AND @x1 AND lat BETWEEN @y0 AND @y1
+       ORDER BY rcrit_pblanc_de DESC;
+      /* ★ 집계 안에 서브쿼리를 넣지 않는다(규칙 — 세 번째로 어겼다). 자리 여부를 먼저 칸으로 만들고 센다 */
+      SELECT 안이어짐 = COUNT(DISTINCT x.house_manage_no),
+             자리없음 = COUNT(DISTINCT CASE WHEN x.자리 = 0 THEN x.house_manage_no END)
+        FROM (SELECT p.house_manage_no,
+                     자리 = CASE WHEN p.pnu IS NOT NULL AND EXISTS (SELECT 1 FROM silver.cadastral_parcel cp WHERE cp.pnu = p.pnu AND cp.is_current = 1)
+                                 THEN 1 ELSE 0 END
+                FROM silver.applyhome_pblanc p
+               WHERE NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x;`);
+    res.json({ 핀: r.recordsets[0], 셈: (r.recordsets[1] || [])[0] || {} });
+  } catch (e) { fail(res, e, 'applyhome-pins'); }
 });
 
 /* ===================== 동네 고르기 (2026-10-21 18:56, 사장님 "만들어봐 ㄱㄱ") =====================

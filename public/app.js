@@ -761,6 +761,7 @@ function initMap() {
 
   markerLayer = L.layerGroup().addTo(map);
   newbuildLayer = L.layerGroup().addTo(map);
+  분양핀층 = L.layerGroup().addTo(map);
 
   map.on('moveend', refreshMap);
   /* 줌만 바뀌어도 이름표를 다시 판단한다. loadOverlay 는 bbox 가 그대로면
@@ -877,6 +878,7 @@ async function loadMarkers() {
 let newbuildItems = [];
 let selectedKapt = null;
 let newbuildLayer = null;
+let 분양핀층 = null, 분양핀켜짐 = true, 분양핀차례 = 0;
 
 function newbuildMarkerHtml(n, sel) {
   const amt = n.최고가 != null ? eok(n.최고가) : null;
@@ -1264,12 +1266,14 @@ function refreshMap() {
     markerLayer.clearLayers(); markerOf.clear();
     지도알림('마커', '');              /* 법정동 보기에는 '단지 400개까지만' 이 해당 없다 */
     newbuildLayer.clearLayers();
+    if (분양핀층) 분양핀층.clearLayers();
     loadLawds();
   } else {
     lawdLayer.clearLayers(); lawdMarkerLayer.clearLayers();
     지도알림('법정동', '');            /* 단지 보기로 들어가면 '이름 N개 숨김' 은 해당 없다 */
     loadMarkers();
     loadNewbuilds();
+    분양핀불러오기();
   }
   if (showPolys) loadParcels(); else { parcelLayer.clearLayers(); buildingLayer.clearLayers(); }
   loadOverlay();
@@ -3628,6 +3632,7 @@ const SRC = {
   kinder: { t: '유치원알리미', s: '교육부 · 한국교육학술정보원 (유치원 공시정보)',
             note: '연 2회 공시 · 직선거리' },
   applyhome: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 APT 분양정보)', note: '추정 연결' },
+  applyhome0: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 분양정보) — 단지에 아직 안 이어진 공고' },
   landuse: { t: '토지이용규제정보', s: '국토교통부 토지이용규제정보서비스 (VWorld getLandUseAttr)' },
   hira: { t: '심평원 병원·약국', s: '건강보험심사평가원 병원정보서비스 · 약국정보서비스 (요양기관 신고)' },
   academy: { t: 'NEIS 학원·교습소', s: '교육부 NEIS 교육정보 개방포털 (교육청 등록 현황)',
@@ -5386,12 +5391,13 @@ function 분양칸(공고) {
   if (!공고.length) return '';
   const 날 = v => (v ? String(v).slice(0, 10).replace(/-/g, '.') : '—');
   const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
-  return `${sect('분양', 'applyhome', ` ${fmt(공고.length)}`)}
+  /* 단지에 안 이어진 공고(지도 핀)는 '추정 연결' 표가 맞지 않는다 — 출처 표만 단다 */
+  return `${sect('분양', 공고.some(p => p.근거) ? 'applyhome' : 'applyhome0', ` ${fmt(공고.length)}`)}
     ${공고.map(p => {
       const 형 = p.주택형 || [];
       return `<div class="ahrow">
         <div class="ah1"><b>${esc(p.house_nm || '')}</b>
-          <span class="muted">${esc([p.house_secd_nm, p.house_dtl_secd_nm, p.rent_secd_nm].filter(Boolean).join(' · '))}</span></div>
+          <span class="muted">${esc([p.공고종류 && p.공고종류 !== 'APT' ? 공고종류말[p.공고종류] : null, p.house_secd_nm, p.house_dtl_secd_nm, p.rent_secd_nm].filter(Boolean).join(' · '))}</span></div>
         <div class="ah2">모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대${
           p.cnstrct_entrps_nm ? ' · 시공 ' + esc(p.cnstrct_entrps_nm) : ''}${
           p.pblanc_url ? ` · <a href="${esc(p.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>` : ''}</div>
@@ -5401,8 +5407,9 @@ function 분양칸(공고) {
             <td class="n">${m.최고원 ? eok(m.최고원) : '—'}</td>
             <td class="n">${m.최고원 && m.전용m2 ? eok(Number(m.최고원) / (Number(m.전용m2) / 3.3058)) : '—'}</td></tr>`).join('')}
           </tbody></table>` : ''}
-        <p class="note sm">추정 연결 — ${esc(p.근거 || '')}${p.거리m != null ? ` · 공고 지번과 ${fmt(p.거리m)}m` : ''}. 이름으로 잇지 않았습니다.
-          공급세대는 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.</p>
+        <p class="note sm">${p.근거 ? `추정 연결 — ${esc(p.근거)}${p.거리m != null ? ` · 공고 지번과 ${fmt(p.거리m)}m` : ''}. 이름으로 잇지 않았습니다.`
+            : '아직 단지(건축물대장 · K-apt)에 이어지지 않은 공고입니다 — 공고 지번 자리에 보입니다.'}
+          공급세대는 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.${p.공고종류 === 'PBLPVT' ? ' 공공지원민간임대는 분양이 아니라 임대라 금액 칸을 비웠습니다(조건은 공고문).' : ''}</p>
       </div>`;
     }).join('')}`;
 }
@@ -5675,3 +5682,56 @@ function 시트달기() {
   grip.addEventListener('pointerup', 놓기);
   grip.addEventListener('pointercancel', 놓기);
 }
+
+/* ---------------- 지도의 '분양' 핀 (2026-10-22, 사장님 "1,2,3 ㄱㄱ") ----------------
+   단지에 아직 안 이어진 청약홈 공고를 **공고 지번 자리**에 핀으로. 같은 주택(관리번호)의 공고는 한 핀으로 묶는다.
+   ★ 자리를 못 찾은 공고(지번 없음 · 공공주택지구 블록)는 핀이 없다 — 동 가운데에 찍으면 틀린 자리라서. */
+const 공고종류말 = { APT: 'APT', URBTY: '오피스텔·도시형', REMNDR: '무순위·재공급', PBLPVT: '공공지원민간임대', OPT: '임의공급' };
+const 공고종류짧게 = { APT: '분양', URBTY: '오피스텔', REMNDR: '무순위', PBLPVT: '임대', OPT: '임의공급' };
+async function 분양핀불러오기() {
+  if (!분양핀층) return;
+  if (!분양핀켜짐 || map.getZoom() < LAWD_ZOOM) { 분양핀층.clearLayers(); return; }
+  const 차례 = ++분양핀차례;
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(n => n.toFixed(7)).join(',');
+  let r;
+  try { r = await fetch(`/api/applyhome/pins?bbox=${bbox}`).then(x => x.json()); } catch (e) { return; }   // 보조 축 — 실패해도 지도는 그대로
+  if (차례 !== 분양핀차례 || r.error) return;
+  분양핀층.clearLayers();
+  const 집 = new Map();
+  for (const p of (r.핀 || [])) {
+    const g = 집.get(p.house_manage_no) || { ...p, 종류: new Set(), n: 0 };
+    g.종류.add(p.공고종류); g.n++; 집.set(p.house_manage_no, g);
+  }
+  const 지금월 = new Date().toISOString().slice(0, 7).replace('-', '');
+  for (const g of 집.values()) {
+    const 입주 = g.mvn_prearnge_ym ? `${g.mvn_prearnge_ym.slice(0, 4)}.${g.mvn_prearnge_ym.slice(4, 6)}` : null;
+    const 앞 = g.mvn_prearnge_ym && g.mvn_prearnge_ym >= 지금월;
+    const 꼬리 = [...g.종류].map(k => 공고종류짧게[k] || k).join('·');
+    const mk = L.marker([g.lat, g.lng], {
+      icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
+        html: `<div class="ahmark${앞 ? ' soon' : ''}"><b>${esc(꼬리)}</b><span>${esc(shortNm(g.house_nm) || '')}</span>${
+               입주 ? `<i>${앞 ? '입주예정' : '입주'} ${esc(입주)}</i>` : ''}</div>` }),
+      zIndexOffset: 300, riseOnHover: true,
+      title: `${g.house_nm} · 청약홈 공고 ${g.n}건 · 단지에 아직 안 이어짐`,
+    });
+    mk.on('click', () => 분양핀열기(g.house_manage_no, [g.lat, g.lng]));
+    mk.addTo(분양핀층);
+  }
+}
+async function 분양핀열기(house, ll) {
+  const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
+    .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
+  try {
+    const r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json());
+    if (r.error) throw new Error(r.error);
+    pop.setContent(`<div class="ahpopin">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`);
+  } catch (e) { pop.setContent(`<p class="note">공고를 불러오지 못했습니다 — ${esc(e.message || String(e))}</p>`); }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('#ahpins');
+  if (!b) return;
+  분양핀켜짐 = !분양핀켜짐;
+  b.setAttribute('aria-pressed', String(분양핀켜짐));
+  분양핀불러오기();
+});

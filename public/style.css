@@ -1678,3 +1678,18 @@ ul.lu li:last-child{border-bottom:0}
 .mc input[type="checkbox"]{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
 .mc{position:relative}
 .mc:has(input:focus-visible){outline:2px solid var(--s5);outline-offset:-2px}
+
+/* 지도의 '분양' 핀 (2026-10-22) — 신축 핀(.nbmark)과 같은 꼴, 색은 --s5. 입주가 앞으로면 채운다 */
+.ahmark{position:relative;transform:translate(-50%,-100%);display:flex;align-items:baseline;gap:4px;
+  padding:3px 8px 4px;border-radius:7px;white-space:nowrap;cursor:pointer;background:var(--surface);
+  border:1.5px solid var(--s5);box-shadow:var(--shadow);font-family:var(--font);line-height:1.15}
+.ahmark::after{content:'';position:absolute;left:50%;bottom:-5px;width:7px;height:7px;margin-left:-3.5px;
+  background:var(--surface);border-right:1.5px solid var(--s5);border-bottom:1.5px solid var(--s5);transform:rotate(45deg)}
+.ahmark b{font:500 9.5px var(--mono);color:var(--s5)}
+.ahmark span{font-size:12px;font-weight:600;color:var(--ink);letter-spacing:-.3px}
+.ahmark i{font:500 10px var(--mono);font-style:normal;color:var(--ink-3)}
+.ahmark.soon{background:var(--s5)}
+.ahmark.soon::after{background:var(--s5)}
+.ahmark.soon b,.ahmark.soon span,.ahmark.soon i{color:#fff}
+.ahpop .leaflet-popup-content{max-height:60vh;overflow:auto;margin:8px 10px}
+.ahpopin .sect{margin-top:0}
