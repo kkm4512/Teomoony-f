@@ -1697,3 +1697,9 @@ ul.lu li:last-child{border-bottom:0}
 #detail [data-redev]{cursor:pointer}
 #detail [data-redev]:hover{background:var(--surface-2)}
 #detail [data-redev].on{background:var(--surface-2);box-shadow:inset 3px 0 0 var(--mark)}
+/* 정비구역 검색 줄 · 말풍선 단추 (2026-10-22) */
+.sw.rz{background:transparent;border:2px dashed var(--mark)}
+.popbtn{margin-top:6px;font:500 11.5px var(--font);padding:4px 9px;border-radius:6px;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--ink);cursor:pointer}
+.popbtn:hover{background:var(--surface-2)}
+#detail [data-goto]:hover,#detail [data-ahhouse]:hover{background:var(--surface-2)}

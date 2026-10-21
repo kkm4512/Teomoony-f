@@ -756,7 +756,8 @@ function initMap() {
       + `<div class="m">${esc(p.biz || p.lclas || '')}</div>`
       + `<div class="m">${p.stage ? esc(p.stage) : '추진단계 코드 ' + esc(p.cd || '') + ' 가 코드표에 없습니다'}`
       + `${p.pct == null ? '' : ` · 진행 ${p.pct}%`}</div>`
-      + (p.area ? `<div class="m">${fmt(Math.round(p.area))} ㎡</div>` : ''));
+      + (p.area ? `<div class="m">${fmt(Math.round(p.area))} ㎡</div>` : '')
+      + (p.present_sn ? `<button type="button" class="popbtn" data-redevzone="${esc(p.present_sn)}">구역 상세 보기</button>` : ''));
   } });
 
   markerLayer = L.layerGroup().addTo(map);
@@ -876,6 +877,7 @@ async function loadMarkers() {
    축으로 띄운다. 단지코드는 발급하지 않는다 — 대장이 나오면 정식 단지가 되고
    이 목록에서 저절로 사라진다. */
 let newbuildItems = [];
+let redevItems = [], selectedRedev = null;
 let selectedKapt = null;
 let newbuildLayer = null;
 let 분양핀층 = null, 분양핀켜짐 = true, 분양핀차례 = 0;
@@ -1692,6 +1694,7 @@ async function search() {
     items = d.items;
     lawdItems = d.lawds || [];
     newbuildItems = d.newbuilds || [];
+    redevItems = d.redevs || [];
     /* ★ 상한에 걸렸으면 숫자 옆에 적는다 — '200개 단지' 가 '전부 200개' 로
        읽히면 안 된다. 진짜 페이징(OFFSET)은 아직 없다. */
     $('#count').textContent = `${fmt(d.count)}개 단지${d.잘림 ? '+' : ''}`
@@ -1711,7 +1714,7 @@ function renderList() {
      깔아 두면 거리순 1등이 최근 목록 **아래**로 밀려서, 가장 가까운 건물이
      화면 밖에 있다. 거리순이라는 약속이 깨진다. */
   const rec = myPos ? '' : recentRows();
-  if (!items.length && !lawdItems.length && !newbuildItems.length) {
+  if (!items.length && !lawdItems.length && !newbuildItems.length && !redevItems.length) {
     ul.innerHTML = rec || '<li class="muted">결과가 없습니다.</li>'; return;
   }
   /* 법정동을 단지보다 위에 둔다. 동을 치는 사람은 그 동으로 이동하려는 것이다. */
@@ -1735,7 +1738,17 @@ function renderList() {
       <span class="d">${fmt(n.세대)}세대<br>${fmt(n.거래)}거래</span>
     </button></li>`).join('');
 
-  ul.innerHTML = rec + lawdRows + nbRows + items.map(c => `
+  /* 정비사업 구역(2026-10-22) — 법정동 다음, 신축 앞. 구역을 치는 사람은 그 구역을 보려는 것이다 */
+  const rzRows = redevItems.map(z => `
+    <li><button class="row rz" data-redevzone="${esc(z.present_sn)}" aria-current="${z.present_sn === selectedRedev}">
+      <span class="sw rz"></span>
+      <span class="mid">
+        <span class="nm">${esc(z.zone_nm || z.biz_nm || '')} <span class="tag">정비구역</span></span>
+        <span class="ad">${esc([z.biz_nm, z.propel_nm, z.propel_pct != null ? '진행 ' + z.propel_pct + '%' : null].filter(Boolean).join(' · '))}</span>
+      </span>
+      <span class="d">${z.area_m2 ? fmt(Math.round(z.area_m2)) + '㎡' : ''}</span>
+    </button></li>`).join('');
+  ul.innerHTML = rec + lawdRows + rzRows + nbRows + items.map(c => `
     <li><button class="row" data-id="${c.complex_id}" aria-current="${c.complex_id === selected}">
       <span class="sw" style="background:${colorOf(c.dong_cnt)}${c.has_recap ? ';outline:1.5px solid var(--mark);outline-offset:-1.5px' : ''}"></span>
       <span class="mid">
@@ -2143,7 +2156,7 @@ document.addEventListener('click', (e) => {
 });
 
 function closeDetail() {
-  if (selected === null && selectedKapt === null) return;   /* 열린 게 없으면 그냥 둔다 */
+  if (selected === null && selectedKapt === null && selectedRedev === null) return;   /* 열린 게 없으면 그냥 둔다 */
   selected = null; selectedKapt = null;
   목록수동 = false; 목록접기(false);
   lastDetail = null; lastGeo = null; lastBgeo = null;
@@ -2151,6 +2164,7 @@ function closeDetail() {
   const box = $('#detail');
   if (box) { box.hidden = true; box.innerHTML = ''; }
   구역지우기();
+  selectedRedev = null;
   주소맞춤('/');
   시트(($('#q') && $('#q').value.trim()) ? 'half' : 'peek');
   try { focusLayer.clearLayers(); focusBldLayer.clearLayers(); } catch (e) {}
@@ -2164,6 +2178,7 @@ async function select(id, fromList) {
   시트('full');             // 폰: 상세는 지도를 가리고 전체로
   주변점지우기();           // 다른 단지의 주변 점이 남아 있으면 안 된다
   구역지우기();             // 앞 단지에서 눌러 그린 정비구역 경계도
+  selectedRedev = null;      // 구역 상세에서 단지로 넘어왔으면 구역 상세는 닫힌 것이다
   /* ★ 단지가 바뀌면 거래 탭의 '직접 고름' 을 푼다 (2026-10-20).
      안 풀면 월세를 보던 사람이 월세가 없는 단지로 옮겼을 때 **빈 화면**을 본다.
      탭 선택 자체(거래탭)는 남겨 둔다 — 같은 종류를 계속 보려는 사람이 많다. */
@@ -4931,6 +4946,7 @@ async function boot() {
     if (e.target.id === 'reclear') { recentClear(); return; }
     const b = e.target.closest('.row');
     if (!b) return;
+    if (b.dataset.redevzone) return;      // 정비구역 줄은 문서 단위 처리기(selectRedevZone)가 받는다
     if (b.dataset.lawd) selectLawd(b.dataset.lawd);
     else if (b.dataset.kapt) selectNewbuild(b.dataset.kapt, true);
     else select(Number(b.dataset.id), true);
@@ -5781,4 +5797,81 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const el = e.target.closest && e.target.closest('#detail [data-redev]');
   if (el) { e.preventDefault(); 구역보이기(el.dataset.redev, el); }
+});
+
+/* ---------------- 정비사업 구역 상세 (2026-10-22, 사장님 "신길제2구역을 검색했을 때도 단지 상세처럼") ----------------
+   검색 결과의 정비구역 줄 · 지도 구역 말풍선의 '구역 상세 보기' 로 연다. 왼쪽(폰은 시트)에 구역 개요 · 걸친 단지 · 구역 안 공고,
+   지도에는 경계를 그리고 맞춘다. 단지 줄을 누르면 그 단지 상세로 간다. */
+async function selectRedevZone(sn) {
+  if (selected !== null || selectedKapt !== null) closeDetail();
+  selectedRedev = sn;
+  document.querySelectorAll('.row.rz').forEach(b => b.setAttribute('aria-current', String(b.dataset.redevzone === sn)));
+  목록자동(true);
+  const box = $('#detail');
+  box.hidden = false;
+  box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  시트('half');
+  let d;
+  try {
+    d = await fetch(`/api/redev/${encodeURIComponent(sn)}/detail`).then(r => r.json());
+    if (d.error) throw new Error(d.error);
+  } catch (e) {
+    if (selectedRedev === sn) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '정비구역을 불러오지 못했습니다 — ' + (e.message || e))}</p>`;
+    return;
+  }
+  if (selectedRedev !== sn) return;   // 그사이 다른 것을 열었다
+  /* 경계 — 토지 탭 줄 누르기와 같은 층을 쓴다 */
+  구역지우기();
+  if (d.geometry) {
+    구역층 = L.geoJSON({ type: 'Feature', geometry: d.geometry, properties: {} }, { interactive: false,
+      style: { color: css('--mark') || '#c2410c', weight: 2.5, dashArray: '6 4', fillOpacity: 0.1 } }).addTo(map);
+    구역지금 = sn;
+    const b = 구역층.getBounds();
+    setTimeout(() => {
+      const top = 폰() ? ((document.querySelector('.ptop') || {}).offsetHeight || 0) : 0;
+      const sh = 폰() ? ((document.querySelector('#psheet') || {}).offsetHeight || 0) : 0;
+      map.fitBounds(b, { paddingTopLeft: [24, top + 24], paddingBottomRight: [24, sh + 24], maxZoom: 17 });
+    }, 280);
+  }
+  box.innerHTML = 구역상세(d);
+}
+function 구역상세(d) {
+  const z = d.구역 || {}, 단 = d.단지 || [], 공 = d.공고 || [];
+  const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+  const 세대합 = 단.reduce((t, x) => t + (Number(x.포함률) >= 50 ? Number(x.세대) || 0 : 0), 0);
+  const 날 = v => (v ? String(v).slice(0, 10).replace(/-/g, '.') : '—');
+  const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
+  const 이름 = x => (x.이름 && x.주소 && x.이름 === x.주소 && x.실거래이름) ? x.실거래이름 : (shortNm(x.이름) || x.이름 || '(이름 없음)');
+  return `
+    <span class="pill">정비사업 구역</span>
+    <h2>${esc(z.zone_nm || z.biz || '')}</h2>
+    <p class="sub">${esc([z.biz, z.lclas].filter(Boolean).join(' · '))}</p>
+    ${sect('구역 개요', 'redev')}
+    <dl>
+      ${row('추진단계', z.stage ? esc(z.stage) + (z.pct != null ? ` <span class="muted">· 진행 ${z.pct}%</span>` : '')
+                                : gapCell('', 'EMPTY', `추진단계 코드 ${esc(z.cd || '')} 가 코드표에 없습니다`))}
+      ${row('구역 면적', z.area ? fmt(Math.round(z.area)) + ' ㎡' : '—')}
+      ${row('걸친 단지', `${fmt(단.length)}곳${세대합 ? ` <span class="muted">· 절반 넘게 들어간 공동주택 ${fmt(세대합)}세대(대장 세대수 — 단독주택은 0 으로 셈)</span>` : ''}`)}
+    </dl>
+    ${sect('구역 안 청약 공고', 'applyhome0', 공.length ? ` ${fmt(공.length)}` : '')}
+    ${공.length ? `<ul class="lu">${공.map(p => `<li${p.이은단지 ? ` data-goto="${p.이은단지}"` : ` data-ahhouse="${esc(p.house_manage_no)}" data-lat="${p.lat}" data-lng="${p.lng}"`} style="cursor:pointer">
+        <b>${esc(p.house_nm || '')}</b><span class="muted"> ${esc(공고종류말[p.공고종류] || p.공고종류 || '')} · 모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대</span></li>`).join('')}</ul>`
+      : `<p class="note">${gapCell('', 'NA', '공고 지번이 이 구역 안에 있는 청약홈 공고가 없습니다 (서울·안양 공고만 받았습니다)')}</p>`}
+    ${sect('구역에 걸친 단지', 'bld', ` ${fmt(단.length)}`)}
+    ${단.length ? `<ul class="lu">${단.slice(0, 60).map(x => `<li data-goto="${x.complex_id}" style="cursor:pointer">
+        <b>${esc(이름(x))}</b><span class="muted"> ${x.세대 ? fmt(x.세대) + '세대 · ' : ''}${x.동 ? fmt(x.동) + '동 · ' : ''}${x.사용승인 ? String(x.사용승인).slice(0, 4) + '년 · ' : ''}구역 안 ${Number(x.포함률).toFixed(0)}%${
+          x.최고 ? ` · 3년 최고 ${eok(x.최고)}` : ''}</span></li>`).join('')}</ul>
+      ${단.length > 60 ? `<p class="note sm">세대수 많은 순으로 60곳만 보입니다(전체 ${fmt(단.length)}곳).</p>` : ''}`
+      : `<p class="note">${gapCell('', 'NA', '이 구역과 겹치는 대장 단지가 없습니다')}</p>`}
+    <p class="srcline">구역 경계 · 단계: ${esc(d.출처 || '')}. 걸친 단지는 단지 필지와 구역 경계의 <b>겹친 넓이</b>로 셉니다(단지 상세의 '정비사업 구역' 칸과 같은 셈).
+      경계에 겨우 닿은(1% 미만) ${fmt(d.뺀단지 || 0)}곳은 뺐습니다. 세대 합은 구역 안에 절반 넘게 들어간 단지만 더했습니다.</p>`;
+}
+document.addEventListener('click', e => {
+  const z = e.target.closest('[data-redevzone]');
+  if (z && !e.target.closest('#detail [data-redev]')) { e.preventDefault(); try { map.closePopup(); } catch (x) {} selectRedevZone(z.dataset.redevzone); return; }
+  if (!selectedRedev) return;
+  const g = e.target.closest('#detail [data-goto]');
+  if (g) { select(Number(g.dataset.goto)); return; }
+  const h = e.target.closest('#detail [data-ahhouse]');
+  if (h) { 시트('half'); 분양핀열기(h.dataset.ahhouse, [Number(h.dataset.lat), Number(h.dataset.lng)]); }
 });

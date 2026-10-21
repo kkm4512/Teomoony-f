@@ -1497,7 +1497,18 @@ app.get('/api/complexes', async (req, res) => {
       const 별 = new Map(al.recordset.map(x => [x.complex_id, x.실거래이름]));
       _행.forEach(x => { if (별.has(x.complex_id)) x.실거래이름 = 별.get(x.complex_id); });
     }
-    res.json({ count: _행.length, 상한: limit, 잘림, items: _행, lawds, newbuilds });
+    /* ★ 2026-10-22 사장님 "신길제2구역을 검색해도 단지 상세처럼" — 정비사업 구역 이름도 같이 찾는다(겹쳐 보기와 같은 표) */
+    let redevs = [];
+    if (q) {
+      const rz = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT TOP 8 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2
+          FROM silver.redev_zone
+         WHERE is_current = 1 AND geojson IS NOT NULL AND (zone_nm LIKE @q OR biz_nm LIKE @q)
+         ORDER BY CASE WHEN zone_nm LIKE @q THEN 0 ELSE 1 END, area_m2 DESC`);
+      redevs = rz.recordset;
+    }
+    res.json({ count: _행.length, 상한: limit, 잘림, items: _행, lawds, newbuilds, redevs });
   } catch (e) { fail(res, e, 'complexes'); }
 });
 
@@ -2664,6 +2675,51 @@ app.get('/api/redev', async (req, res) => {
                     cd: d.propel_cd, stage: d.propel_nm, pct: d.propel_pct,
                     fam: d.propel_fam, area: d.area_m2 } })) });
   } catch (e) { fail(res, e, 'redev'); }
+});
+
+/* ---------- 정비사업 구역 상세 (2026-10-22 사장님 "신길제2구역을 검색했을 때도 단지 상세처럼 왼쪽에") ----------
+   ★ 구역 개요 · 구역에 걸친 단지(대장 단지 — 필지가 구역과 겹치는 것, 겹친 비율) · 구역 안 청약홈 공고(공고 지번 필지가 구역 안).
+   ★ 단지는 gold.v_complex_redev(단지 상세의 '정비사업 구역' 칸과 **같은 뷰**)로 센다 — 두 화면이 같은 말을 하게. */
+app.get('/api/redev/:sn/detail', async (req, res) => {
+  const sn = String(req.params.sn || '').slice(0, 40);
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('sn', sql.VarChar(40), sn).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
+        FROM silver.redev_zone WHERE is_current = 1 AND present_sn = @sn;
+      SELECT v.complex_id, 이름 = MAX(m.complex_nm), 실거래이름 = MAX(al.실거래이름), 주소 = MAX(m.rep_plat_plc),
+             세대 = MAX(m.hhld_cnt_sum), 동 = MAX(m.dong_cnt), 사용승인 = MAX(m.oldest_use_apr),
+             포함률 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(v.parea), 0) AS DECIMAL(5,1)),
+             최고 = MAX(tm.max_amt), 최고일 = MAX(tm.max_ymd)
+        FROM gold.v_complex_redev v
+        JOIN gold.v_complex_map m ON m.complex_id = v.complex_id
+        LEFT JOIN gold.complex_alias al ON al.complex_id = v.complex_id
+        LEFT JOIN gold.complex_trade_max tm ON tm.complex_id = v.complex_id AND tm.종류 = 'ALL'
+       WHERE v.present_sn = @sn
+       GROUP BY v.complex_id
+       ORDER BY MAX(m.hhld_cnt_sum) DESC, v.complex_id;
+      SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.tot_suply, p.rcrit_pblanc_de, p.mvn_prearnge_ym,
+             lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
+             이은단지 = l.complex_id
+        FROM silver.redev_zone z
+        JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
+         AND cp.bbox_minx <= z.bbox_maxx AND cp.bbox_maxx >= z.bbox_minx AND cp.bbox_miny <= z.bbox_maxy AND cp.bbox_maxy >= z.bbox_miny
+         AND cp.geom.STIntersects(z.geom) = 1
+        JOIN silver.applyhome_pblanc p ON p.pnu = cp.pnu
+        LEFT JOIN gold.applyhome_link l ON l.house_manage_no = p.house_manage_no AND l.pblanc_no = p.pblanc_no
+       WHERE z.is_current = 1 AND z.present_sn = @sn
+       ORDER BY p.rcrit_pblanc_de DESC;`);
+    const z = r.recordsets[0][0];
+    if (!z) return res.status(404).json({ error: 'not found' });
+    res.json({ 출처: '서울 열린데이터광장 정비사업 구역(OA-22712)',
+      구역: { sn: z.present_sn, zone_nm: z.zone_nm, lclas: z.biz_lclas_nm, biz: z.biz_nm, cd: z.propel_cd,
+              stage: z.propel_nm, pct: z.propel_pct, fam: z.propel_fam, area: z.area_m2 },
+      geometry: z.geojson ? JSON.parse(z.geojson) : null,
+      /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
+      단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
+      공고: r.recordsets[2] });
+  } catch (e) { fail(res, e, 'redev-detail'); }
 });
 
 /* ---------- 정비사업 구역 하나의 경계 (2026-10-22 사장님: "토지 탭의 재개발을 누르면 그 폴리곤") ----------
