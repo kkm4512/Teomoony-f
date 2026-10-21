@@ -4817,6 +4817,30 @@ function toFC(rows, extra) {
   return { type: 'FeatureCollection', features };
 }
 
+/* ===================== robots.txt · sitemap.xml (2026-10-22 SEO 4단계) =====================
+   ★ Cloudflare 가 robots.txt 앞에 '콘텐츠 신호' 고지문을 덧붙여 낸다 — 우리 줄은 그 뒤에 그대로 붙는다.
+   ★ /api/ 는 막는다(데이터 창구이지 페이지가 아니다 — 긁히면 DB 만 일한다).
+   ★ 사이트맵은 **조금씩 연다**: 세대수 큰 단지부터(지금 100세대 이상 4,034곳). 구글 수집기가 한꺼번에 53만 주소를
+     두드리면 사장님 PC 의 DB 가 버티지 못한다. 넓힐 때는 아래 숫자만 낮춘다.
+   ★ lastmod 는 안 적는다 — 단지마다 믿을 만한 '바뀐 날' 이 없다. 틀린 날짜는 없는 것보다 나쁘다. */
+const 사이트맵_최소세대 = 100;
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain; charset=utf-8').send(
+    'User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://teomoony.com/sitemap.xml\n');
+});
+app.get('/sitemap.xml', async (req, res, next) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('m', sql.Int, 사이트맵_최소세대).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 50000 complex_id FROM gold.v_complex_map WHERE hhld_cnt_sum >= @m ORDER BY hhld_cnt_sum DESC, complex_id`);
+    const 줄 = ['<url><loc>https://teomoony.com/</loc></url>']
+      .concat(r.recordset.map(x => `<url><loc>https://teomoony.com/c/${x.complex_id}</loc></url>`));
+    res.type('application/xml; charset=utf-8')
+       .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${줄.join('\n')}\n</urlset>\n`);
+  } catch (e) { next(e); }
+});
+
 /* ===================== 단지 주소 /c/:id — 검색엔진이 읽는 HTML (2026-10-22, 사장님 SEO "ㄱㄱ") =====================
    ★ 왜: 화면이 전부 JS 로 그려져서 구글에는 첫 화면 한 장만 있었다. 단지마다 주소가 없었고(#map 뿐), HTML 에 내용이 없었다.
    ★ 여기서 **서버가** 제목 · 설명 · 핵심 수치(대장 제원 · 최근 매매)를 HTML 에 넣어 보낸다. 사람이 보는 화면은 그대로 —
