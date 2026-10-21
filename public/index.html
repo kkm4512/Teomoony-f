@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teomoony · 단지 조회</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="./style.css">
+<!-- ★ 스타일 바로 뒤, 그림 그리기 전에 입힌다. app.js 에서 하면 밝은 화면이
+     한 번 번쩍인다. localStorage 는 사생활 모드에서 던질 수 있어 try 로 감싼다. -->
+<script>try{var t=localStorage.getItem('teomoony.theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<div class="app">
+  <!-- ★ 헤더는 패널 밖, 화면 전체 폭(2026-10-19). 왼쪽에 이름, 오른쪽에 적재 수치.
+       수치를 지우지 않고 올린 이유: 이 화면에서 "무엇을 얼마나 받았는가" 를
+       알려주는 **유일한 표시**다. 서초동을 '없다' 고 답할 뻔한 날 배웠다. -->
+  <header class="topbar">
+    <div class="brand">
+      <h1>터무니</h1>
+      <p>단지코드 하나로 보는 건축물대장 · 토지</p>
+    </div>
+    <!-- ★ 3탭 (2026-10-20). 지도만 덩그러니 있어서 처음 온 사람이 여기가
+         뭐 하는 곳인지 몰랐다. 홈을 앞에 둔다.
+         .panel 과 .mapwrap 은 **건드리지 않는다** - app.js 의 선택자가 전부
+         그대로 살아 있어야 한다. 보이고 안 보이고만 .app[data-view] 로 가른다. -->
+    <nav class="tabs" id="tabs" aria-label="화면">
+      <button type="button" class="tab" data-view="home"  aria-current="true">홈</button>
+      <button type="button" class="tab" data-view="map"   aria-current="false">지도</button>
+      <button type="button" class="tab" data-view="usage" aria-current="false">이용현황</button>
+    </nav>
+    <div class="statrow" id="stats"></div>
+    <button type="button" class="thbtn" id="theme" title="밝게 / 어둡게" aria-label="밝게 / 어둡게">
+      <svg class="sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6"/><path d="M10 1.4v2.3M10 16.3v2.3M1.4 10h2.3M16.3 10h2.3M3.9 3.9l1.6 1.6M14.5 14.5l1.6 1.6M16.1 3.9l-1.6 1.6M5.5 14.5l-1.6 1.6"/></svg>
+      <svg class="moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.3A7 7 0 0 1 7.7 3.8a7 7 0 1 0 8.5 8.5Z"/></svg>
+    </button>
+  </header>
+
+  <aside class="panel">
+
+    <div class="seg" role="tablist" aria-label="검색 방식">
+      <button type="button" class="segbtn" data-mode="find" aria-selected="true">단지 검색</button>
+      <button type="button" class="segbtn" data-mode="ask" aria-selected="false">AI 검색</button>
+    </div>
+    <div class="searchbar">
+      <input id="q" type="search" placeholder="단지 · 동네(법정동·행정동) · 역 · 학교 · 학원 · 상가" autocomplete="off" spellcheck="false"
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugg">
+      <button id="clear" class="ghost" title="지우기" hidden>&times;</button>
+      <div id="sugg" class="sugg" role="listbox" aria-label="자동완성" hidden></div>
+    </div>
+    <div id="askhint" class="askhint" hidden>
+      <b>Enter</b> 로 찾습니다 · 예) <button type="button" class="ex">은평구 아파트 제일 비싼 10개</button>
+      <button type="button" class="ex">종로구 20억 넘는 곳</button>
+      <button type="button" class="ex">은평구 세대 많은 단지</button>
+    </div>
+    <div class="listwrap">
+      <!-- ★ 버튼이다(2026-10-19). 상세를 볼 때 목록을 접으려고. div 로 두면
+           키보드로 못 누르고 스크린리더가 누를 수 있는 줄 모른다. -->
+      <button type="button" id="listtoggle" class="listhead" aria-expanded="true"
+              aria-controls="list" title="목록 접기 / 펴기">
+        <span id="count">—</span>
+        <span class="hint">동 수 순</span>
+        <span class="togl"><span class="tword">접기</span><span class="caret" aria-hidden="true">▾</span></span>
+      </button>
+      <ul id="list" class="list"></ul>
+    </div>
+
+    <section id="detail" class="detail" hidden></section>
+  </aside>
+
+  <main class="mapwrap">
+    <div id="map"></div>
+
+    <!-- 동네 고르기 (2026-10-21 18:56, 사장님 요청). 탭이 넓게 볼 때 그리는 경계 종류도 정한다.
+         동을 고르면 그 동 안의 **다른 체계** 경계를 얇게 같이 그리고 넓이 비율을 적는다. -->
+    <div class="areactl" id="areactl" role="group" aria-label="동네 고르기">
+      <div class="ac-tabs">
+        <button type="button" data-k="lawd" aria-pressed="true"
+                title="법정동 — 주소(지번)에 쓰는 동. 넓게 볼 때 이 경계를 그립니다">법정동</button>
+        <button type="button" data-k="adm" aria-pressed="false"
+                title="행정동 — 주민센터가 맡는 동. 넓게 볼 때 이 경계를 그립니다(점선)">행정동</button>
+      </div>
+      <div class="ac-sel">
+        <select id="acSido" aria-label="시·도 고르기"><option value="">시·도</option></select>
+        <select id="acSgg" aria-label="시·군·구 고르기" disabled><option value="">시·군·구</option></select>
+        <select id="acDong" aria-label="읍·면·동 고르기" disabled><option value="">읍·면·동</option></select>
+        <button type="button" id="acClear" class="ac-x" title="고른 동 강조 지우기" aria-label="강조 지우기" hidden>×</button>
+      </div>
+      <div id="acRel" class="ac-rel" hidden></div>
+    </div>
+
+    <!-- ★ 지도를 어떻게 그릴지 고르는 것들은 **지도 옆이 아니라 지도 위**에 둔다
+         (2026-10-19). 보면서 켜고 끄는 것이라서. 입력 요소의 id 는 그대로 두어
+         기존 로직(app.js)이 손대지 않아도 되게 했다 - 체크박스는 눈에만 숨긴다. -->
+    <div class="mapctl" role="group" aria-label="지도 표시 옵션">
+      <label class="mc" title="총괄표제부가 있는 단지만 보기">
+        <input type="checkbox" id="recap">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.6 17.6 7 10 11.4 2.4 7 10 2.6Z"/><path d="M3.6 10.2 10 13.9l6.4-3.7"/><path d="M3.6 13.4 10 17.1l6.4-3.7"/></svg>
+        <span>총괄</span>
+      </label>
+      <label class="mc" title="필지와 건물 외곽선 그리기">
+        <input type="checkbox" id="polys">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.6 6.2 8 2.9l9.4 3.6-2 8.4L7.6 17 2.6 13.6V6.2Z"/><path d="M8 2.9v14.1"/><path d="M15.4 6.5 8 9.1"/></svg>
+        <span>필지</span>
+      </label>
+      <label class="mc" title="항공사진 바탕으로 바꾸기">
+        <input type="checkbox" id="sat">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.6" y="4.2" width="14.8" height="11.6" rx="1.6"/><circle cx="7.2" cy="8.2" r="1.5"/><path d="M2.8 14.2 7.4 9.8l3.3 3 2.4-2.1 4.1 3.6"/></svg>
+        <span>항공</span>
+      </label>
+
+      <!-- (2026-10-21 18:56) '행정동' 단추는 왼쪽 위 **동네 고르기 창의 탭**으로 옮겼다(사장님) -->
+
+      <div class="mcsep" aria-hidden="true"></div>
+
+      <!-- 겹쳐보기: select 는 그대로 두고(값 읽는 코드가 있다) 눈에만 숨긴다.
+           버튼이 select 의 값을 바꾸고 change 를 쏜다 - 로직은 한 줄도 안 바뀐다. -->
+      <select id="overlay" class="vh" tabindex="-1" aria-hidden="true">
+        <option value="">없음</option>
+        <option value="zone">용도지역</option>
+        <option value="redev">정비사업 구역</option>
+      </select>
+      <button type="button" class="mc ov" data-ov="zone" aria-pressed="false" title="용도지역 겹쳐 보기">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.8 5.6 7.4 3.2l5.2 2.4 4.6-2.4v11.2l-4.6 2.4-5.2-2.4-4.6 2.4V5.6Z"/><path d="M7.4 3.2v11.2"/><path d="M12.6 5.6v11.2"/></svg>
+        <span>용도</span>
+      </button>
+      <button type="button" class="mc ov" data-ov="redev" aria-pressed="false" title="정비사업 구역 겹쳐 보기">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.4 16.6V8.4l5-3.2v11.4"/><path d="M8.4 16.6V9.8l5.4 2v4.8"/><path d="M13.8 16.6V7.2l2.8-1.4v10.8"/><path d="M2.4 16.6h15.2"/></svg>
+        <span>정비</span>
+      </button>
+      <!-- 내 위치. 누르면 그 자리로 옮기고 주변 건물을 거리순으로 목록에 띄운다.
+           한 번 더 누르면 끄고 원래 검색 결과로 돌아간다. -->
+      <button type="button" class="mc" id="geo" aria-pressed="false"
+              title="내 위치 찾기 — 주변 건물을 거리순으로 봅니다">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.2"/><circle cx="10" cy="10" r="6.6"/><path d="M10 .9v2.6M10 16.5v2.6M.9 10h2.6M16.5 10h2.6"/></svg>
+        <span>내위치</span>
+      </button>
+      <!-- 거리 재기 (2026-10-21 사장님 요청). 누르면 켜지고, 지도를 누를 때마다 점이 찍힌다.
+           두 번 누르거나 Esc 로 끝 · 한 번 더 누르면 지우고 끈다. -->
+      <button type="button" class="mc" id="measure" aria-pressed="false"
+              title="거리 재기 — 지도를 눌러 점을 찍습니다 · 두 번 누르거나 Esc 로 끝 · 지우기는 다시 누르기">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.6 13.4 13.4 2.6l4 4L6.6 17.4l-4-4Z"/><path d="M5.4 10.6l1.6 1.6M7.8 8.2l2.2 2.2M10.2 5.8l1.6 1.6M12.6 3.4l2.2 2.2"/></svg>
+        <span>거리</span>
+      </button>
+    </div>
+
+    <!-- ★ details 로 둔다(2026-10-20). 휴대폰에서 이 범례가 지도를 거의
+         다 덮었다. 접고 펴는 데 자바스크립트가 필요 없고, 키보드와
+         스크린리더가 원래 아는 요소다. 좁은 화면에서는 닫은 채로 연다. -->
+    <details class="maplegend" id="maplegend" open>
+      <summary>범례</summary>
+      <div class="lrow"><span class="sw mk"></span>단지 마커 · 최근 3년 최고가 · 클릭하면 필지가 그려집니다</div>
+      <div class="lrow"><span class="sw mk stale"></span>흐린 마커 · 3년 안 매매가 없어 마지막 매매(연도)</div>
+      <div class="lt">단지 내 동 수 <span class="hint">(폴리곤 켤 때)</span></div>
+      <div class="ramp">
+        <i data-s="1"></i><i data-s="2"></i><i data-s="3"></i><i data-s="4"></i><i data-s="5"></i><i data-s="6"></i>
+      </div>
+      <div class="rl"><span>1</span><span>10+</span></div>
+      <div class="lrow"><span class="sw recap"></span>총괄표제부 보유</div>
+      <div class="lrow"><span class="sw bld"></span>건물 외곽선</div>
+      <div class="lrow"><span class="sw none"></span>단지 미지정</div>
+      <div id="olegend" hidden></div>
+      <div id="mcap" class="mcap" hidden></div>
+    </details>
+    <div id="toast" class="toast" hidden></div>
+  </main>
+
+  <!-- ================= 홈 ================= -->
+  <section id="view-home" class="view" hidden>
+    <div class="vwrap">
+      <h2 class="vtitle">단지코드 하나로, 건축물대장부터 주변까지</h2>
+      <p class="vlead">터무니는 국가가 공개한 데이터를 모아 한 화면에서 보여줍니다.
+        값을 지어내거나 고치지 않고, <b>원본 그대로</b> 보여주는 것을 원칙으로 합니다.
+        모르는 것은 비워 둡니다.</p>
+
+      <div id="homestats" class="homestats" aria-live="polite"></div>
+
+      <h3 class="vh3">무엇을 볼 수 있나</h3>
+      <ul class="vlist">
+        <li><b>단지와 건물</b> — 표제부 · 전유부 · 층별 · 부속지번 · 총괄표제부, 동과 호까지</li>
+        <li><b>실거래</b> — 매매 · 전세 · 월세, 직거래 구분, 최근 거래일 순</li>
+        <li><b>토지</b> — 필지 경계, 용도지역, 공시지가와 면적</li>
+        <li><b>주변</b> — 지하철 · 버스 · 학교 · 유치원 · 학원 · 상권, 목록에 올리면 지도에 점으로</li>
+        <li><b>정비사업</b> — 재개발 · 재건축 구역과 이름</li>
+      </ul>
+
+      <h3 class="vh3">데이터 출처</h3>
+      <p class="note sm">모두 공개된 공식 경로로 받습니다. 웹사이트를 긁어 오지 않습니다.</p>
+      <ul class="srcs">
+        <li><b>국토교통부</b> 건축물대장 · 실거래가 · 공동주택 단지정보 · 버스정류소(TAGO)
+          <span class="sg">공공데이터포털</span></li>
+        <li><b>국토교통부 공간정보 오픈플랫폼(VWorld)</b> 연속지적도 · 건물 외곽선 · 용도지역 · 배경지도
+          <span class="sg">api.vworld.kr</span></li>
+        <li><b>국토교통부 국가공간정보포털(NED)</b> 토지특성 — 공시지가 · 지목 · 면적
+          <span class="sg">api.vworld.kr/ned</span></li>
+        <li><b>소상공인시장진흥공단</b> 상가(상권)정보 <span class="sg">공공데이터포털</span></li>
+        <li><b>교육부</b> NEIS 학원 · 교습소 <span class="sg">open.neis.go.kr</span></li>
+        <li><b>한국교육시설안전원 / 교육부</b> 전국초중등학교위치 · 초등학교 통학구역
+          <span class="sg">공공데이터포털</span></li>
+        <li><b>교육부</b> 유치원알리미 <span class="sg">e-childschoolinfo.moe.go.kr</span></li>
+        <li><b>국가철도공단</b> 전국도시철도역사정보 <span class="sg">공공데이터포털</span></li>
+        <li><b>서울특별시</b> 도시계획사업 현황(서울플랜+) 공간정보
+          <span class="sg">서울 열린데이터광장 OA-22712</span></li>
+      </ul>
+      <p class="note sm">서울시 정비사업 자료는 <b>공공누리 제4유형</b>(출처표시 · 상업적 이용금지 ·
+        변경금지)입니다. 그래서 이 서비스는 비상업으로만 운영합니다.</p>
+    </div>
+  <footer class="foot">
+    <div class="fwrap">
+      <p class="fb">터무니</p>
+      <p>국가가 공개한 데이터를 모아 보여주는 <b>비상업</b> 서비스입니다.</p>
+      <p>문의 · 잘못된 값 신고 <a href="mailto:nayoun440@naver.com">nayoun440@naver.com</a></p>
+      <!-- ★ 2026-10-21: 접속 기록 수집을 알리는 줄. IP 는 개인정보라 공개하지 않아도
+           **보관 자체로** 책임이 생기고, 알리는 것이 원칙이다.
+           ⚠ 이 footer 는 **홈·이용현황 두 군데에 같은 내용이 복사돼 있다.**
+             한쪽만 고치면 화면마다 다른 말을 하게 된다 — 고칠 때 둘 다 고쳐라. -->
+      <p class="fsm">접속 기록(IP · 요청 경로)을 운영 목적으로 <b>90일간</b> 보관합니다.</p>
+    </div>
+  </footer>
+  </section>
+
+  <!-- ================= 이용현황 ================= -->
+  <section id="view-usage" class="view" hidden>
+    <div class="vwrap">
+      <h2 class="vtitle">이용현황</h2>
+      <div id="usum" class="homestats" aria-live="polite"></div>
+
+      <h3 class="vh3">동작별</h3>
+      <div id="uacts" class="uacts"></div>
+
+      <h3 class="vh3">날짜별 <span class="h3hint">최근 14일</span></h3>
+      <div id="udays" class="udays"></div>
+
+      <p class="note sm">단지 하나를 열면 실거래 · 주변 · 건축허가가 <b>한 번에</b> 나갑니다.
+        서버가 하는 일이 하나라서 그 셋을 따로 셀 수 없고, <b>단지 상세</b> 하나로 셉니다.</p>
+    </div>
+  <footer class="foot">
+    <div class="fwrap">
+      <p class="fb">터무니</p>
+      <p>국가가 공개한 데이터를 모아 보여주는 <b>비상업</b> 서비스입니다.</p>
+      <p>문의 · 잘못된 값 신고 <a href="mailto:nayoun440@naver.com">nayoun440@naver.com</a></p>
+      <!-- ★ 2026-10-21: 접속 기록 수집을 알리는 줄. IP 는 개인정보라 공개하지 않아도
+           **보관 자체로** 책임이 생기고, 알리는 것이 원칙이다.
+           ⚠ 이 footer 는 **홈·이용현황 두 군데에 같은 내용이 복사돼 있다.**
+             한쪽만 고치면 화면마다 다른 말을 하게 된다 — 고칠 때 둘 다 고쳐라. -->
+      <p class="fsm">접속 기록(IP · 요청 경로)을 운영 목적으로 <b>90일간</b> 보관합니다.</p>
+    </div>
+  </footer>
+  </section>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="./app.js"></script>
+  <!-- 호 하나의 상세. 격자 칸을 누르면 채워진다 (app.js openHo) -->
+  <div id="homodal" aria-live="polite"></div>
+</body>
+</html>
