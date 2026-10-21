@@ -1650,3 +1650,7 @@ ul.lu li:last-child{border-bottom:0}
   .app[data-view="map"][data-detail] .mapctl{top:6px}
   .app[data-view="map"][data-detail] .leaflet-top{top:2px}
 }
+@media (max-width:640px){
+  /* 2026-10-22 사장님: 머리틀 수치 4칸은 폰 지도 화면에서 뺀다 — 홈에 같은 수치가 있다. 머리틀 134px 를 먹고 있었다 */
+  .app[data-view="map"] .topbar .statrow{display:none}
+}
