@@ -912,7 +912,8 @@ async function loadNewbuilds() {
 
 async function selectNewbuild(code, fromList) {
   selectedKapt = code; selected = null;
-  주소맞춤('/');           // 대장 없는 신축은 아직 단지 주소가 없다
+  주소맞춤('/', 상세쌓기());           // 대장 없는 신축은 아직 단지 주소가 없다
+  시트('full');
   목록자동(true);
   document.querySelectorAll('.row').forEach(b =>
     b.setAttribute('aria-current', String(b.dataset.kapt === code)));
@@ -2146,6 +2147,7 @@ function closeDetail() {
   const box = $('#detail');
   if (box) { box.hidden = true; box.innerHTML = ''; }
   주소맞춤('/');
+  시트(($('#q') && $('#q').value.trim()) ? 'half' : 'peek');
   try { focusLayer.clearLayers(); focusBldLayer.clearLayers(); } catch (e) {}
   document.querySelectorAll('.row').forEach(b => b.setAttribute('aria-current', 'false'));
   paintMarkers();
@@ -2153,7 +2155,8 @@ function closeDetail() {
 
 async function select(id, fromList) {
   selected = id; selectedKapt = null;
-  주소맞춤(`/c/${id}`);     // 2026-10-22 SEO: 단지마다 주소 — 공유·새로고침해도 같은 단지
+  주소맞춤(`/c/${id}`, 상세쌓기());     // 2026-10-22 SEO: 단지마다 주소 — 공유·새로고침해도 같은 단지
+  시트('full');             // 폰: 상세는 지도를 가리고 전체로
   주변점지우기();           // 다른 단지의 주변 점이 남아 있으면 안 된다
   /* ★ 단지가 바뀌면 거래 탭의 '직접 고름' 을 푼다 (2026-10-20).
      안 풀면 월세를 보던 사람이 월세가 없는 단지로 옮겼을 때 **빈 화면**을 본다.
@@ -4927,6 +4930,7 @@ async function boot() {
 
   탭달기();
   테마달기();
+  시트달기();
   search();
   주소로열기();
 }
@@ -4934,9 +4938,11 @@ async function boot() {
 /* ---------- 단지 주소 /c/:id (2026-10-22 SEO) ----------
    서버가 /c/:id 에 요약 HTML 을 넣어 보낸다(검색엔진용 · 보이는 요약). 여기서는 그 단지를 지도에서 열어 자세한 상세로 바꾼다.
    주소는 replaceState 로만 바꾼다 — 뒤로가기 동작은 예전과 같다(쌓지 않는다). '#보기' 는 그대로 붙여 둔다. */
-function 주소맞춤(경로) {
+function 주소맞춤(경로, 쌓기 = false) {
   try {
-    if (location.pathname !== 경로) history.replaceState(null, '', 경로 + location.search + location.hash);
+    /* 쌓기: 폰에서 상세를 열 때만 기록을 하나 쌓는다 — 폰의 '뒤로' 가 사이트를 나가지 않고 상세를 닫게(popstate). */
+    if (쌓기) history.pushState({ 상세: 1 }, '', 경로 + location.search + location.hash);
+    else if (location.pathname !== 경로) history.replaceState(history.state, '', 경로 + location.search + location.hash);
   } catch (e) { /* 주소는 덤 — 못 바꿔도 화면은 그대로 */ }
 }
 function 주소로열기() {
@@ -5548,4 +5554,104 @@ function 분양권칸(r) {
     <p class="note sm">국토교통부 분양권전매 실거래가를 <b>지번</b>으로 이었습니다(공고 지번 · 준공 후 지번). 첫 모집공고일 이후 계약만 셉니다.
       '분양가와 차이' 는 같은 전용면적의 <b>최고</b> 분양가를 뺀 값이라 옵션·발코니 확장·층 차이는 들어 있지 않습니다.
       <b>입주권</b>은 조합원 권리라 분양가와 견주지 않았고, 원본 구분 칸이 빈 거래는 빈칸으로 둡니다.${t.length > 15 ? ` 최근 15건만 보입니다.` : ''}</p>`;
+}
+
+/* ================= 폰 바텀시트 (2026-10-22, 사장님 "너 생각대로 ㄱㄱ") =================
+   ≤640px 지도 보기에서만 쓴다(넓은 화면은 CSS 가 아무것도 안 바꾼다 — 상태 값만 달린다).
+     peek : 검색 전 — 지도가 화면 가득, 아래 손잡이와 목록 머리만
+     half : 검색 결과 · 주변 항목을 눌렀을 때 — 지도와 같이 본다
+     full : 단지 상세 — 지도를 가린다
+   손잡이는 누르면 한 칸씩, 끌면 손 뗀 높이에서 가까운 칸으로 붙는다.
+   ★ 폰의 '뒤로': 상세를 열 때 기록을 하나 쌓고(pushState), 뒤로 오면 상세를 닫는다. */
+/* ★ const 가 아니라 function — boot() 가 파일 끝보다 먼저 불려도 쓸 수 있게(선언 전 접근 TDZ 를 피한다, 11-1xx 교훈) */
+function 폰() { return matchMedia('(max-width:640px)').matches; }
+function 상세쌓기() { return 폰() && !(history.state && history.state.상세); }
+function 시트(상태) {
+  const app = document.querySelector('.app');
+  if (!app) return;
+  /* 상세가 열려 있나 — 폰에서는 상세를 볼 때 검색 틀·동네 고르기를 접어 지도 띠를 넓힌다(CSS) */
+  if (selected !== null || selectedKapt !== null) app.dataset.detail = '1'; else delete app.dataset.detail;
+  if (app.dataset.sheet === 상태) return;
+  app.dataset.sheet = 상태;
+  if (상태 === 'half' && 폰()) setTimeout(시트지도맞춤, 260);   // 높이가 다 바뀐 뒤에 잰다(.22s)
+}
+/* 반쯤 내렸을 때 단지(와 찍힌 주변 점)가 검색 틀과 시트 사이 **보이는 띠** 안에 오게 */
+function 시트지도맞춤() {
+  try {
+    if (!map) return;
+    const b = L.latLngBounds([]);
+    const 넣기 = l => {
+      if (l.getLatLng) b.extend(l.getLatLng());
+      else if (l.getBounds) { try { b.extend(l.getBounds()); } catch (e) {} }
+      else if (l.eachLayer) l.eachLayer(넣기);
+    };
+    if (focusLayer) focusLayer.eachLayer(넣기);
+    if (ptLayer) ptLayer.eachLayer(넣기);
+    고정.forEach((g, k) => { if (k.startsWith(selected + '|')) 넣기(g); });   // 눌러 고정한 주변 점도 띠 안에
+    if (!b.isValid()) return;
+    const top = (document.querySelector('.ptop') || {}).offsetHeight || 0;
+    const sh = (document.querySelector('#psheet') || {}).offsetHeight || 0;
+    map.fitBounds(b, { paddingTopLeft: [24, top + 16], paddingBottomRight: [24, sh + 16], maxZoom: 17 });
+  } catch (e) { /* 덤 */ }
+}
+function 시트달기() {
+  const app = document.querySelector('.app');
+  if (!app.dataset.sheet) app.dataset.sheet = 'peek';
+  const top = document.querySelector('.ptop');
+  if (top && 'ResizeObserver' in window)
+    new ResizeObserver(() => app.style.setProperty('--ptop-h', top.offsetHeight + 'px')).observe(top);
+  const ac = document.querySelector('.areactl');
+  if (ac && 'ResizeObserver' in window)
+    new ResizeObserver(() => app.style.setProperty('--ac-h', ac.offsetHeight + 'px')).observe(ac);
+
+  /* 검색 결과가 그려지면(검색어가 있을 때만) 반쯤 올린다. 검색 전 지도 훑기로 목록이 바뀌는 건 그대로 둔다 */
+  const list = $('#list');
+  if (list) new MutationObserver(() => {
+    if (app.dataset.sheet === 'peek' && $('#q') && $('#q').value.trim()) 시트('half');
+  }).observe(list, { childList: true });
+
+  /* 주변 항목을 누르면 반쯤 내려 지도에 찍힌 점을 보인다(폰에는 '마우스 올리기' 가 없다) */
+  document.addEventListener('click', e => {
+    const el = e.target.closest('#detail [data-pt]');
+    if (!폰() || !el) return;
+    if (app.dataset.sheet === 'full') 시트('half');
+    /* 누른 줄이 시트 안에서 보이게 · 점은 받아 오는 데 시간이 걸리니 한 번 더 맞춘다 */
+    setTimeout(() => { try { el.scrollIntoView({ block: 'nearest' }); } catch (x) {} }, 280);
+    setTimeout(시트지도맞춤, 1000);
+  });
+
+  /* 뒤로 = 상세 닫기 */
+  window.addEventListener('popstate', e => {
+    if (e.state && e.state.상세) return;
+    if (selected !== null || selectedKapt !== null) closeDetail();
+  });
+
+  /* 손잡이: 누르면 한 칸씩, 끌면 가까운 칸으로 */
+  const grip = $('#sheetgrip'), sheet = $('#psheet');
+  if (!grip || !sheet) return;
+  const 다음 = { peek: 'half', half: (selected !== null || selectedKapt !== null) ? 'full' : 'full', full: 'half' };
+  let y0 = null, h0 = 0, 움직임 = 0;
+  grip.addEventListener('pointerdown', e => {
+    if (!폰()) return;
+    y0 = e.clientY; h0 = sheet.offsetHeight; 움직임 = 0;
+    sheet.classList.add('dragging'); grip.setPointerCapture(e.pointerId);
+  });
+  grip.addEventListener('pointermove', e => {
+    if (y0 === null) return;
+    const dy = y0 - e.clientY; 움직임 = Math.max(움직임, Math.abs(dy));
+    const 전체 = sheet.parentElement.offsetHeight || window.innerHeight;
+    sheet.style.height = Math.max(48, Math.min(전체, h0 + dy)) + 'px';
+  });
+  const 놓기 = e => {
+    if (y0 === null) return;
+    sheet.classList.remove('dragging');
+    const 전체 = sheet.parentElement.offsetHeight || window.innerHeight;
+    const 비 = sheet.offsetHeight / 전체;
+    sheet.style.height = '';
+    y0 = null;
+    if (움직임 < 6) { 시트(다음[app.dataset.sheet] || 'half'); return; }   // 끌지 않았으면 '누름'
+    시트(비 < 0.25 ? 'peek' : 비 < 0.76 ? 'half' : 'full');
+  };
+  grip.addEventListener('pointerup', 놓기);
+  grip.addEventListener('pointercancel', 놓기);
 }
