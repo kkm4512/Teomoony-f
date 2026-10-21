@@ -1654,3 +1654,27 @@ ul.lu li:last-child{border-bottom:0}
   /* 2026-10-22 사장님: 머리틀 수치 4칸은 폰 지도 화면에서 뺀다 — 홈에 같은 수치가 있다. 머리틀 134px 를 먹고 있었다 */
   .app[data-view="map"] .topbar .statrow{display:none}
 }
+
+/* ---------- 폰 머리틀 · 지도 도구 (2026-10-22 07:42, 사장님) ----------
+   ① 홈 · 지도 · 이용현황 탭을 '터무니' 오른쪽 **같은 줄**로(두 줄 → 한 줄).
+   ② 지도 도구(총괄 · 필지 · 항공 · 용도 · 정비 · 내위치 · 거리)는 **세로**로 오른쪽 가장자리에. */
+@media (max-width:640px){
+  .topbar{flex-wrap:nowrap;align-items:center;gap:10px;padding:6px 52px 6px 12px}
+  .topbar .brand{flex:none}
+  .topbar .tabs{order:2;width:auto;margin-left:0;flex:1 1 auto;min-width:0}
+  .topbar .tab{flex:1 1 0;padding:5px 0;font-size:12.5px;text-align:center}   /* 상세 탭(.tab[data-tab])은 건드리지 않게 .topbar 로 가둔다 */
+  .thbtn{top:50%;transform:translateY(-50%)}
+
+  .app[data-view="map"] .mapctl{flex-direction:column;left:auto;right:6px;width:auto;max-width:none;
+    max-height:calc(100% - var(--ptop-h, 96px) - var(--ac-h, 64px) - 90px);overflow-y:auto;overflow-x:hidden}
+  .app[data-view="map"] .mapctl .mc{width:44px}
+  .app[data-view="map"] .mapctl .mcsep{width:auto;height:1px;margin:3px 4px}
+  .app[data-view="map"][data-detail] .mapctl{max-height:calc(48% - 16px)}
+  /* 동네 고르기는 도구 열 왼쪽까지만 */
+  .app[data-view="map"] .areactl{right:6px}
+}
+/* 지도 도구의 체크박스는 '눈에만' 숨긴다 — 주석(index.html)은 숨긴다고 했는데 규칙이 없어서 네모가 보였다(2026-10-22 폰 실측).
+   눌러지는 것은 label 이 받고, 키보드 초점은 묶음 테두리로 보인다. */
+.mc input[type="checkbox"]{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+.mc{position:relative}
+.mc:has(input:focus-visible){outline:2px solid var(--s5);outline-offset:-2px}
