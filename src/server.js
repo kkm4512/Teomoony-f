@@ -2986,8 +2986,8 @@ app.get('/api/complexes/:id/points', async (req, res) => {
     academy:   ['gold.v_complex_academy', 'aca_nm', 'grp',    'le_crse_nm'],
     academynm: ['gold.v_complex_academy', 'aca_nm', 'aca_nm', 'le_crse_nm'],
   }[kind];
-  if (!표 && kind !== 'busroute')
-    return res.status(400).json({ error: 'kind 는 scls|life|brand|subway|bus|school|kinder|academy|academynm|busroute' });
+  if (!표 && kind !== 'busroute' && kind !== 'hira')
+    return res.status(400).json({ error: 'kind 는 scls|life|brand|subway|bus|school|kinder|academy|academynm|busroute|hira' });
 
   const [뷰, 이름칸, 거름칸, 보조칸] = 표 || [];
   const 상한 = 400;
@@ -3010,6 +3010,29 @@ app.get('/api/complexes/:id/points', async (req, res) => {
          안 맞추면 칩이 말하는 최단거리와 찍히는 첫 점이 어긋난다.
        ★ ARS 자릿수 함정은 집계 쪽과 같다: bus_stop '8832' vs route_station '08832'.
          v 쪽에서 두 모양을 만들어 = 로 비교해야 인덱스를 쓴다(11-?? 참조). */
+    /* ★ 2026-10-22 07:46 사장님 "병원 약국은 좌표가 없나? 클릭하면 위치가 떠야 해" — 좌표는 있었고(좌표없음 0) 점 찍기를 안 붙였다.
+       /hira 칸과 **같은 조건**: key 'big' = 5km 안 상급종합·종합 3곳 · 'y:<ykiho>' = 그 한 곳 · 그 밖 = 종별 코드(cl_cd) 1km 안 전부. */
+    if (kind === 'hira') {
+      const k = key || '';
+      const rq2 = pool.request().input('id', sql.Int, id).input('lim', sql.Int, 상한 + 1);
+      let 조건;
+      if (k === 'big') 조건 = `h.구분 = 'HOSP' AND h.cl_cd IN ('01', '11') AND h.geog.STDistance(@g) <= 5000`;
+      else if (k.startsWith('y:')) { rq2.input('y', sql.VarChar(120), k.slice(2)); 조건 = `h.ykiho = @y`; }
+      else { rq2.input('cl', sql.VarChar(4), k.slice(0, 4)); 조건 = `h.cl_cd = @cl AND h.geog.STDistance(@g) <= 1000`; }
+      const rh = await rq2.query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        DECLARE @g GEOGRAPHY = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
+                                 WHERE complex_id = @id AND centroid_lat IS NOT NULL);
+        SELECT TOP (${k === 'big' ? 3 : '@lim'}) 이름 = h.yadm_nm,
+               보조 = CONCAT(h.cl_cd_nm, CASE WHEN h.dr_tot > 0 THEN CONCAT(N' · 의사 ', h.dr_tot, N'명') ELSE N'' END),
+               lat = h.lat, lng = h.lng, m = CAST(h.geog.STDistance(@g) AS INT)
+          FROM silver.hira_inst h
+         WHERE @g IS NOT NULL AND h.is_current = 1 AND h.geog IS NOT NULL AND ${조건}
+         ORDER BY h.geog.STDistance(@g)`);
+      const 잘림h = rh.recordset.length > 상한;
+      return res.json({ kind, key, 상한, 잘림: 잘림h, 개수: 잘림h ? 상한 : rh.recordset.length,
+                        점: 잘림h ? rh.recordset.slice(0, 상한) : rh.recordset });
+    }
     if (kind === 'busroute') {
       if (!key) return res.status(400).json({ error: 'busroute 는 노선 번호(key)가 필요합니다' });
       const r0 = await pool.request().input('id', sql.Int, id)
@@ -4602,7 +4625,7 @@ app.get('/api/complexes/:id/hira', async (req, res) => {
                                WHERE complex_id = @id AND centroid_lat IS NOT NULL);
       SELECT 적재 = (SELECT COUNT(*) FROM silver.hira_inst WHERE is_current = 1), 좌표 = CASE WHEN @g IS NULL THEN 0 ELSE 1 END,
              받은시각 = (SELECT MAX(마지막본시각) FROM silver.hira_inst);
-      SELECT TOP 3 이름 = h.yadm_nm, 종별 = h.cl_cd_nm, 의사 = h.dr_tot, 전문의 = h.mdept_sdr, m = CAST(h.geog.STDistance(@g) AS INT)
+      SELECT TOP 3 이름 = h.yadm_nm, 종별 = h.cl_cd_nm, 의사 = h.dr_tot, 전문의 = h.mdept_sdr, m = CAST(h.geog.STDistance(@g) AS INT), h.ykiho
         FROM silver.hira_inst h
        WHERE @g IS NOT NULL AND h.is_current = 1 AND h.구분 = 'HOSP' AND h.cl_cd IN ('01', '11')
          AND h.geog.STDistance(@g) <= 5000

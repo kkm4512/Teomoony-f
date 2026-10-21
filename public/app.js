@@ -5508,6 +5508,7 @@ async function 병원채우기() {
   const 지금 = document.querySelector('#detail .hirabox');
   if (!지금 || 지금.dataset.hira !== 키) return;
   지금.innerHTML = 병원칸(r);
+  고정표시();             // 늦게 그려진 칸에도 '고정됨' 표시를 입힌다
 }
 function 병원칸(r) {
   const st = r.상태 || {};
@@ -5517,11 +5518,12 @@ function 병원칸(r) {
   const 거리 = m => (m >= 1000 ? (m / 1000).toFixed(1) + 'km' : fmt(m) + 'm');
   const 큰 = r.큰병원 || [], 종 = r.종별 || [];
   return `${머리}
-    ${큰.length ? `<ul class="lu">${큰.map(h => `<li><b>${esc(h.이름 || '')}</b><span class="muted"> ${esc(h.종별 || '')} · ${거리(Number(h.m) || 0)}${
+    ${큰.length ? `<ul class="lu">${큰.map(h => `<li data-pt="hira|y:${esc(h.ykiho || '')}" title="누르면 지도에 고정 · 올리면 잠깐 보기"><b>${esc(h.이름 || '')}</b><span class="muted"> ${esc(h.종별 || '')} · ${거리(Number(h.m) || 0)}${
         h.의사 != null ? ` · 의사 ${fmt(h.의사)}명` : ''}</span></li>`).join('')}</ul>`
       : `<p class="note sm">5km 안에 상급종합·종합병원이 없습니다.</p>`}
     ${종.length ? `<div class="lifegrid">${종.map(x => `
-      <div class="lcell${Number(x.r500) ? '' : ' far'}" title="가장 가까운 곳 ${fmt(x.최단m)}m · 1km 안 의사 ${fmt(x.의사)}명">
+      <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="hira|${esc(x.cl_cd || '')}" data-pt-r="${Number(x.r500) ? 500 : 1000}"
+           title="가장 가까운 곳 ${fmt(x.최단m)}m · 1km 안 의사 ${fmt(x.의사)}명">
         <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
         <span>${esc(x.종별 || '')}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>` : ''}
     <p class="note sm">큰 병원은 단지 중심에서 <b>5km 안</b> 가장 가까운 상급종합·종합병원 3곳, 칸은 <b>500m</b>(없으면 1km) 안 종별 개수입니다.
