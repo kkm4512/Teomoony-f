@@ -1581,3 +1581,11 @@ table.mini td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--lin
 ul.lu{list-style:none;margin:2px 0 0;padding:0}
 ul.lu li{font-size:12px;padding:2px 0;border-bottom:1px dashed var(--line)}
 ul.lu li:last-child{border-bottom:0}
+
+/* 단지 주소 /c/:id 의 서버 요약 (2026-10-22 SEO) — app.js 가 곧 자세한 상세로 바꾼다 */
+.ssr h2{margin:0 0 4px}
+.ssr h3{font-size:12px;margin:10px 0 4px;color:var(--ink-3)}
+.ssr dl{margin:8px 0}
+.ssr .ssr-r{display:flex;gap:8px;font-size:12.5px;padding:2px 0}
+.ssr .ssr-r dt{min-width:90px;color:var(--ink-3)}
+.ssr .ssr-r dd{margin:0}

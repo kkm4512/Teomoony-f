@@ -4817,6 +4817,106 @@ function toFC(rows, extra) {
   return { type: 'FeatureCollection', features };
 }
 
+/* ===================== 단지 주소 /c/:id — 검색엔진이 읽는 HTML (2026-10-22, 사장님 SEO "ㄱㄱ") =====================
+   ★ 왜: 화면이 전부 JS 로 그려져서 구글에는 첫 화면 한 장만 있었다. 단지마다 주소가 없었고(#map 뿐), HTML 에 내용이 없었다.
+   ★ 여기서 **서버가** 제목 · 설명 · 핵심 수치(대장 제원 · 최근 매매)를 HTML 에 넣어 보낸다. 사람이 보는 화면은 그대로 —
+     app.js 가 같은 자리(#detail)에 자세한 상세를 다시 그린다. 서버가 넣은 것은 **보이는** 요약이다(숨긴 글을 넣지 않는다).
+   ★ 가볍게: 조회 3개(단지 한 줄 · 3년 최고가 한 줄 · 최근 매매 5건). 구글 수집기가 긁어도 DB 가 버티게.
+   ★ 흡수된 단지는 301 로 살아남은 단지에 넘긴다(같은 단지를 한 주소로). 없는 단지는 404 + noindex.
+   ★ 원칙 그대로: 없는 값은 안 쓴다(지어내지 않는다). 출처를 적는다. */
+const 쪽틀 = path.join(__dirname, '..', 'public', 'index.html');
+function h(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+function 억표기(원) {
+  const v = Number(원); if (!v) return null;
+  const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4);
+  return a ? `${a}억${b ? ' ' + b.toLocaleString('ko-KR') : ''}` : `${b.toLocaleString('ko-KR')}만`;
+}
+const 날짜표기 = d => (d && String(d).length >= 8 ? `${String(d).slice(0, 4)}.${String(d).slice(4, 6)}.${String(d).slice(6, 8)}` : null);
+
+app.get('/c/:id', async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1 || id > 2147483647) return next();
+  try {
+    const 틀 = await fs.promises.readFile(쪽틀, 'utf8');
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT merged_into FROM gold.complex WHERE complex_id = @id;
+      SELECT v.complex_id, v.complex_nm, v.rep_plat_plc, v.rep_road_addr, v.hhld_cnt_sum, v.dong_cnt, v.max_floor,
+             v.oldest_use_apr, v.centroid_lat, v.centroid_lng,
+             실거래이름 = (SELECT al.실거래이름 FROM gold.complex_alias al WHERE al.complex_id = v.complex_id)
+        FROM gold.v_complex_map v WHERE v.complex_id = @id;
+      SELECT max_amt, max_ymd, max_unit FROM gold.complex_trade_max WHERE complex_id = @id AND 종류 = 'ALL';
+      SELECT TOP 5 deal_ymd, deal_amount, exclu_use_ar, floor_no
+        FROM silver.rtms_trade
+       WHERE match_complex_id = @id AND is_rent = 0 AND ISNULL(is_canceled, 0) = 0 AND trade_kind NOT LIKE 'SILV%'
+         AND deal_amount > 0
+       ORDER BY deal_ymd DESC, trade_sk DESC;`);
+    const [m0, c0, mx0, tr] = r.recordsets;
+    const into = (m0[0] || {}).merged_into;
+    if (into) return res.redirect(301, `/c/${into}`);
+    const c = c0[0];
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    if (!c) {
+      return res.status(404).send(틀.replace('</head>', '<meta name="robots" content="noindex">\n</head>'));
+    }
+    const 이름 = (c.complex_nm && c.complex_nm === c.rep_plat_plc && c.실거래이름) ? c.실거래이름 : (c.complex_nm || `단지 ${id}`);
+    const 주소 = c.rep_road_addr || c.rep_plat_plc || '';
+    const 동네 = (c.rep_plat_plc || '').split(/\s+/).slice(1, 3).join(' ');      // '성북구 장위동'
+    const 연 = c.oldest_use_apr ? String(c.oldest_use_apr).slice(0, 4) : null;
+    const 세대 = Number(c.hhld_cnt_sum) || null;
+    const mx = mx0[0];
+    const 최근 = tr[0];
+    const url = `https://teomoony.com/c/${id}`;
+
+    const 제목 = [이름, 동네, 세대 ? `${세대.toLocaleString('ko-KR')}세대` : null].filter(Boolean).join(' · ') + ' — 터무니';
+    const 설명 = [
+      `${이름}${주소 ? `(${주소})` : ''}`,
+      [세대 ? `${세대.toLocaleString('ko-KR')}세대` : null, c.dong_cnt ? `${c.dong_cnt}개 동` : null,
+       c.max_floor ? `최고 ${c.max_floor}층` : null, 연 ? `${연}년 사용승인` : null].filter(Boolean).join(' · '),
+      최근 ? `최근 매매 ${날짜표기(최근.deal_ymd)} 전용 ${Number(최근.exclu_use_ar || 0).toFixed(0)}㎡ ${억표기(최근.deal_amount)}` : null,
+      '건축물대장 · 국토교통부 실거래가 기준.'
+    ].filter(Boolean).join('. ');
+
+    const ld = { '@context': 'https://schema.org', '@type': 'ApartmentComplex', name: 이름, url,
+      ...(주소 ? { address: { '@type': 'PostalAddress', streetAddress: 주소, addressCountry: 'KR' } } : {}),
+      ...(c.centroid_lat ? { geo: { '@type': 'GeoCoordinates', latitude: Number(c.centroid_lat), longitude: Number(c.centroid_lng) } } : {}),
+      ...(세대 ? { numberOfAccommodationUnits: { '@type': 'QuantitativeValue', value: 세대 } } : {}) };
+
+    const 줄 = (k, v) => (v ? `<div class="ssr-r"><dt>${h(k)}</dt><dd>${h(v)}</dd></div>` : '');
+    const 요약 = `
+      <article class="ssr" data-ssr="${id}">
+        <h2>${h(이름)}</h2>
+        <p class="sub">${h(c.rep_plat_plc || '')}${c.rep_road_addr ? '<br>' + h(c.rep_road_addr) : ''}</p>
+        <dl>
+          ${줄('세대수', 세대 ? 세대.toLocaleString('ko-KR') + '세대' : null)}
+          ${줄('동', c.dong_cnt ? c.dong_cnt + '개 동' : null)}
+          ${줄('최고 층수', c.max_floor ? '지상 ' + c.max_floor + '층' : null)}
+          ${줄('사용승인', c.oldest_use_apr ? 날짜표기(c.oldest_use_apr) : null)}
+          ${줄('최근 3년 최고 매매', mx && mx.max_amt ? `${억표기(mx.max_amt)} (${날짜표기(mx.max_ymd) || ''})` : null)}
+        </dl>
+        ${tr.length ? `<h3>최근 매매</h3><table class="mini"><thead><tr><th>계약</th><th>전용</th><th>층</th><th>거래가</th></tr></thead><tbody>
+          ${tr.map(t => `<tr><td>${h(날짜표기(t.deal_ymd))}</td><td>${h(Number(t.exclu_use_ar || 0).toFixed(2))}㎡</td><td>${h(t.floor_no ?? '')}</td><td>${h(억표기(t.deal_amount))}</td></tr>`).join('')}
+        </tbody></table>` : ''}
+        <p class="srcline">출처: 건축물대장(국토교통부) · 아파트·연립 매매 실거래가(국토교통부). 자세한 내용은 화면을 불러오면 보입니다.</p>
+      </article>`;
+
+    let out = 틀
+      .replace(/<title>[\s\S]*?<\/title>/, `<title>${h(제목)}</title>`)
+      .replace(/<meta name="description" content="[^"]*">/, `<meta name="description" content="${h(설명)}">`)
+      .replace(/<link rel="canonical" href="[^"]*">/, `<link rel="canonical" href="${h(url)}">`)
+      .replace(/<meta property="og:title" content="[^"]*">/, `<meta property="og:title" content="${h(제목)}">`)
+      .replace(/<meta property="og:description" content="[^"]*">/, `<meta property="og:description" content="${h(설명)}">`)
+      .replace(/<meta property="og:url" content="[^"]*">/, `<meta property="og:url" content="${h(url)}">`)
+      .replace('</head>', `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>\n</head>`)
+      .replace('<section id="detail" class="detail" hidden></section>', `<section id="detail" class="detail">${요약}</section>`);
+    res.send(out);
+  } catch (e) { next(e); }
+});
+
 app.use((req, res) => res.status(404).json({ error: 'not found' }));
 
 /* ---------- 마지막 그물 (2026-10-21 QA) ----------

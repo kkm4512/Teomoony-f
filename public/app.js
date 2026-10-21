@@ -912,6 +912,7 @@ async function loadNewbuilds() {
 
 async function selectNewbuild(code, fromList) {
   selectedKapt = code; selected = null;
+  주소맞춤('/');           // 대장 없는 신축은 아직 단지 주소가 없다
   목록자동(true);
   document.querySelectorAll('.row').forEach(b =>
     b.setAttribute('aria-current', String(b.dataset.kapt === code)));
@@ -2144,6 +2145,7 @@ function closeDetail() {
   clearShots();
   const box = $('#detail');
   if (box) { box.hidden = true; box.innerHTML = ''; }
+  주소맞춤('/');
   try { focusLayer.clearLayers(); focusBldLayer.clearLayers(); } catch (e) {}
   document.querySelectorAll('.row').forEach(b => b.setAttribute('aria-current', 'false'));
   paintMarkers();
@@ -2151,6 +2153,7 @@ function closeDetail() {
 
 async function select(id, fromList) {
   selected = id; selectedKapt = null;
+  주소맞춤(`/c/${id}`);     // 2026-10-22 SEO: 단지마다 주소 — 공유·새로고침해도 같은 단지
   주변점지우기();           // 다른 단지의 주변 점이 남아 있으면 안 된다
   /* ★ 단지가 바뀌면 거래 탭의 '직접 고름' 을 푼다 (2026-10-20).
      안 풀면 월세를 보던 사람이 월세가 없는 단지로 옮겼을 때 **빈 화면**을 본다.
@@ -4925,6 +4928,22 @@ async function boot() {
   탭달기();
   테마달기();
   search();
+  주소로열기();
+}
+
+/* ---------- 단지 주소 /c/:id (2026-10-22 SEO) ----------
+   서버가 /c/:id 에 요약 HTML 을 넣어 보낸다(검색엔진용 · 보이는 요약). 여기서는 그 단지를 지도에서 열어 자세한 상세로 바꾼다.
+   주소는 replaceState 로만 바꾼다 — 뒤로가기 동작은 예전과 같다(쌓지 않는다). '#보기' 는 그대로 붙여 둔다. */
+function 주소맞춤(경로) {
+  try {
+    if (location.pathname !== 경로) history.replaceState(null, '', 경로 + location.search + location.hash);
+  } catch (e) { /* 주소는 덤 — 못 바꿔도 화면은 그대로 */ }
+}
+function 주소로열기() {
+  const m = location.pathname.match(/^\/c\/(\d+)\/?$/);
+  if (!m) return;
+  보기전환('map');
+  select(Number(m[1]));
 }
 
 /* ================= 3탭: 홈 / 지도 / 이용현황 (2026-10-20) =================
