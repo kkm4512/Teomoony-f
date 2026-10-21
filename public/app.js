@@ -5526,9 +5526,27 @@ function 병원칸(r) {
            title="가장 가까운 곳 ${fmt(x.최단m)}m · 1km 안 의사 ${fmt(x.의사)}명">
         <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
         <span>${esc(x.종별 || '')}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>` : ''}
+    ${과목칸(r)}
     <p class="note sm">큰 병원은 단지 중심에서 <b>5km 안</b> 가장 가까운 상급종합·종합병원 3곳, 칸은 <b>500m</b>(없으면 1km) 안 종별 개수입니다.
       위 생활 편의의 병원 숫자는 상가정보(사업자등록)라 <b>출처가 달라</b> 다를 수 있습니다.
-      진료과목은 병원이 신고한 과목이 넓어서(정형외과 의원도 소아청소년과를 신고) 싣지 않았습니다.</p>`;
+      진료과목은 병원이 신고한 과목이 넓어서(정형외과 의원도 소아청소년과를 신고) 그 값은 쓰지 않고,
+      <b>간판 과목</b>(요양기관 개설 현황의 표시과목${(r.과목상태 || {}).기준일 ? ' · ' + esc(String(r.과목상태.기준일).replace(/(\d{4})(\d{2})(\d{2})/, '$1.$2.$3')) + ' 기준' : ''})만 셉니다 — 그 뒤 생긴 곳은 빠져 있습니다.</p>`;
+}
+/* 간판 과목 칸 (298) — 아이 키우는 집이 먼저 찾는 순서로 앞에 세우고, 나머지는 많은 순 */
+const 과목순서 = ['소아청소년과', '내과', '이비인후과', '가정의학과', '치과', '한방', '정형외과', '피부과', '안과', '산부인과'];
+function 과목칸(r) {
+  const st = r.과목상태 || {};
+  if (!Number(st.이어짐)) return `<div class="lt2">간판 과목</div><p class="note sm">${gapCell('', 'SCOPE', '요양기관 개설 현황(간판 과목)을 아직 받지 않았습니다 — 곧 받습니다')}</p>`;
+  const 과 = (r.과목 || []).slice();
+  if (!과.some(x => x.과목 === '소아청소년과')) 과.push({ 과목: '소아청소년과', r500: 0, r1000: 0, 최단m: null });   // 0 도 정보다 — 1km 안에 없다
+  const 순 = x => { const i = 과목순서.indexOf(x.과목); return i < 0 ? 100 : i; };
+  과.sort((a, b) => (순(a) - 순(b)) || (Number(b.r1000) - Number(a.r1000)));
+  return `<div class="lt2">간판 과목 <span class="muted">(의원·병원 · 500m, 없으면 1km)</span></div>
+    <div class="lifegrid">${과.slice(0, 12).map(x => {
+      const n = Number(x.r500) || Number(x.r1000) || 0;
+      return `<div class="lcell${Number(x.r500) ? '' : ' far'}"${n ? ` data-pt="hira|g:${esc(x.과목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}"` : ''}
+           title="${x.최단m != null ? '가장 가까운 곳 ' + fmt(x.최단m) + 'm' : '1km 안에 없습니다'}">
+        <b>${fmt(n)}</b><span>${esc(x.과목)}${Number(x.r500) ? '' : (n ? ' <i>1km</i>' : ' <i>1km 안 없음</i>')}</span></div>`; }).join('')}</div>`;
 }
 
 /* 분양권·입주권 거래 (2026-10-21 밤) — 분양 칸 밑. 지번(PNU)으로 이었다(서버 주석).

@@ -3018,6 +3018,10 @@ app.get('/api/complexes/:id/points', async (req, res) => {
       let 조건;
       if (k === 'big') 조건 = `h.구분 = 'HOSP' AND h.cl_cd IN ('01', '11') AND h.geog.STDistance(@g) <= 5000`;
       else if (k.startsWith('y:')) { rq2.input('y', sql.VarChar(120), k.slice(2)); 조건 = `h.ykiho = @y`; }
+      else if (k.startsWith('g:')) {   /* 298 간판 과목 — /hira 의 과목 칸과 같은 조건(1km · HOSP · ykiho 로 이은 것) */
+        rq2.input('gw', sql.NVarChar(60), k.slice(2));
+        조건 = `h.구분 = 'HOSP' AND h.geog.STDistance(@g) <= 1000 AND EXISTS (SELECT 1 FROM silver.hira_open o WHERE o.ykiho = h.ykiho AND o.표시과목 = @gw)`;
+      }
       else { rq2.input('cl', sql.VarChar(4), k.slice(0, 4)); 조건 = `h.cl_cd = @cl AND h.geog.STDistance(@g) <= 1000`; }
       const rh = await rq2.query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
@@ -4634,9 +4638,19 @@ app.get('/api/complexes/:id/hira', async (req, res) => {
              최단m = MIN(CAST(x.d AS INT)), 의사 = SUM(ISNULL(x.dr_tot, 0))
         FROM (SELECT h.cl_cd, h.cl_cd_nm, h.dr_tot, d = h.geog.STDistance(@g) FROM silver.hira_inst h
                WHERE @g IS NOT NULL AND h.is_current = 1 AND h.geog.STDistance(@g) <= 1000) x
-       GROUP BY x.cl_cd, x.cl_cd_nm ORDER BY x.cl_cd;`);
+       GROUP BY x.cl_cd, x.cl_cd_nm ORDER BY x.cl_cd;
+      /* 298: 간판 과목(표시과목) — 1km 안, ykiho 로 이은 것만. '해당사항없음'(약국·요양 등)은 뺀다 */
+      SELECT 과목 = o.표시과목, r500 = SUM(CASE WHEN x.d <= 500 THEN 1 ELSE 0 END), r1000 = COUNT(*),
+             최단m = MIN(CAST(x.d AS INT)), 기준일 = MAX(o.기준일)
+        FROM (SELECT h.ykiho, d = h.geog.STDistance(@g) FROM silver.hira_inst h
+               WHERE @g IS NOT NULL AND h.is_current = 1 AND h.구분 = 'HOSP' AND h.geog.STDistance(@g) <= 1000) x
+        JOIN silver.hira_open o ON o.ykiho = x.ykiho
+       WHERE o.표시과목 IS NOT NULL AND o.표시과목 <> N'해당사항없음'
+       GROUP BY o.표시과목;
+      SELECT 이어짐 = (SELECT COUNT(*) FROM silver.hira_open), 기준일 = (SELECT MAX(기준일) FROM silver.hira_open);`);
     res.json({ 출처: '건강보험심사평가원 병원정보서비스 · 약국정보서비스', 상태: r.recordsets[0][0] || {},
-               큰병원: r.recordsets[1], 종별: r.recordsets[2] });
+               큰병원: r.recordsets[1], 종별: r.recordsets[2],
+               과목: r.recordsets[3] || [], 과목상태: (r.recordsets[4] || [])[0] || {} });
   } catch (e) { fail(res, e, 'complex-hira'); }
 });
 
