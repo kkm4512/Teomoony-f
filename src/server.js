@@ -2666,6 +2666,25 @@ app.get('/api/redev', async (req, res) => {
   } catch (e) { fail(res, e, 'redev'); }
 });
 
+/* ---------- 정비사업 구역 하나의 경계 (2026-10-22 사장님: "토지 탭의 재개발을 누르면 그 폴리곤") ----------
+   겹쳐 보기(/api/redev)와 **같은 표 · 같은 칸**이다. 단지 상세의 '정비사업 구역' 줄을 누르면 이걸 받아 그린다. */
+app.get('/api/redev/:sn', async (req, res) => {
+  const sn = String(req.params.sn || '').slice(0, 40);
+  if (!sn) return res.status(400).json({ error: 'bad sn' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('sn', sql.VarChar(40), sn).query(`   /* 칸이 VARCHAR — NVARCHAR 로 넘기면 색인을 못 탄다 */
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, area_m2, geojson
+        FROM silver.redev_zone WHERE is_current = 1 AND present_sn = @sn AND geojson IS NOT NULL`);
+    const d = r.recordset[0];
+    if (!d) return res.status(404).json({ error: 'not found' });
+    res.json({ type: 'Feature', geometry: JSON.parse(d.geojson),
+      properties: { sn: d.present_sn, zone_nm: d.zone_nm, lclas: d.biz_lclas_nm, biz: d.biz_nm,
+                    cd: d.propel_cd, stage: d.propel_nm, area: d.area_m2 } });
+  } catch (e) { fail(res, e, 'redev-one'); }
+});
+
 /* ---------- 법정동 하나의 경계 (GeoJSON) ---------- */
 app.get('/api/lawds/:lawd/geo', async (req, res) => {
   const lawd = String(req.params.lawd || '');
@@ -3708,11 +3727,11 @@ app.get('/api/complexes/:id', async (req, res) => {
        작은 것(= 더 구체적인 것)부터 보여준다. */
     const _q_redev = () => pool.request().input('id', sql.Int, id).query(`
       SELECT 구역 = v.zone_nm, 대분류 = v.biz_lclas_nm, 사업 = v.biz_nm,
-             단계 = v.propel_nm, 단계코드 = v.propel_cd, 구역면적 = v.area_m2,
+             단계 = v.propel_nm, 단계코드 = v.propel_cd, 구역면적 = v.area_m2, sn = v.present_sn,
              포함률 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(v.parea), 0) AS DECIMAL(5,1))
       FROM gold.v_complex_redev v
       WHERE v.complex_id = @id
-      GROUP BY v.zone_nm, v.biz_lclas_nm, v.biz_nm, v.propel_nm, v.propel_cd, v.area_m2
+      GROUP BY v.zone_nm, v.biz_lclas_nm, v.biz_nm, v.propel_nm, v.propel_cd, v.area_m2, v.present_sn
       ORDER BY v.area_m2`);
 
     /* 주변 상권 (2026-10-19) — 소상공인 상가(상권)정보.

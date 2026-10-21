@@ -2150,6 +2150,7 @@ function closeDetail() {
   clearShots();
   const box = $('#detail');
   if (box) { box.hidden = true; box.innerHTML = ''; }
+  구역지우기();
   주소맞춤('/');
   시트(($('#q') && $('#q').value.trim()) ? 'half' : 'peek');
   try { focusLayer.clearLayers(); focusBldLayer.clearLayers(); } catch (e) {}
@@ -2162,6 +2163,7 @@ async function select(id, fromList) {
   주소맞춤(`/c/${id}`, 상세쌓기());     // 2026-10-22 SEO: 단지마다 주소 — 공유·새로고침해도 같은 단지
   시트('full');             // 폰: 상세는 지도를 가리고 전체로
   주변점지우기();           // 다른 단지의 주변 점이 남아 있으면 안 된다
+  구역지우기();             // 앞 단지에서 눌러 그린 정비구역 경계도
   /* ★ 단지가 바뀌면 거래 탭의 '직접 고름' 을 푼다 (2026-10-20).
      안 풀면 월세를 보던 사람이 월세가 없는 단지로 옮겼을 때 **빈 화면**을 본다.
      탭 선택 자체(거래탭)는 남겨 둔다 — 같은 종류를 계속 보려는 사람이 많다. */
@@ -4701,7 +4703,7 @@ function renderDetail(payload) {
     <div class="lubox" data-lu="${esc(String(c.complex_id))}"></div>
 
     ${sect('정비사업 구역', 'redev', rv.length ? ` ${fmt(rv.length)}` : '')}
-    ${rv.length ? rv.map(r => `<div class="rdv">
+    ${rv.length ? rv.map(r => `<div class="rdv"${r.sn ? ` data-redev="${esc(String(r.sn))}" role="button" tabindex="0" title="누르면 지도에 이 구역 경계를 그립니다 · 다시 누르면 지웁니다"` : ''}>
       <div class="rdv-h"><b>${esc(r.구역 || '')}</b>${
         r.단계 ? `<span class="rdv-st">${esc(r.단계)}</span>`
                : gapCell('', 'EMPTY', `추진단계 코드 ${esc(r.단계코드 || '')} 가 코드표에 없습니다`)}</div>
@@ -4749,6 +4751,7 @@ function renderDetail(payload) {
 
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
   고정표시();              // 20:00 눌러 고정한 줄 표시를 다시 입힌다
+  document.querySelectorAll('#detail [data-redev]').forEach(el => el.classList.toggle('on', el.dataset.redev === 구역지금));
   분양채우기();            // 분양(청약홈) 칸 — 실거래 탭에 있을 때만 그릇이 있다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
@@ -5734,4 +5737,48 @@ document.addEventListener('click', e => {
   분양핀켜짐 = !분양핀켜짐;
   b.setAttribute('aria-pressed', String(분양핀켜짐));
   분양핀불러오기();
+});
+
+/* ---------------- 정비사업 구역 경계 (2026-10-22, 사장님 "재개발 부분을 누르면 그 폴리곤") ----------------
+   토지 탭 '정비사업 구역' 줄을 누르면 그 구역 경계를 지도에 그리고 맞춘다. 다시 누르면 지운다. 단지를 바꾸거나 닫으면 지운다.
+   ★ 겹쳐 보기('정비')와 같은 표(silver.redev_zone)다 — 다른 경계가 아니다. */
+let 구역층 = null, 구역지금 = null;
+function 구역지우기() {
+  if (구역층) { try { map.removeLayer(구역층); } catch (e) {} }
+  구역층 = null; 구역지금 = null;
+  document.querySelectorAll('#detail [data-redev].on').forEach(el => el.classList.remove('on'));
+}
+async function 구역보이기(sn, el) {
+  if (구역지금 === sn) { 구역지우기(); return; }
+  구역지우기();
+  try {
+    const f = await fetch(`/api/redev/${encodeURIComponent(sn)}`).then(r => r.json());
+    if (f.error) return 오류토스트('정비구역 경계', f);
+    구역층 = L.geoJSON(f, { interactive: false,
+      style: { color: css('--mark') || '#c2410c', weight: 2.5, dashArray: '6 4', fillOpacity: 0.12 } }).addTo(map);
+    구역지금 = sn;
+    if (el) el.classList.add('on');
+    const b = 구역층.getBounds();
+    const 맞춤 = () => {
+      const top = (document.querySelector('.ptop') || {}).offsetHeight || 0;
+      const sh = 폰() ? ((document.querySelector('#psheet') || {}).offsetHeight || 0) : 0;
+      map.fitBounds(b, { paddingTopLeft: [24, (폰() ? top : 0) + 24], paddingBottomRight: [24, sh + 24], maxZoom: 17 });
+    };
+    if (폰() && document.querySelector('.app').dataset.sheet === 'full') {
+      시트('half');
+      setTimeout(() => { 맞춤(); try { el && el.scrollIntoView({ block: 'nearest' }); } catch (x) {} }, 280);   // 누른 줄이 시트 안에 보이게
+    }
+    else 맞춤();
+    const p = f.properties || {};
+    toast(`${p.zone_nm || '정비구역'}${p.stage ? ' — ' + p.stage : ''}${p.area ? ` · ${fmt(Math.round(p.area))}㎡` : ''}`, 2500);
+  } catch (e) { toast('정비구역 경계를 불러오지 못했습니다', 2000); }
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('#detail [data-redev]');
+  if (el) 구역보이기(el.dataset.redev, el);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest && e.target.closest('#detail [data-redev]');
+  if (el) { e.preventDefault(); 구역보이기(el.dataset.redev, el); }
 });

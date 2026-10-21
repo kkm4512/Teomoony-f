@@ -1693,3 +1693,7 @@ ul.lu li:last-child{border-bottom:0}
 .ahmark.soon b,.ahmark.soon span,.ahmark.soon i{color:#fff}
 .ahpop .leaflet-popup-content{max-height:60vh;overflow:auto;margin:8px 10px}
 .ahpopin .sect{margin-top:0}
+/* 정비구역 줄 — 누를 수 있다는 것과 켜진 것 (2026-10-22) */
+#detail [data-redev]{cursor:pointer}
+#detail [data-redev]:hover{background:var(--surface-2)}
+#detail [data-redev].on{background:var(--surface-2);box-shadow:inset 3px 0 0 var(--mark)}
