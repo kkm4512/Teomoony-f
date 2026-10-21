@@ -5420,12 +5420,18 @@ function 분양칸(공고) {
         <div class="ah2">모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대${
           p.cnstrct_entrps_nm ? ' · 시공 ' + esc(p.cnstrct_entrps_nm) : ''}${
           p.pblanc_url ? ` · <a href="${esc(p.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>` : ''}</div>
-        ${형.length ? `<table class="mini"><thead><tr><th>주택형(전용)</th><th class="n">공급</th><th class="n">최고 분양가</th><th class="n">전용 평당</th></tr></thead><tbody>
+        ${형.length ? `<table class="mini"><thead><tr><th>주택형(전용)</th><th class="n">공급</th><th class="n">최고 분양가</th><th class="n">전용 평당</th>${
+            형.some(m => m.경쟁 != null) ? '<th class="n">경쟁률</th>' : ''}${형.some(m => m.가점최저 != null) ? '<th class="n">당첨가점</th>' : ''}</tr></thead><tbody>
           ${형.map(m => `<tr><td>${esc(m.house_ty || '')}${m.전용m2 ? `<span class="muted"> ${(Number(m.전용m2) / 3.3058).toFixed(1)}평</span>` : ''}</td>
             <td class="n">${fmt(m.공급 || 0)}</td>
             <td class="n">${m.최고원 ? eok(m.최고원) : '—'}</td>
-            <td class="n">${m.최고원 && m.전용m2 ? eok(Number(m.최고원) / (Number(m.전용m2) / 3.3058)) : '—'}</td></tr>`).join('')}
-          </tbody></table>` : ''}
+            <td class="n">${m.최고원 && m.전용m2 ? eok(Number(m.최고원) / (Number(m.전용m2) / 3.3058)) : '—'}</td>${
+            형.some(z => z.경쟁 != null) ? `<td class="n" title="${esc([m.경쟁순위 ? m.경쟁순위 + '순위' : '', m.경쟁구분 || '', m.접수 != null ? '접수 ' + fmt(m.접수) + '건' : ''].filter(Boolean).join(' · '))}">${
+              m.경쟁 == null ? '—' : m.미달 != null ? `<span class="warnx">미달 ${fmt(m.미달)}</span>` : esc(String(m.경쟁)) + ':1'}</td>` : ''}${
+            형.some(z => z.가점최저 != null) ? `<td class="n">${m.가점최저 != null ? `${Number(m.가점최저)}~${Number(m.가점최고)}` : '—'}</td>` : ''}</tr>`).join('')}
+          </tbody></table>
+          ${형.some(m => m.경쟁 != null) ? `<p class="note sm">경쟁률은 <b>1순위 · 해당지역</b> 기준(없으면 그 다음 순위)입니다 — 칸에 올리면 순위·지역·접수 건수가 보입니다.
+            '미달 n' 은 접수가 공급보다 n세대 적었다는 원문 표기((△n))입니다. 당첨가점은 해당지역 최저~최고점.</p>` : ''}` : ''}
         <p class="note sm">${p.근거 ? `추정 연결 — ${esc(p.근거)}${p.거리m != null ? ` · 공고 지번과 ${fmt(p.거리m)}m` : ''}. 이름으로 잇지 않았습니다.`
             : '아직 단지(건축물대장 · K-apt)에 이어지지 않은 공고입니다 — 공고 지번 자리에 보입니다.'}
           공급세대는 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.${p.공고종류 === 'PBLPVT' ? ' 공공지원민간임대는 분양이 아니라 임대라 금액 칸을 비웠습니다(조건은 공고문).' : ''}</p>

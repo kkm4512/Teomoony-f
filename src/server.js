@@ -2795,11 +2795,23 @@ app.get('/api/applyhome', async (req, res) => {
         JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no
         LEFT JOIN gold.applyhome_link l ON l.house_manage_no = p.house_manage_no AND l.pblanc_no = p.pblanc_no
        ORDER BY p.rcrit_pblanc_de DESC;
+      /* 300: 경쟁률 · 당첨가점 — 주택형마다 한 줄. 잇는 키 = 주택형 번호(model_no), 없으면(무순위·임의공급) 주택형 이름.
+         고르는 줄: 1순위 · 해당지역(01) 이 먼저, 없으면 순위 낮은 것. 원문('(△30)' = 미달 30세대)을 그대로 보인다. */
       SELECT m.house_manage_no, m.pblanc_no, m.model_no, m.house_ty, m.전용m2, m.suply_ar,
              공급 = ISNULL(m.suply_hshldco, 0) + ISNULL(m.spsply_hshldco, 0), m.suply_hshldco, m.spsply_hshldco,
-             최고원 = m.top_amount_man * 10000
+             최고원 = m.top_amount_man * 10000,
+             경쟁 = c.경쟁률원문, 경쟁순위 = c.순위, 경쟁구분 = c.구분이름, 접수 = c.접수, 미달 = c.미달,
+             가점최저 = g.최저, 가점최고 = g.최고, 가점평균 = g.평균
         FROM silver.applyhome_mdl m
         JOIN #ahkey a ON a.house_manage_no = m.house_manage_no AND a.pblanc_no = m.pblanc_no
+        OUTER APPLY (SELECT TOP 1 c.* FROM silver.applyhome_cmpet c
+                      WHERE c.house_manage_no = m.house_manage_no AND c.pblanc_no = m.pblanc_no
+                        AND (c.model_no = m.model_no OR (c.model_no IS NULL AND LTRIM(RTRIM(c.주택형)) = LTRIM(RTRIM(m.house_ty))))
+                      ORDER BY CASE WHEN c.순위 = 1 AND c.구분키 = '01' THEN 0 ELSE 1 END, c.순위, c.구분키) c
+        OUTER APPLY (SELECT TOP 1 g.* FROM silver.applyhome_score g
+                      WHERE g.house_manage_no = m.house_manage_no AND g.pblanc_no = m.pblanc_no
+                        AND (g.model_no = m.model_no OR LTRIM(RTRIM(g.주택형)) = LTRIM(RTRIM(m.house_ty)))
+                      ORDER BY CASE WHEN g.구분키 = '01' THEN 0 ELSE 1 END, g.구분키) g
        ORDER BY m.house_manage_no, m.전용m2, m.model_no;
       /* ★ 2026-10-21 밤: 분양권·입주권 전매 실거래(SILV_TRADE, 291)를 **지번(PNU)으로** 붙인다 — 이름으로 잇지 않는다.
          지번 = 공고 지번(사업 전) ∪ 이어진 K-apt 지번 ∪ 이어진 단지 필지. 첫 모집공고일 **이후** 계약만(같은 땅의 옛 사업을 막는다).
