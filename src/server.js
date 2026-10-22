@@ -4280,7 +4280,7 @@ const 분양권줄SQL = `
              처음 = MIN(t.deal_ymd), 끝 = MAX(t.deal_ymd)
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`;
 const 폐쇄칸 = `s.site_key, s.pnu, s.shter_day, s.이름, s.이름출처, s.주용도, s.동수, s.총괄세대, s.사용승인일, s.폐쇄구분,
-                s.plat_plc, s.new_plat_plc, s.lat, s.lng, s.now_complex_id, now_nm = c.complex_nm`;
+                s.plat_plc, s.new_plat_plc, s.lat, s.lng, s.now_complex_id, now_nm = c.complex_nm, s.위치근거`;   /* 319: 지금 필지가 없는 자리는 어떻게 찍었는지 */
 const 폐쇄동칸 = `t.mgm_shtreg_pk, t.pnu, t.shter_day, t.shter_gb_nm, t.regstr_kind_nm, t.bld_nm, t.dong_nm, t.main_atch_gb_nm,
                   t.main_purps_nm, t.etc_purps, t.strct_nm, t.hhld_cnt, t.fmly_cnt, t.ho_cnt, t.grnd_flr_cnt, t.ugrnd_flr_cnt,
                   t.tot_area, t.plat_area, t.use_apr_day`;
