@@ -1397,15 +1397,37 @@ app.get('/api/_perf/:id', async (req, res) => {
 
 /* ---------- 검색 ----------
    단지명 / 지번주소 / 도로명주소 / 단지코드 */
+/* ★ 2026-10-22 사장님 "'드림아트빌' 은 나오는데 '드림아트빌라' 까지 적으면 안 나와":
+   이름(대장·실거래·K-apt) 어디에도 **그 글자 그대로는 없고**, 끝의 건물 종류 말('빌라·아파트·맨션…')을 떼면 있을 때만 뗀 말로 찾는다.
+   ★ 뗀 사실을 화면에 적는다(조용히 바꾸지 않는다). 그대로 있는 이름은 건드리지 않는다. */
+const 종류꼬리 = /(빌라|아파트|맨션|타운|하우스|빌리지|주택|오피스텔|빌딩|apt|APT)$/;
+async function 이름꼬리떼기(pool, q) {
+  if (!q || /\d/.test(q) || !종류꼬리.test(q)) return null;
+  /* '빌라' 는 이름이 '…빌' 로 끝나는 경우가 많다(드림아트빌) — '라' 만 뗀 것을 먼저 본다 */
+  const 후보 = (q.endsWith('빌라') ? [q.slice(0, -1)] : []).concat([q.replace(종류꼬리, '').trim()])
+    .filter(v => [...v].length >= 2);
+  if (!후보.length) return null;
+  const 있나 = async v => (await pool.request().input('v', sql.NVarChar(200), `%${글자그대로(v)}%`).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 1 AS y FROM gold.complex WHERE merged_into IS NULL AND complex_nm LIKE @v
+      UNION ALL SELECT TOP 1 1 FROM gold.complex_alias WHERE 실거래이름 LIKE @v
+      UNION ALL SELECT TOP 1 1 FROM gold.complex_kapt WHERE kapt_name LIKE @v`)).recordset.length > 0;
+  if (await 있나(q)) return null;
+  for (const v of 후보) if (await 있나(v)) return v;
+  return null;
+}
+
 app.get('/api/complexes', async (req, res) => {
-  const q = 도로명맞춤((req.query.q || '').trim().slice(0, 200));   /* ★ 감싸면 3배가 되므로 먼저 막는다 · 20:11 도로명 띄어쓰기 맞춤 */
+  let q = 도로명맞춤((req.query.q || '').trim().slice(0, 200));   /* ★ 감싸면 3배가 되므로 먼저 막는다 · 20:11 도로명 띄어쓰기 맞춤 */
   const limit = 상한(req.query.limit, 50, 300);
   const onlyRecap = req.query.recap === '1';
+  let 꼬리뗌 = null;
   /* ★ 2026-10-20: 빈 검색어 결과에 5분 캐시를 걸었다가 **걷어냈다.**
      캐시는 일치성 문제를 새로 만든다 — 적재 중에는 묵은 목록을 사실처럼 보여준다.
      OPTION (RECOMPILE) 은 남긴다. 그건 캐시가 아니라 **계획**을 고치는 것이다. */
   try {
     const pool = await getPool();
+    { const 뗀 = await 이름꼬리떼기(pool, q); if (뗀) { 꼬리뗌 = { 원래: q, 찾은말: 뗀 }; q = 뗀; } }
     const r = await pool.request()
       .input('q', sql.NVarChar(1000), q ? `%${글자그대로(q)}%` : null)
       .input('qid', sql.Int, /^\d+$/.test(q) ? Number(q) : null)
@@ -1621,7 +1643,7 @@ app.get('/api/complexes', async (req, res) => {
         if (더단지.length > 남는칸) 바뀜.forEach(b => { b.잘림 = true; });
       }
     }
-    res.json({ count: _행.length, 상한: limit, 잘림: 잘림 || !!(바뀜 && 바뀜.some(b => b.잘림)), items: _행, lawds, newbuilds, redevs, 바뀜 });
+    res.json({ count: _행.length, 상한: limit, 잘림: 잘림 || !!(바뀜 && 바뀜.some(b => b.잘림)), items: _행, lawds, newbuilds, redevs, 바뀜, 꼬리뗌 });
   } catch (e) { fail(res, e, 'complexes'); }
 });
 
@@ -1644,10 +1666,12 @@ app.get('/api/suggest', async (req, res) => {
   /* ★ 두 글자부터 (실측 2026-10-21): '동' 한 글자가 거의 모든 이름에 걸려 **60초 시간초과**,
      '장' 은 2.8초였다. 한 글자는 제안으로도 쓸모가 없다 - 화면이 '두 글자부터' 라고 적는다. */
   if (길이 < 2) return res.json({ q: raw, 묶음: [], 안내: '두 글자부터 찾습니다' });
-  const 글자 = 글자그대로(도로명맞춤(raw));   /* 2026-10-22: 목록 검색과 같은 맞춤(시도 줄임말 · 도로명 띄어쓰기) */
+  let 글자 = 글자그대로(도로명맞춤(raw));   /* 2026-10-22: 목록 검색과 같은 맞춤(시도 줄임말 · 도로명 띄어쓰기) */
   try {
     const pool = await getPool();
     const t0 = Date.now();
+    const 뗀말 = await 이름꼬리떼기(pool, 도로명맞춤(raw));   // '드림아트빌라' → '드림아트빌' (그대로는 없을 때만)
+    if (뗀말) 글자 = 글자그대로(뗀말);
     const r = await pool.request()
       .input('raw', sql.NVarChar(60), raw)
       .input('q', sql.NVarChar(200), `%${글자}%`)
@@ -1889,7 +1913,7 @@ app.get('/api/suggest', async (req, res) => {
           이름: x.bizes_nm + (x.brch_nm ? ` ${x.brch_nm}` : ''), 보조: [x.inds_scls_nm, x.adong_nm, x.주소].filter(Boolean).join(' · '),
           동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
     ].filter(g => g.항목.length);
-    res.json({ q: raw, ms: Date.now() - t0, 묶음 });
+    res.json({ q: raw, ms: Date.now() - t0, 묶음, ...(뗀말 ? { 꼬리뗌: { 원래: raw, 찾은말: 뗀말 } } : {}) });
   } catch (e) { fail(res, e, 'suggest'); }
 });
 
