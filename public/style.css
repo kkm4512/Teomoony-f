@@ -1887,3 +1887,6 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 #view-github .ghcard h3{margin:0 0 4px;font-size:15px}
 #view-github .ghcard p{margin:4px 0;font-size:13px;line-height:1.55;color:var(--ink-2)}
 #view-github .ghcard a{color:var(--mark);font-weight:600;word-break:break-all}
+
+/* 지도 아닌 화면: .thbtn 의 margin-left:auto 를 내 정보 단추가 같이 받아 테마 단추가 가운데로 밀리던 것 */
+.app:not([data-view="map"]) .mebtn{margin-left:8px}

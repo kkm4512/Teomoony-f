@@ -6958,8 +6958,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) 배�
 /* ---- Github (2026-10-22 사장님 "어차피 깃 소스코드도 다 공개할 거라 · Github 탭을 문의 오른쪽에") ----
    ★ 저장소 주소를 아직 받지 않았다 — 빈 칸이면 '공개 준비 중' 으로 적는다(없는 주소를 지어내지 않는다). 주소가 생기면 여기 두 칸만 채운다. */
 const 깃허브 = {
-  화면: '',   // Teomoony-f — 화면 · 서버
-  적재: '',   // Teomoony — 적재(ETL) · DB 스크립트 · 작업 기록
+  화면: 'https://github.com/kkm4512/Teomoony-f',   // Teomoony-f — 화면 · 서버
+  적재: 'https://github.com/kkm4512/Teomoony-b',   // Teomoony-b — 적재(ETL) · DB 스크립트 · 작업 기록
 };
 function 깃허브그리기() {
   const 칸 = (주소, 이름, 글) => `<div class="ghcard"><h3>${esc(이름)}</h3><p>${글}</p>
@@ -6968,5 +6968,5 @@ function 깃허브그리기() {
     <p class="note sm">터무니의 소스코드는 모두 공개합니다. 데이터를 어디서 받아 어떻게 잇고 어떻게 세는지 — 화면에 보이는 숫자가 어디서 왔는지를 코드로 확인할 수 있습니다.
       키·비밀번호(.env)는 저장소에 넣지 않습니다.</p>
     ${칸(깃허브.화면, 'Teomoony-f — 화면 · 서버', 'Node.js(Express) API 와 지도 화면(Leaflet). 단지 상세 · 검색 · AI 검색 · 겹쳐보기 · 정책 화면.')}
-    ${칸(깃허브.적재, 'Teomoony — 적재 · DB', '공공데이터 적재(Python) · SQL Server 테이블과 파생표 스크립트(deploy/sql) · 작업 기록(CONTEXT.md).')}`;
+    ${칸(깃허브.적재, 'Teomoony-b — 적재 · DB', '공공데이터 적재(Python) · SQL Server 테이블과 파생표 스크립트(deploy/sql) · 작업 기록(CONTEXT.md).')}`;
 }
