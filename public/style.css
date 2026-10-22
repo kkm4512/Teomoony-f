@@ -1097,7 +1097,8 @@ svg.pl.tower .pl-bg{fill:var(--surface);stroke:none}
 .app[data-view="usage"] .panel, .app[data-view="usage"] .mapwrap,
 .app[data-view="qna"] .panel,   .app[data-view="qna"] .mapwrap,
 .app[data-view="policy"] .panel, .app[data-view="policy"] .mapwrap,
-.app[data-view="my"] .panel, .app[data-view="my"] .mapwrap{display:none}
+.app[data-view="my"] .panel, .app[data-view="my"] .mapwrap,
+.app[data-view="github"] .panel, .app[data-view="github"] .mapwrap{display:none}
 /* 머리틀의 작은 수치는 지도에서만 - 홈에는 같은 숫자가 크게 있다 */
 .app:not([data-view="map"]) .topbar .statrow{display:none}
 
@@ -1714,6 +1715,7 @@ ul.lu li:last-child{border-bottom:0}
 .app[data-view="qna"] #view-qna[hidden]{display:flex}
 .app[data-view="policy"] #view-policy[hidden]{display:flex}
 .app[data-view="my"] #view-my[hidden]{display:flex}
+.app[data-view="github"] #view-github[hidden]{display:flex}
 
 /* (2026-10-22) 폐쇄·말소 대장 칸 */
 .clsite{border-top:1px solid var(--line);padding:6px 0}
@@ -1867,3 +1869,21 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 #view-my .mylogin .lin{display:block;width:100%;max-width:280px;box-sizing:border-box;margin:6px 0;padding:7px 9px;border:1px solid var(--line-2);
   border-radius:6px;background:var(--surface);color:var(--ink);font:13px var(--font)}
 #view-my .unfav{border:0;background:none;color:var(--ink-3);cursor:pointer;font-size:12px;padding:2px 4px}
+
+/* 2026-10-22 내 정보 단추(사람 그림 동그라미) — 테마 단추 오른쪽. 좁은 화면은 테마 단추 왼쪽 자리에 못 박는다 */
+.mebtn{order:10;margin-left:8px;border-radius:50%;position:relative}
+.mebtn[aria-current="true"]{color:var(--band-ink);border-color:var(--band-ink);background:rgba(255,255,255,.10)}
+.mebtn .nbadge{position:absolute;top:-6px;right:-8px;margin:0;min-width:15px;padding:0 3px;font-size:10px;line-height:15px}
+@media (max-width:900px){
+  .topbar{padding-right:92px}
+  .mebtn{position:absolute;right:52px;top:10px;margin-left:0}
+}
+@media (max-width:640px){
+  .topbar{padding-right:92px}
+  .mebtn{top:50%;transform:translateY(-50%)}
+}
+/* Github 화면 */
+#view-github .ghcard{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--surface)}
+#view-github .ghcard h3{margin:0 0 4px;font-size:15px}
+#view-github .ghcard p{margin:4px 0;font-size:13px;line-height:1.55;color:var(--ink-2)}
+#view-github .ghcard a{color:var(--mark);font-weight:600;word-break:break-all}

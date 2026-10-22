@@ -5109,7 +5109,7 @@ function 주소로열기() {
      가른다 - 기존 선택자와 로직이 한 줄도 안 바뀌게.
    ★ 지도는 숨어 있는 동안 제 크기를 0 으로 안다. 돌아올 때 invalidateSize 로
      다시 재고 refreshMap 을 부른다. 안 하면 회색 화면이 뜬다. */
-const 보기들 = ['home', 'map', 'usage', 'qna', 'policy', 'my'];
+const 보기들 = ['home', 'map', 'usage', 'qna', 'policy', 'my', 'github'];
 let 지금보기 = null, 홈받음 = false, 이용받음 = 0;
 
 function 보기전환(이름, 주소도 = true) {
@@ -5122,6 +5122,8 @@ function 보기전환(이름, 주소도 = true) {
   $('#view-qna').hidden   = 이름 !== 'qna';
   $('#view-policy').hidden = 이름 !== 'policy';
   $('#view-my').hidden = 이름 !== 'my';
+  $('#view-github').hidden = 이름 !== 'github';
+  { const m = $('#mebtn'); if (m) m.setAttribute('aria-current', String(이름 === 'my')); }
   document.querySelectorAll('.tab').forEach(b =>
     b.setAttribute('aria-current', String(b.dataset.view === 이름)));
   if (주소도) {
@@ -5135,6 +5137,7 @@ function 보기전환(이름, 주소도 = true) {
   if (이름 === 'qna')   문의탭그리기();
   if (이름 === 'policy') 정책그리기();
   if (이름 === 'my') 내정보그리기();
+  if (이름 === 'github') 깃허브그리기();
   const v = document.querySelector('.view:not([hidden])');
   if (v) v.scrollTop = 0;
 }
@@ -5158,6 +5161,7 @@ function 탭달기() {
     const b = e.target.closest('.tab');
     if (b) 보기전환(b.dataset.view);
   });
+  { const m = $('#mebtn'); if (m) m.addEventListener('click', () => 보기전환('my')); }   // 내 정보 = 머리틀 오른쪽 사람 그림
   window.addEventListener('hashchange', () => 보기전환((location.hash || '').slice(1), false));
   const 첫 = (location.hash || '').slice(1);
   보기전환(보기들.includes(첫) ? 첫 : 'home');
@@ -6950,3 +6954,19 @@ document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target &&
 /* 처음 열 때 · 창으로 돌아올 때 배지를 새로(답변이 달렸는지) — 주기적으로 두드리지 않는다 */
 배지새로();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) 배지새로(); });
+
+/* ---- Github (2026-10-22 사장님 "어차피 깃 소스코드도 다 공개할 거라 · Github 탭을 문의 오른쪽에") ----
+   ★ 저장소 주소를 아직 받지 않았다 — 빈 칸이면 '공개 준비 중' 으로 적는다(없는 주소를 지어내지 않는다). 주소가 생기면 여기 두 칸만 채운다. */
+const 깃허브 = {
+  화면: '',   // Teomoony-f — 화면 · 서버
+  적재: '',   // Teomoony — 적재(ETL) · DB 스크립트 · 작업 기록
+};
+function 깃허브그리기() {
+  const 칸 = (주소, 이름, 글) => `<div class="ghcard"><h3>${esc(이름)}</h3><p>${글}</p>
+    <p>${주소 ? `<a href="${esc(주소)}" target="_blank" rel="noopener">${esc(주소)}</a>` : '<span class="muted">저장소 주소를 아직 붙이지 않았습니다 — 공개 준비 중</span>'}</p></div>`;
+  $('#ghbox').innerHTML = `<h2 class="vtitle">Github</h2>
+    <p class="note sm">터무니의 소스코드는 모두 공개합니다. 데이터를 어디서 받아 어떻게 잇고 어떻게 세는지 — 화면에 보이는 숫자가 어디서 왔는지를 코드로 확인할 수 있습니다.
+      키·비밀번호(.env)는 저장소에 넣지 않습니다.</p>
+    ${칸(깃허브.화면, 'Teomoony-f — 화면 · 서버', 'Node.js(Express) API 와 지도 화면(Leaflet). 단지 상세 · 검색 · AI 검색 · 겹쳐보기 · 정책 화면.')}
+    ${칸(깃허브.적재, 'Teomoony — 적재 · DB', '공공데이터 적재(Python) · SQL Server 테이블과 파생표 스크립트(deploy/sql) · 작업 기록(CONTEXT.md).')}`;
+}
