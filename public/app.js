@@ -5865,7 +5865,7 @@ function 폐쇄묶음줄(s, 동들, 열기 = false) {
       ${꼬리 ? `<div class="muted sm">${esc(꼬리)}</div>` : ''}</summary>
       ${s.이름 && s.plat_plc ? `<p class="sm muted">${esc(s.plat_plc)}${s.new_plat_plc ? ` · ${esc(s.new_plat_plc)}` : ''}</p>` : ''}
       ${동줄 ? `<ul class="lu">${동줄}</ul>` : '<p class="sm muted">이 묶음에는 총괄표제부만 있습니다(동별 표제부 없음).</p>'}
-      ${s.lat != null ? `<button type="button" class="popbtn" data-clsite="${esc(s.site_key)}">지도에 ✕ 로 보기</button>` : '<p class="sm muted">그 필지가 지금은 없어(합필·분필) 지도에 자리를 찍지 않습니다.</p>'}
+      ${s.lat != null ? '' : '<p class="sm muted">그 필지가 지금은 없어(합필·분필) 지도에 자리를 찍지 않습니다.</p>'}
     </details>`;
 }
 async function 폐쇄받기(키) {
@@ -6014,12 +6014,14 @@ function 닫힌자리자동(cid, r) {
   닫힌자리지우기();
   const 필 = (r.필지 || []).filter(x => x.geometry || x.lat != null);
   if (!필.length || typeof map === 'undefined' || !map) return;
+  /* ★ 12:52 사장님 "회색이 안 나와" — 단지 필지·건물(주황) 밑에 깔려 가려졌다. 전용 판(pane)을 위에 둔다(그림 400 < 이것 450 < 표 600) */
+  if (!map.getPane('closedPane')) { const pn = map.createPane('closedPane'); pn.style.zIndex = 450; pn.style.pointerEvents = 'none'; }
   const g = L.featureGroup().addTo(map);
   for (const f of 필) {
     const 묶 = (r.묶음 || []).filter(s => s.pnu === f.pnu);
     const 말 = 묶.map(s => `${s.폐쇄구분 || ''} ${날8(s.shter_day) || '날짜 없음'} · ${s.이름 || s.주용도 || '이름 없음'}`).join('\n');
-    if (f.geometry) L.geoJSON(f.geometry, { interactive: false,
-      style: { color: '#6b7280', weight: 1.5, dashArray: '4 4', fillColor: '#9ca3af', fillOpacity: 0.22 } }).addTo(g);
+    if (f.geometry) L.geoJSON(f.geometry, { interactive: false, pane: 'closedPane',
+      style: { color: '#4b5563', weight: 2, dashArray: '5 4', fillColor: '#6b7280', fillOpacity: 0.5 } }).addTo(g);
     if (f.lat != null) {
       const m = L.marker([Number(f.lat), Number(f.lng)], { zIndexOffset: 800, keyboard: false,
         title: `닫힌 대장 ${묶.length}묶음 — 지금 건물이 아닙니다\n${말}`,
@@ -6038,8 +6040,9 @@ function 닫힌자리그리기(r, 표) {
   구역지우기();
   if (!(r.필지 || s.lat != null)) return false;
   const g = L.featureGroup().addTo(map);
-  if (r.필지) L.geoJSON(r.필지, { interactive: false,
-    style: { color: '#6b7280', weight: 2, dashArray: '4 4', fillColor: '#9ca3af', fillOpacity: 0.28 } }).addTo(g);
+  if (!map.getPane('closedPane')) { const pn = map.createPane('closedPane'); pn.style.zIndex = 450; pn.style.pointerEvents = 'none'; }
+  if (r.필지) L.geoJSON(r.필지, { interactive: false, pane: 'closedPane',
+    style: { color: '#4b5563', weight: 2, dashArray: '5 4', fillColor: '#6b7280', fillOpacity: 0.5 } }).addTo(g);
   const c = s.lat != null ? [Number(s.lat), Number(s.lng)] : g.getBounds().getCenter();
   L.marker(c, { interactive: false, zIndexOffset: 900, icon: L.divIcon({ className: 'clx-wrap', iconSize: [26, 26], iconAnchor: [13, 13],
     html: '<div class="clx" aria-label="닫힌 대장">✕</div>' }) }).addTo(g);
