@@ -1757,3 +1757,6 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
   background:rgba(255,255,255,.92);border:1px solid #6b7280;color:#4b5563;font:500 10px/1.5 var(--mono);box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .oldtag.on{background:#c2410c;border-color:#c2410c;color:#fff;font-size:11px}
 [data-theme="dark"] .oldtag:not(.on){background:rgba(30,30,30,.9);color:#d1d5db}
+
+/* (13:13) .pill 의 display 가 hidden 속성을 이겨서 빈 테두리가 보였다 */
+.pill[hidden]{display:none}
