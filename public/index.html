@@ -33,7 +33,8 @@
        알려주는 **유일한 표시**다. 서초동을 '없다' 고 답할 뻔한 날 배웠다. -->
   <header class="topbar">
     <div class="brand">
-      <h1>터무니</h1>
+      <!-- 2026-10-22 사장님 "홈은 없애고, 터무니 로고를 클릭하면 홈으로" — 홈 탭을 빼고 이름을 홈 링크로 -->
+      <h1><a href="#home" class="homelink" title="홈으로">터무니</a></h1>
       <p>단지코드 하나로 보는 건축물대장 · 토지</p>
     </div>
     <!-- ★ 3탭 (2026-10-20). 지도만 덩그러니 있어서 처음 온 사람이 여기가
@@ -41,7 +42,6 @@
          .panel 과 .mapwrap 은 **건드리지 않는다** - app.js 의 선택자가 전부
          그대로 살아 있어야 한다. 보이고 안 보이고만 .app[data-view] 로 가른다. -->
     <nav class="tabs" id="tabs" aria-label="화면">
-      <button type="button" class="tab" data-view="home"  aria-current="true">홈</button>
       <button type="button" class="tab" data-view="map"   aria-current="false">지도</button>
       <button type="button" class="tab" data-view="usage" aria-current="false">이용현황</button>
     </nav>

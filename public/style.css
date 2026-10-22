@@ -1787,3 +1787,8 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
   border-radius: 6px; background: var(--mark-soft); color: var(--ink); font-size: 13px; line-height: 1.5; }
 #list .movednote .muted { color: var(--ink-2); }
 #list .movednote .sm { font-size: 12px; margin-top: 4px; }
+
+/* 2026-10-22: 이름 = 홈 링크(홈 탭을 뺐다) */
+.brand h1 a.homelink{color:inherit;text-decoration:none;cursor:pointer;border-radius:4px}
+.brand h1 a.homelink:hover{opacity:.8}
+.brand h1 a.homelink:focus-visible{outline:2px solid var(--mark);outline-offset:2px}
