@@ -2078,6 +2078,37 @@ function requireAuth(req, res, next) {
   next();
 }
 
+/* ===================== 문의 남기기 (2026-10-22 사장님 "다시하기 빼고 문의남기기 · 로그인된 유저만", 310) =====================
+   ★ requireAuth — 화면 버튼을 숨기는 것만이 아니라 **서버가** 막는다.
+   ★ 글자 수를 자른다(받는 칸 크기 그대로). 한 사람이 1시간에 20건까지 — 버튼 연타·스크립트로 표가 차지 않게(메모리 셈, 서버 재시작이면 초기화).
+   ★ IP·브라우저는 담지 않는다. 오류번호가 있으면 그걸로 접속 기록을 찾는다. */
+const 문의셈 = new Map();   // uid → [시각…]
+app.post('/api/inquiry', requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const 글 = (v, n) => (v == null ? null : String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, n) || null);
+  const uid = Number(req.user && req.user.uid) || null;
+  const 이제 = Date.now();
+  const 기록 = (문의셈.get(uid) || []).filter(t => 이제 - t < 3600e3);
+  if (기록.length >= 20) return res.status(429).json({ error: '문의를 너무 많이 남겼습니다 — 한 시간 뒤에 다시 남겨 주세요' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('uid', sql.Int, uid)
+      .input('u', sql.NVarChar(50), 글(req.user && req.user.u, 50))
+      .input('무엇', sql.NVarChar(100), 글(b.무엇, 100))
+      .input('말', sql.NVarChar(300), 글(b.말, 300))
+      .input('번호', sql.VarChar(20), /^[0-9A-Z-]{4,20}$/.test(String(b.오류번호 || '')) ? String(b.오류번호) : null)
+      .input('단지', sql.NVarChar(30), 글(b.단지코드, 30))
+      .input('화면', sql.NVarChar(500), 글(b.화면, 500))
+      .input('내용', sql.NVarChar(2000), 글(b.내용, 2000))
+      .query(`INSERT ops.inquiry (user_id, 아이디, 종류, 무엇, 말, 오류번호, 단지코드, 화면, 내용)
+              OUTPUT inserted.inquiry_id
+              VALUES (@uid, @u, N'오류', @무엇, @말, @번호, @단지, @화면, @내용);`);
+    기록.push(이제); 문의셈.set(uid, 기록);
+    res.json({ ok: true, 문의번호: r.recordset[0].inquiry_id });
+  } catch (e) { fail(res, e, 'inquiry'); }
+});
+
 /* 지역 이름 -> 법정동 코드. ★ 사전이 LLM 보다 정확하다(20,561건) -
    그래서 LLM 이 보태준 표현도 **반드시 이 함수를 거친다.**
    코드 변환까지 LLM 에 맡기면 조용히 틀린 지역을 보여주게 된다. */

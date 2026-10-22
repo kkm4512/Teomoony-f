@@ -137,8 +137,12 @@ function 오류카드({ 무엇, 응답, 예외, 단지코드, 다시 } = {}) {
     document.body.append(el);
     el.addEventListener('click', e => {
       if (e.target === el || e.target.closest('[data-ec-close]')) 오류카드닫기();
-      else if (e.target.closest('[data-ec-retry]')) {
-        const f = 오류판.다시; 오류카드닫기(); if (f) f();
+      else if (e.target.closest('[data-ec-ask]')) 문의펴기();
+      else if (e.target.closest('[data-ec-send]')) 문의보내기();
+      else if (e.target.closest('[data-ec-login]')) {
+        오류카드닫기();
+        if (!askMode) setMode('ask');
+        로그인띄우기('', '로그인하면 오류 창에서 문의를 남길 수 있습니다.');
       } else if (e.target.closest('[data-ec-copy]')) 오류복사(e.target.closest('[data-ec-copy]'));
     });
     document.addEventListener('keydown', e => {
@@ -153,6 +157,7 @@ function 오류카드({ 무엇, 응답, 예외, 단지코드, 다시 } = {}) {
     return;
   }
   오류판.열림키 = 키; 오류판.횟수 = 1; 오류판.다시 = 다시 || null;
+  오류판.카드 = { 무엇: 무엇 || '요청', 말, 오류번호: 번호, 단지코드: 단지코드 != null ? String(단지코드) : null, 화면: location.href };
   오류판.복사글 = [`[터무니 오류] ${무엇 || '요청'} 실패`, 말,
     `오류번호 ${번호 || '없음(서버에 닿지 못함)'}`,
     단지코드 != null ? `단지코드 ${단지코드}` : null,
@@ -172,16 +177,53 @@ function 오류카드({ 무엇, 응답, 예외, 단지코드, 다시 } = {}) {
         ${단지코드 != null ? `<dt>단지코드</dt><dd><b>${esc(단지코드)}</b></dd>` : ''}
         <dt>시각</dt><dd>${esc(시각)}</dd>
       </dl>
-      <p class="ec-help">계속되면 위 <b>오류번호</b>를 관리자에게 알려 주세요. 번호로 그 요청을 바로 찾을 수 있습니다.</p>
+      <p class="ec-help">계속되면 <b>문의 남기기</b>로 알려 주세요 — 오류번호·시각·화면이 같이 남아 그 요청을 바로 찾을 수 있습니다.</p>
       ${자세히}
+      <div class="ec-ask" hidden></div>
       <div class="ec-btns">
-        ${다시 ? '<button type="button" class="ec-b ec-pri" data-ec-retry>다시 시도</button>' : ''}
+        <!-- 2026-10-22 사장님 "다시하기 빼고 문의남기기 · 로그인된 유저만" — 다시 시도는 같은 동작을 사용자가 다시 하면 된다 -->
+        <button type="button" class="ec-b ec-pri" data-ec-ask>문의 남기기</button>
         <button type="button" class="ec-b" data-ec-copy>번호 복사</button>
         <button type="button" class="ec-b" data-ec-close>닫기</button>
       </div>
     </div>`;
   el.hidden = false;
-  (el.querySelector('[data-ec-retry]') || el.querySelector('[data-ec-close]')).focus();
+  el.querySelector('[data-ec-ask]').focus();
+}
+/* 문의 남기기 — 로그인한 사용자만(서버도 토큰을 본다, 310). 오류 정보는 저절로 붙고, 글은 비워도 된다. */
+function 문의펴기() {
+  const el = document.getElementById('errcard'); if (!el) return;
+  const box = el.querySelector('.ec-ask'); if (!box) return;
+  box.hidden = false;
+  { const ask = el.querySelector('.ec-btns [data-ec-ask]'); if (ask) ask.hidden = true; }   // 펼친 뒤엔 같은 단추를 또 안 보인다
+  if (!토큰()) {
+    box.innerHTML = `<p class="ec-help">문의는 <b>로그인한 사용자만</b> 남길 수 있습니다.</p>
+      <button type="button" class="ec-b" data-ec-login>로그인하러 가기</button>`;
+    return;
+  }
+  box.innerHTML = `<label class="ec-help" for="ec-txt">무엇을 하다가 났는지 적어 주세요(비워도 됩니다 — 오류번호·시각·화면은 저절로 같이 남습니다).</label>
+    <textarea id="ec-txt" class="ec-txt" maxlength="2000" rows="3" placeholder="예) AI 검색에 '은평구 신축 아파트' 를 넣었습니다"></textarea>
+    <div class="ec-btns"><button type="button" class="ec-b ec-pri" data-ec-send>보내기</button><span class="ec-sent muted"></span></div>`;
+  el.querySelector('#ec-txt').focus();
+}
+async function 문의보내기() {
+  const el = document.getElementById('errcard'); if (!el) return;
+  const btn = el.querySelector('[data-ec-send]'), out = el.querySelector('.ec-sent');
+  const 내용 = (el.querySelector('#ec-txt') || {}).value || '';
+  if (btn) { btn.disabled = true; btn.textContent = '보내는 중…'; }
+  try {
+    const t = 토큰();
+    const r = await fetch('/api/inquiry', { method: 'POST',
+      headers: { 'content-type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) },
+      body: JSON.stringify({ ...(오류판.카드 || {}), 내용 }) });
+    const d = await r.json();
+    if (r.status === 401) { 토큰저장(''); 문의펴기(); return; }       // 만료 — 로그인 안내로
+    if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+    el.querySelector('.ec-ask').innerHTML = `<p class="ec-help"><b>문의를 남겼습니다</b> (문의번호 ${esc(String(d.문의번호))}). 고맙습니다.</p>`;
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '보내기'; }
+    if (out) out.textContent = '보내지 못했습니다 — ' + e.message;
+  }
 }
 function 오류카드닫기() {
   const el = document.getElementById('errcard');
