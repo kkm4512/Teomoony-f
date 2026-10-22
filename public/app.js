@@ -3582,18 +3582,20 @@ function permitBlock(rows, scope, dongs) {
     const 목 = 동묶음.get(pk);
     if (!목 || !목.length) return '';
     const 총 = Number(목[0].동총수) || 목.length;
+    /* ★ 2026-10-22 사장님 "동 내역이 다 가로로 나와 보기 불편해" — 항목마다 한 줄(이름 : 값)로 세운다. 없는 값은 줄을 안 만든다. */
     const 칸 = d => {
       const t = [];
-      if (d.main_atch_gb_nm) t.push(esc(d.main_atch_gb_nm));
-      if (d.strct_nm) t.push(esc(d.strct_nm));
-      if (d.roof_nm)  t.push('지붕 ' + esc(d.roof_nm));
-      if (d.arch_area > 0) t.push('건축 ' + fmt(Math.round(d.arch_area)) + '㎡');
-      if (d.tot_area  > 0) t.push('연면적 ' + fmt(Math.round(d.tot_area)) + '㎡');
-      if (d.hhld_cnt  > 0) t.push(fmt(d.hhld_cnt) + '세대');
-      if (d.ho_cnt    > 0) t.push(fmt(d.ho_cnt) + '호');
-      if (d.ride_use_elvt_cnt > 0) t.push('승강기 ' + fmt(d.ride_use_elvt_cnt));
+      if (d.main_purps_nm && d.bld_nm) t.push(['주용도', esc(d.main_purps_nm)]);
+      if (d.main_atch_gb_nm) t.push(['주/부속', esc(d.main_atch_gb_nm)]);
+      if (d.strct_nm) t.push(['구조', esc(d.strct_nm)]);
+      if (d.roof_nm)  t.push(['지붕', esc(d.roof_nm)]);
+      if (d.arch_area > 0) t.push(['건축면적', fmt(Math.round(d.arch_area)) + '㎡']);
+      if (d.tot_area  > 0) t.push(['연면적', fmt(Math.round(d.tot_area)) + '㎡']);
+      if (d.hhld_cnt  > 0) t.push(['세대', fmt(d.hhld_cnt) + '세대']);
+      if (d.ho_cnt    > 0) t.push(['호', fmt(d.ho_cnt) + '호']);
+      if (d.ride_use_elvt_cnt > 0) t.push(['승강기', fmt(d.ride_use_elvt_cnt) + '대']);
       return `<div class="pdrow"><b>${esc(d.bld_nm || d.main_purps_nm || '(이름 없음)')}</b>`
-           + (t.length ? `<span>${t.join(' · ')}</span>` : '') + `</div>`;
+           + (t.length ? `<dl class="pdkv">${t.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : '') + `</div>`;
     };
     return `<details class="pdong"><summary>동 내역 ${fmt(총)}개</summary>
         <div class="pdlist">${목.map(칸).join('')}</div>
