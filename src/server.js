@@ -201,6 +201,7 @@ const 이용_안세는호스트 = new Set(['localhost', '127.0.0.1', '[::1]']);
 function 이용_이름(req) {
   if (req.method !== 'GET') return null;
   const p = req.path;
+  if (/^\/c\/\d+\/?$/.test(p)) return '단지 페이지 열기';   // 315: 주소로 바로 연 단지 페이지(검색 로봇이 주로 이 길로 온다)
   if (!p.startsWith('/api/') || p.startsWith('/api/_')) return null;
   if (p === '/api/complexes') return req.query.q ? '단지 검색' : '단지 목록';
   if (이용_정확[p]) return 이용_정확[p];
@@ -210,7 +211,39 @@ function 이용_이름(req) {
 
 function 이용_동작(req) {
   if (이용_안세는호스트.has(req.hostname)) return null;
+  if (운영자IP.has(진짜IP(req))) return null;          // 315: 운영자(사장님) 접속은 공개 수치에서 뺀다
   return 이용_이름(req);
+}
+
+/* ---------- 315: 누가 보냈나 — 갈래 (2026-10-22 사장님 "이용현황에 어떤 IP 들이 — 권장으로") ----------
+   ★ User-Agent 로만 가른다(스스로 밝힌 이름). 꾸밀 수 있는 칸이라 '사람' 은 "로봇이라고 밝히지 않은 것" 이라는 뜻이다.
+   ★ 한 곳에서만 가른다 — 실시간 세기 · 지난 기록 다시 세기 · root IP 목록이 다 이 함수를 쓴다. */
+function 갈래(ua) {
+  const u = String(ua || '');
+  if (!u) return '스크립트';
+  if (/Googlebot|Google-InspectionTool|GoogleOther|Yeti|NaverBot|Naver|bingbot|Daum|Yahoo! Slurp|DuckDuckBot|Applebot/i.test(u)) return '검색 로봇';
+  if (/ClaudeBot|Claude-|anthropic|GPTBot|OAI-SearchBot|ChatGPT|PerplexityBot|Bytespider|CCBot|Amazonbot|meta-externalagent|cohere/i.test(u)) return 'AI 수집 로봇';
+  if (/AhrefsBot|SemrushBot|MJ12bot|DotBot|PetalBot|BLEXBot|DataForSeoBot|SeznamBot/i.test(u)) return 'SEO 수집 로봇';
+  if (/bot|spider|crawl|facebookexternalhit|kakaotalk-scrap|Slackbot|Discordbot|TelegramBot|WhatsApp|preview/i.test(u)) return '기타 로봇·미리보기';
+  if (/^(python-|curl\/|Go-http|Wget|okhttp|Java\/|node-fetch|axios)|Downloader|HeadlessChrome/i.test(u)) return '스크립트';
+  if (/Chrome\/(7\d|8\d|9[0-9])\./.test(u) && !/Mobile/.test(u)) return '스캐너 추정';   // 몇 해 묵은 데스크톱 크롬 흉내 — 실측 싱가포르·일본·미국 데이터센터
+  return '사람';
+}
+/* 운영자 IP — root 로 로그인한 요청이 들어온 IP(계정이 root 하나라 그게 사장님). 표(ops.usage_owner_ip)와 메모리 둘 다 */
+const 운영자IP = new Set();
+async function 운영자IP읽기() {
+  try { const r = await (await getPool()).request().query('SELECT ip FROM ops.usage_owner_ip');
+        운영자IP.clear(); r.recordset.forEach(x => 운영자IP.add(x.ip)); }
+  catch (e) { console.error('[운영자IP] 못 읽었다 —', e.message); }
+}
+운영자IP읽기(); setInterval(운영자IP읽기, 10 * 60 * 1000).unref();
+function 운영자IP더하기(req, 근거) {
+  const ip = 진짜IP(req);
+  if (!ip || 운영자IP.has(ip) || 이용_안세는호스트.has(req.hostname)) return;
+  운영자IP.add(ip);
+  getPool().then(pool => pool.request().input('ip', sql.VarChar(45), ip).input('g', sql.NVarChar(100), 근거).query(`
+    IF NOT EXISTS (SELECT 1 FROM ops.usage_owner_ip WHERE ip = @ip) INSERT INTO ops.usage_owner_ip (ip, 근거) VALUES (@ip, @g);`))
+    .catch(e => console.error('[운영자IP] 못 넣었다 —', e.message));
 }
 /* 한국 시간으로 시(時)를 내린다. 서버 시간대에 기대지 않으려고 UTC 에 9시간을
    더해 UTC 칸을 읽는다 - 서버를 어디에 두든 같은 값이 나온다. */
@@ -231,7 +264,7 @@ app.use((req, res, next) => {
   const 동작 = 이용_동작(req);
   if (동작) res.on('finish', () => {
     if (res.statusCode >= 400) return;        /* 실패한 요청은 쓰임이 아니다 */
-    const 키 = 이용_시() + '\t' + 동작;
+    const 키 = 이용_시() + '\t' + 동작 + '\t' + 갈래(req.headers['user-agent']);
     이용_모음.set(키, (이용_모음.get(키) || 0) + 1);
   });
   next();
@@ -247,18 +280,19 @@ async function 이용_내보내기() {
     for (let i = 0; i < 담음.length; i += 200) {
       const 조각 = 담음.slice(i, i + 200), r = pool.request();
       const 값들 = 조각.map(([키, 수], j) => {
-        const [때, 동작] = 키.split('\t');
+        const [때, 동작, 갈] = 키.split('\t');
         r.input('t' + j, sql.VarChar(19), 때);
         r.input('a' + j, sql.NVarChar(40), 동작);
+        r.input('k' + j, sql.NVarChar(20), 갈 || '모름');
         r.input('c' + j, sql.Int, 수);
-        return '(CAST(@t' + j + ' AS DATETIME2(0)), @a' + j + ', @c' + j + ')';
+        return '(CAST(@t' + j + ' AS DATETIME2(0)), @a' + j + ', @k' + j + ', @c' + j + ')';
       }).join(',');
       await r.query(
         'MERGE ops.usage_hour AS d ' +
-        'USING (VALUES ' + 값들 + ') AS s(시각, 동작, 횟수) ' +
-        '   ON d.시각 = s.시각 AND d.동작 = s.동작 ' +
+        'USING (VALUES ' + 값들 + ') AS s(시각, 동작, 갈래, 횟수) ' +
+        '   ON d.시각 = s.시각 AND d.동작 = s.동작 AND d.갈래 = s.갈래 ' +
         ' WHEN MATCHED THEN UPDATE SET 횟수 = d.횟수 + s.횟수 ' +
-        ' WHEN NOT MATCHED THEN INSERT (시각, 동작, 횟수) VALUES (s.시각, s.동작, s.횟수);');
+        ' WHEN NOT MATCHED THEN INSERT (시각, 동작, 갈래, 횟수) VALUES (s.시각, s.동작, s.갈래, s.횟수);');
     }
   } catch (e) {
     /* ★ 못 넣었으면 **돌려놓는다.** 버리면 숫자가 조용히 줄어든다 */
@@ -418,31 +452,118 @@ app.get('/api/usage', async (req, res) => {
       .input('오늘', sql.VarChar(19), 오늘)
       .input('이레', sql.VarChar(19), 이레)
       .input('보름', sql.VarChar(19), 보름);
+    /* ★ 315: 맨 위 수 · 동작별 · 날짜별은 **사람**만(로봇이라고 밝히지 않은 것). 갈래별 표는 따로 — 로봇이 얼마나 오는지도 사실이다.
+       ★ 운영자(사장님) 접속은 세지 않는다(셀 때 뺀다 · 지난 것은 다시 셌다). 나라는 접속 기록(req_log)의 최근 7일 — IP 는 내보내지 않는다. */
     const 결 = await r.query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT 동작,
              오늘 = SUM(CASE WHEN 시각 >= CAST(@오늘 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
              이레 = SUM(CASE WHEN 시각 >= CAST(@이레 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
              전체 = SUM(횟수)
-        FROM ops.usage_hour
+        FROM ops.usage_hour WHERE 갈래 IN (N'사람', N'모름')
        GROUP BY 동작
        ORDER BY SUM(횟수) DESC;
 
       SELECT 날 = CONVERT(CHAR(10), 시각, 23), 횟수 = SUM(횟수)
         FROM ops.usage_hour
-       WHERE 시각 >= CAST(@보름 AS DATETIME2(0))
+       WHERE 시각 >= CAST(@보름 AS DATETIME2(0)) AND 갈래 IN (N'사람', N'모름')
        GROUP BY CONVERT(CHAR(10), 시각, 23)
-       ORDER BY 1;`);
-    const 동작 = 결.recordsets[0] || [], 일별 = 결.recordsets[1] || [];
+       ORDER BY 1;
+
+      SELECT 갈래,
+             오늘 = SUM(CASE WHEN 시각 >= CAST(@오늘 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
+             이레 = SUM(CASE WHEN 시각 >= CAST(@이레 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
+             전체 = SUM(횟수)
+        FROM ops.usage_hour GROUP BY 갈래 ORDER BY SUM(횟수) DESC;
+
+      SELECT 처음 = MIN(시각) FROM ops.usage_hour WHERE 갈래 <> N'모름';
+
+      SELECT l.ip, l.나라, l.ua, n = COUNT(*)
+        FROM ops.req_log l
+       WHERE l.때 >= CAST(@이레 AS DATETIME2(0)) AND l.내부 = 0 AND l.상태 < 400
+         AND NOT EXISTS (SELECT 1 FROM ops.usage_owner_ip o WHERE o.ip = l.ip)
+       GROUP BY l.ip, l.나라, l.ua;`);
+    const 동작 = 결.recordsets[0] || [], 일별 = 결.recordsets[1] || [], 갈래별 = 결.recordsets[2] || [];
+    /* 나라 × 갈래 — IP 수와 요청 수만(주소는 안 내보낸다) */
+    const 나라표 = new Map();
+    for (const x of 결.recordsets[4] || []) {
+      const k = (x.나라 || '??') + '\t' + 갈래(x.ua);
+      const v = 나라표.get(k) || { ip: new Set(), n: 0 }; v.ip.add(x.ip); v.n += x.n; 나라표.set(k, v);
+    }
+    const 나라 = [...나라표.entries()].map(([k, v]) => { const [나, 갈] = k.split('\t'); return { 나라: 나, 갈래: 갈, IP수: v.ip.size, 요청: v.n }; })
+      .sort((a, b) => b.요청 - a.요청).slice(0, 40);
     res.json({
       합계: {
         오늘: 동작.reduce((a, x) => a + x.오늘, 0),
         이레: 동작.reduce((a, x) => a + x.이레, 0),
         전체: 동작.reduce((a, x) => a + x.전체, 0),
       },
-      동작, 일별,
+      동작, 일별, 갈래별, 나라, 갈래시작: (결.recordsets[3][0] || {}).처음 || null,
     });
   } catch (e) { fail(res, e, 'usage'); }
+});
+
+/* 315 집안 전용 — 지난 이용현황을 접속 기록(req_log)으로 **다시 센다**(사장님 허락: 그 시간대 usage_hour 를 지우고 다시 넣는다).
+   ★ 같은 규칙: 바깥(내부=0) · GET · 상태 < 400 · 이용_이름 이 붙는 것 · 운영자 IP 빼기 · 갈래(UA).
+   ★ req_log 가 시작된 다음 시(時)부터만 — 그 앞은 IP·UA 가 없어 가를 수 없으니 그대로(갈래 '모름') 둔다. */
+app.get('/api/_usage_rebuild', async (req, res) => {
+  if (!집안에서(req)) return res.status(404).json({ error: 'not found' });
+  try {
+    const pool = await (require('./db').getLongPool());
+    await 운영자IP읽기();
+    const r = await pool.request().query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      DECLARE @시작 DATETIME2(0) = (SELECT DATEADD(HOUR, DATEDIFF(HOUR, 0, MIN(때)) + 1, 0) FROM ops.req_log);
+      SELECT 시작 = @시작;
+      SELECT 시 = DATEADD(HOUR, DATEDIFF(HOUR, 0, 때), 0), 경로, 질의, ip, ua, n = COUNT(*)
+        FROM ops.req_log
+       WHERE 때 >= @시작 AND 내부 = 0 AND 상태 < 400 AND (동작 IS NOT NULL OR 경로 LIKE '/c/%') AND ISNULL(동작, N'') <> N'로그인'
+       GROUP BY DATEADD(HOUR, DATEDIFF(HOUR, 0, 때), 0), 경로, 질의, ip, ua;`);
+    const 시작 = r.recordsets[0][0].시작;
+    const 모음 = new Map(); let 뺀 = 0;
+    for (const x of r.recordsets[1]) {
+      if (운영자IP.has(x.ip)) { 뺀 += x.n; continue; }
+      const 가짜 = { method: 'GET', path: x.경로, query: Object.fromEntries(new URLSearchParams(x.질의 || '')) };
+      const 동작 = 이용_이름(가짜); if (!동작) continue;
+      const 시 = new Date(x.시).toISOString().slice(0, 19);
+      const k = 시 + '\t' + 동작 + '\t' + 갈래(x.ua);
+      모음.set(k, (모음.get(k) || 0) + x.n);
+    }
+    const 줄 = [...모음.entries()].map(([k, n]) => { const [t, a, g] = k.split('\t'); return { t, a, g, n }; });
+    const tx = new sql.Transaction(pool); await tx.begin();
+    try {
+      await new sql.Request(tx).input('s', sql.DateTime2(0), 시작).query('DELETE FROM ops.usage_hour WHERE 시각 >= @s');
+      for (let i = 0; i < 줄.length; i += 300) {
+        const q = new sql.Request(tx);
+        const v = 줄.slice(i, i + 300).map((x, j) => {
+          q.input('t' + j, sql.VarChar(19), x.t); q.input('a' + j, sql.NVarChar(40), x.a);
+          q.input('g' + j, sql.NVarChar(20), x.g); q.input('n' + j, sql.Int, x.n);
+          return `(CAST(@t${j} AS DATETIME2(0)), @a${j}, @g${j}, @n${j})`; }).join(',');
+        await q.query(`INSERT INTO ops.usage_hour (시각, 동작, 갈래, 횟수) VALUES ${v}`);
+      }
+      await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
+    const 갈 = {}; for (const x of 줄) 갈[x.g] = (갈[x.g] || 0) + x.n;
+    res.json({ 시작, 줄: 줄.length, 운영자뺌: 뺀, 갈래: 갈 });
+  } catch (e) { fail(res, e, '_usage_rebuild'); }
+});
+
+/* 315 root 전용 — 접속 IP 목록(최근 7일). ★ 공개 화면에는 IP 를 내보내지 않는다 — 여기만, root 토큰일 때만 */
+app.get('/api/admin/ips', requireAuth, async (req, res) => {
+  if (!req.user || req.user.r !== 'root') return res.status(403).json({ error: '관리자만 볼 수 있습니다' });
+  try {
+    const r = await (await getPool()).request().query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT l.ip, 나라 = MAX(l.나라), ua = MAX(l.ua), n = COUNT(*),
+             단지 = SUM(CASE WHEN l.경로 LIKE '/c/%' THEN 1 ELSE 0 END), api = SUM(CASE WHEN l.경로 LIKE '/api/%' THEN 1 ELSE 0 END),
+             실패 = SUM(CASE WHEN l.상태 >= 400 THEN 1 ELSE 0 END),
+             첫 = MIN(l.때), 끝 = MAX(l.때), 운영자 = MAX(CASE WHEN o.ip IS NULL THEN 0 ELSE 1 END)
+        FROM ops.req_log l LEFT JOIN ops.usage_owner_ip o ON o.ip = l.ip
+       WHERE l.때 >= DATEADD(DAY, -7, SYSDATETIME()) AND l.내부 = 0
+       GROUP BY l.ip ORDER BY COUNT(*) DESC
+      OFFSET 0 ROWS FETCH NEXT 300 ROWS ONLY;`);
+    res.json({ 목록: r.recordset.map(x => ({ ...x, 갈래: 갈래(x.ua), ua: String(x.ua || '').slice(0, 160) })) });
+  } catch (e) { fail(res, e, 'admin-ips'); }
 });
 
 /* DB 오류를 그대로 500 으로 흘리지 않고, 무엇이 문제인지 알려준다 */
@@ -2094,6 +2215,7 @@ app.post('/api/login', async (req, res) => {
 app.get('/api/me', (req, res) => {
   const p = verifyToken((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
   if (!p) return res.status(401).json({ error: '로그인이 필요합니다' });
+  if (p.r === 'root') 운영자IP더하기(req, 'root 로그인 확인');
   res.json({ username: p.u, role: p.r, exp: p.exp });
 });
 
@@ -2104,6 +2226,7 @@ function requireAuth(req, res, next) {
   const p = verifyToken((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
   if (!p) return res.status(401).json({ error: '로그인이 필요합니다' });
   req.user = p;
+  if (p.r === 'root') 운영자IP더하기(req, 'root 로그인 요청');   // 315: 이용현황에서 운영자 접속을 뺀다
   next();
 }
 

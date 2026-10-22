@@ -314,11 +314,19 @@
       <h2 class="vtitle">이용현황</h2>
       <div id="usum" class="homestats" aria-live="polite"></div>
 
-      <h3 class="vh3">동작별</h3>
+      <p class="note sm" id="unote">위 숫자는 <b>사람</b>이 쓴 것만 셉니다(로봇이라고 밝힌 접속 · 운영자 접속은 뺍니다).</p>
+
+      <h3 class="vh3">누가 왔나 <span class="h3hint">사람 · 로봇 갈래별</span></h3>
+      <div id="ukinds" class="uacts"></div>
+
+      <h3 class="vh3">동작별 <span class="h3hint">사람</span></h3>
       <div id="uacts" class="uacts"></div>
 
-      <h3 class="vh3">날짜별 <span class="h3hint">최근 14일</span></h3>
+      <h3 class="vh3">날짜별 <span class="h3hint">사람 · 최근 14일</span></h3>
       <div id="udays" class="udays"></div>
+
+      <h3 class="vh3">나라별 <span class="h3hint">최근 7일 · 접속 주소 수와 요청 수 — 주소는 보이지 않습니다</span></h3>
+      <div id="unations" class="uacts"></div>
 
       <p class="note sm">단지 하나를 열면 실거래 · 주변 · 건축허가가 <b>한 번에</b> 나갑니다.
         서버가 하는 일이 하나라서 그 셋을 따로 셀 수 없고, <b>단지 상세</b> 하나로 셉니다.</p>

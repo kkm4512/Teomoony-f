@@ -1890,3 +1890,12 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 
 /* 지도 아닌 화면: .thbtn 의 margin-left:auto 를 내 정보 단추가 같이 받아 테마 단추가 가운데로 밀리던 것 */
 .app:not([data-view="map"]) .mebtn{margin-left:8px}
+
+/* 315 이용현황 갈래 · root 접속 IP 표 */
+#ukinds .nm s,#unations .nm s{display:block;text-decoration:none;color:var(--ink-3);font-size:11.5px;font-weight:400}
+#view-my .ipwrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;max-height:420px;overflow-y:auto}
+#view-my .iptab{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
+#view-my .iptab th,#view-my .iptab td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left}
+#view-my .iptab th{position:sticky;top:0;background:var(--surface-2);font-weight:600}
+#view-my .iptab td:nth-child(n+4):nth-child(-n+7){text-align:right;font-variant-numeric:tabular-nums}
+#view-my .iptab tr.own td{background:var(--mark-soft)}

@@ -5231,6 +5231,27 @@ async function 이용그리기() {
       </div>`).join('')
       : '<p class="note sm">아직 쌓인 기록이 없습니다.</p>';
 
+    /* 315: 갈래별(사람 · 검색 로봇 · AI 수집 로봇 …) — '모름' 은 갈래를 세기 전(접속 기록이 없던 때)의 것 */
+    const 갈풀이 = { '사람': '로봇이라고 밝히지 않은 접속', '검색 로봇': '구글 · 네이버 · 빙 등', 'AI 수집 로봇': 'Claude · GPT 등 AI 학습·검색용 수집기',
+      'SEO 수집 로봇': 'Ahrefs 등 검색 순위 분석용', '기타 로봇·미리보기': '메신저 링크 미리보기 등', '스크립트': '프로그램으로 직접 부른 것',
+      '스캐너 추정': '오래된 브라우저를 흉내 낸 데이터센터 접속', '모름': `갈래를 세기 전 기록${u.갈래시작 ? ` (${String(u.갈래시작).slice(0, 13).replace('T', ' ')}시 전)` : ''}` };
+    const 갈최대 = Math.max(1, ...(u.갈래별 || []).map(x => x.전체));
+    $('#ukinds').innerHTML = (u.갈래별 || []).map(x => `
+      <div class="ua">
+        <div class="nm">${esc(x.갈래)} <s>${esc(갈풀이[x.갈래] || '')}</s></div>
+        <div class="n">${fmt(x.전체)}<s>오늘 ${fmt(x.오늘)}</s></div>
+        <div class="bar"><i style="width:${(x.전체 / 갈최대 * 100).toFixed(1)}%"></i></div>
+      </div>`).join('') || '<p class="note sm">아직 없습니다.</p>';
+    const 나라이름 = { KR: '한국', US: '미국', FR: '프랑스', JP: '일본', SG: '싱가포르', NL: '네덜란드', PL: '폴란드', CA: '캐나다', DE: '독일',
+      GB: '영국', RU: '러시아', AU: '호주', TW: '대만', CN: '중국', IN: '인도', BE: '벨기에', BD: '방글라데시', ID: '인도네시아', '??': '모름' };
+    const 나최대 = Math.max(1, ...(u.나라 || []).map(x => x.요청));
+    $('#unations').innerHTML = (u.나라 || []).map(x => `
+      <div class="ua">
+        <div class="nm">${esc(나라이름[x.나라] || x.나라)} · ${esc(x.갈래)}</div>
+        <div class="n">${fmt(x.요청)}<s>주소 ${fmt(x.IP수)}곳</s></div>
+        <div class="bar"><i style="width:${(x.요청 / 나최대 * 100).toFixed(1)}%"></i></div>
+      </div>`).join('') || '<p class="note sm">아직 없습니다.</p>';
+
     /* 빠진 날은 0 으로 채운다 - 줄이 비면 '그날은 안 쌓였다' 가 아니라
        '그날이 없다' 로 읽힌다. 한국 날짜로 센다(9시간 더하고 UTC 칸을 읽는다). */
     const 표 = new Map((u.일별 || []).map(d => [String(d.날), d.횟수]));
@@ -6867,6 +6888,9 @@ async function 내정보그리기() {
         <span class="s">마지막 로그인 ${esc(날(나.last_login))} · 남긴 문의 ${fmt(d.수.문의)} · AI 질문 ${fmt(d.수.질문)}</span></span>
       <span class="r"><button type="button" class="ec-b" data-my-out>로그아웃</button></span></div></div>
 
+    ${나.role === 'root' ? `<section class="mysec"><h3>접속 IP <span class="muted">최근 7일 · root 만 보입니다 — 이용현황(공개)에는 나라별 수만</span>
+        <button type="button" class="ec-b" data-my-ips>열기</button></h3><div id="myips"></div></section>` : ''}
+
     <section class="mysec"><h3>알림함 ${d.안읽음 ? `<span class="pill use">안 읽음 ${fmt(d.안읽음)}</span>` : ''}
         <span class="muted">문의에 답이 달리면 여기로 옵니다</span>
         ${d.안읽음 ? '<button type="button" class="ec-b" data-my-readall>모두 읽음</button>' : ''}</h3>
@@ -6949,6 +6973,19 @@ document.addEventListener('click', async e => {
     보기전환('qna');   // 답변은 문의 탭에서 그 글과 같이 본다
     const qid = n.dataset.myInq;
     if (qid) setTimeout(() => { const a = document.querySelector(`#view-qna [data-qid="${qid}"]`); if (a) { a.scrollIntoView({ block: 'center' }); a.style.outline = '2px solid var(--mark)'; } }, 900);
+    return;
+  }
+  if (e.target.closest('[data-my-ips]')) {
+    const box = $('#myips'); box.innerHTML = '<p class="muted">불러오는 중…</p>';
+    try {
+      const r = await fetch('/api/admin/ips', { headers: { Authorization: 'Bearer ' + 토큰() } });
+      const d = await r.json(); if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+      box.innerHTML = `<div class="ipwrap"><table class="iptab"><thead><tr><th>IP</th><th>나라</th><th>갈래</th><th>요청</th><th>단지</th><th>API</th><th>실패</th><th>처음 ~ 끝</th></tr></thead><tbody>${
+        d.목록.map(x => `<tr${x.운영자 ? ' class="own"' : ''} title="${esc(x.ua)}"><td>${esc(x.ip)}${x.운영자 ? ' <b>나</b>' : ''}</td><td>${esc(x.나라 || '')}</td><td>${esc(x.갈래)}</td>
+          <td>${fmt(x.n)}</td><td>${fmt(x.단지)}</td><td>${fmt(x.api)}</td><td>${fmt(x.실패)}</td>
+          <td>${esc(String(x.첫).slice(5, 16).replace('T', ' '))} ~ ${esc(String(x.끝).slice(5, 16).replace('T', ' '))}</td></tr>`).join('')}</tbody></table></div>
+        <p class="note sm">'나' = root 로 로그인한 요청이 들어온 주소 — 이용현황에서 뺍니다. 줄에 올리면 브라우저 이름(UA)이 보입니다. 시각은 한국 시각.</p>`;
+    } catch (x) { box.innerHTML = `<p class="note sm">불러오지 못했습니다 — ${esc(x.message)}</p>`; }
     return;
   }
   const o = e.target.closest('[data-my-open]');
