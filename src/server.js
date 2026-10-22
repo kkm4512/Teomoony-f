@@ -1703,7 +1703,7 @@ app.get('/api/suggest', async (req, res) => {
           이름: (x.complex_nm === x.rep_plat_plc && x.실거래이름) ? x.실거래이름 : x.complex_nm,
           보조: [x.실거래이름 && !(x.complex_nm === x.rep_plat_plc) ? `실거래 '${x.실거래이름}'` : null, x.rep_plat_plc,
                  x.hhld_cnt_sum ? `${x.hhld_cnt_sum}세대` : null].filter(Boolean).join(' · '),
-          표: Number(x.폐쇄) ? `옛 대장 ${Number(x.폐쇄)}` : null,   /* 13:06 현재 건물 + 같은 필지 옛 대장 */
+          /* 13:11: 현재 단지에는 옛 대장 표를 달지 않는다(토지·허가 탭에만 기록) */
           동작: { 종류: '단지', id: x.complex_id } })) },
       { 종류: '폐쇄·말소 대장', 전체: 전체(rs[11] || []), 항목: (rs[11] || []).map(x => ({
           이름: x.이름,

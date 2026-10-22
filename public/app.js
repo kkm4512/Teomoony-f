@@ -1761,8 +1761,7 @@ function renderList() {
       <span class="mid">
         <span class="nm">${주소이름인가(c) && c.실거래이름
             ? esc(c.실거래이름)
-            : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}${
-            Number(c.폐쇄) ? ` <span class="sg-tag" title="현재 건물입니다. 같은 필지에 예전 건물의 닫힌(폐쇄·말소) 대장 ${Number(c.폐쇄)}묶음">옛 대장 ${Number(c.폐쇄)}</span>` : ''}</span>
+            : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}}</span>
         <span class="ad">${esc(c.rep_plat_plc || '')}</span>
       </span>
       <span class="d">${c.거리m != null
@@ -5888,8 +5887,8 @@ async function 폐쇄머리표() {
   const 지금 = document.querySelector('#detail [data-clpill]');
   if (!r || !지금 || 지금.dataset.clpill !== 키) return;
   const 묶 = r.묶음 || [];
-  닫힌자리자동(키, r);
-  if (!묶.length) return;
+  /* 13:11 사장님 "폐쇄됐다가 지금 라이브인 건 지도에 표시 안 하고, 히스토리로 토지·허가 탭에만 글자" — 지도 표·머리 표를 안 쓴다 */
+  return;
   const 최근 = 묶.find(s => s.shter_day) || 묶[0];
   지금.textContent = `옛 대장 ${fmt(묶.length)}`;
   지금.title = `이 단지는 지금 대장이 있는 현재 건물입니다.
@@ -5920,7 +5919,7 @@ async function 폐쇄채우기() {
       : '<p class="note muted">이 단지 필지에는 폐쇄·말소된 대장이 없습니다.</p>'}
     <p class="srcline"><b>이 단지는 지금 대장이 있는 현재 건물</b>이고, 아래는 같은 필지(PNU)에 있던 <b>예전 건물(또는 예전 서류)의 닫힌 대장</b>입니다 —
       땅이 같을 뿐 시기가 다릅니다. 같은 필지라는 것만 맞췄고, 지금 단지가 그 자리에 이어 지은 것이라고 단정하지는 않습니다.
-      줄에 올리면 지도에 그 필지가 표시됩니다.
+      기록(히스토리)으로만 남기고 지도에는 표시하지 않습니다.
       '폐쇄' 는 철거와 다를 수 있습니다(대장을 새로 만들며 닫은 경우). 묶음은 같은 필지 · 같은 말소일입니다.${
       Number(범.받은동) < Number(범.법정동) ? ` 이 단지 필지의 법정동 ${fmt(범.법정동)}곳 중 ${fmt(범.받은동)}곳만 받았습니다.` : ''}</p>`;
 }
