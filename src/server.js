@@ -1408,7 +1408,9 @@ app.get('/api/complexes', async (req, res) => {
                            AND NOT (v.complex_nm    LIKE @q
                                  OR v.rep_plat_plc  LIKE @q
                                  OR v.rep_road_addr LIKE @q)
-                          THEN am.부속지번 END
+                          THEN am.부속지번 END,
+          /* 2026-10-22: 이 단지 필지에 닫힌(폐쇄·말소) 대장이 있으면 센다 — 목록에 표를 단다 */
+          폐쇄 = (SELECT COUNT(*) FROM gold.complex_pnu cp JOIN gold.closed_site s ON s.pnu = cp.pnu WHERE cp.complex_id = v.complex_id)
         FROM gold.v_complex_map v
         LEFT JOIN 부속맞음 am ON am.complex_id = v.complex_id
         WHERE ((@q IS NULL AND @qid IS NULL)
@@ -1590,7 +1592,9 @@ app.get('/api/suggest', async (req, res) => {
         /* ★ OR 로 엮으면 거른 색인(ix_complex_nm_real)을 못 탄다 - 둘로 나눠 UNION ALL */
         SELECT TOP 5 c.complex_id, c.complex_nm, c.rep_plat_plc, c.hhld_cnt_sum, c.dong_cnt,
                c.centroid_lat, c.centroid_lng, 전체 = COUNT(*) OVER (),
-               실거래이름 = (SELECT al.실거래이름 FROM gold.complex_alias al WHERE al.complex_id = c.complex_id)
+               실거래이름 = (SELECT al.실거래이름 FROM gold.complex_alias al WHERE al.complex_id = c.complex_id),
+               /* 2026-10-22 사장님 "검색할 때 아무 표시가 없어 그냥 라이브 건축물 같아" — 이 단지 필지에 닫힌 대장이 있으면 센다 */
+               폐쇄 = (SELECT COUNT(*) FROM gold.closed_site s WHERE s.pnu IN (SELECT cp.pnu FROM gold.complex_pnu cp WHERE cp.complex_id = c.complex_id))
           FROM (SELECT complex_id, complex_nm, rep_plat_plc, hhld_cnt_sum, dong_cnt, centroid_lat, centroid_lng
                   FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND complex_nm LIKE @q AND merged_into IS NULL
                 UNION
@@ -1663,7 +1667,13 @@ app.get('/api/suggest', async (req, res) => {
                전체 = COUNT(*) OVER ()
           FROM silver.semas_store m
          WHERE @상가 = 1 AND m.is_current = 1 AND m.lat IS NOT NULL AND m.bizes_nm LIKE @p
-         ORDER BY CASE WHEN m.bizes_nm = @raw THEN 0 ELSE 1 END, m.bizes_nm, m.brch_nm;`);
+         ORDER BY CASE WHEN m.bizes_nm = @raw THEN 0 ELSE 1 END, m.bizes_nm, m.brch_nm;
+        /* 12 폐쇄·말소 대장 (2026-10-22) — 지금 단지와 섞지 않고 따로 묶음. 이름이 원문에 있는 것만 */
+        SELECT TOP 4 s.site_key, s.이름, s.폐쇄구분, s.shter_day, s.주용도, s.총괄세대, s.plat_plc, s.lat, s.lng, s.now_complex_id,
+               전체 = COUNT(*) OVER ()
+          FROM gold.closed_site s
+         WHERE s.이름 LIKE @q
+         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 ELSE 1 END, s.총괄세대 DESC, s.이름;`);
     const rs = r.recordsets;
     const 상자 = x => (x.minx == null ? null : [Number(x.minx), Number(x.miny), Number(x.maxx), Number(x.maxy)]);
     const 전체 = a => (a.length ? Number(a[0].전체) : 0);
@@ -1682,7 +1692,15 @@ app.get('/api/suggest', async (req, res) => {
           이름: (x.complex_nm === x.rep_plat_plc && x.실거래이름) ? x.실거래이름 : x.complex_nm,
           보조: [x.실거래이름 && !(x.complex_nm === x.rep_plat_plc) ? `실거래 '${x.실거래이름}'` : null, x.rep_plat_plc,
                  x.hhld_cnt_sum ? `${x.hhld_cnt_sum}세대` : null].filter(Boolean).join(' · '),
+          표: Number(x.폐쇄) ? `폐쇄·말소 대장 ${Number(x.폐쇄)}` : null,
           동작: { 종류: '단지', id: x.complex_id } })) },
+      { 종류: '폐쇄·말소 대장', 전체: 전체(rs[11] || []), 항목: (rs[11] || []).map(x => ({
+          이름: x.이름,
+          보조: [x.폐쇄구분 && x.shter_day ? `${x.폐쇄구분} ${x.shter_day.slice(0, 4)}.${x.shter_day.slice(4, 6)}.${x.shter_day.slice(6, 8)}` : x.폐쇄구분,
+                 x.주용도, x.총괄세대 ? `${x.총괄세대}세대(총괄표제부)` : null, x.plat_plc].filter(Boolean).join(' · '),
+          표: '닫힌 대장',
+          동작: { 종류: '폐쇄', key: x.site_key, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng),
+                  now: x.now_complex_id || null } })) },
       { 종류: '신축', 전체: 전체(rs[4]), 항목: rs[4].map(x => ({
           이름: x.kapt_name, 보조: [x.lawd_nm, x.세대 ? `${x.세대}세대` : null].filter(Boolean).join(' · '),
           동작: { 종류: '신축', code: x.kapt_code } })) },

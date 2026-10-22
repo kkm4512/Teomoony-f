@@ -1057,7 +1057,7 @@ function 제안그리기(j) {
       const k = 제안.항목.length;
       제안.항목.push({ ...it, 종류: g.종류 });
       html += `<div class="sg-it" role="option" id="sg-${k}" data-k="${k}" aria-selected="false">
-        <span class="sg-nm">${글자강조(it.이름, j.q)}</span>${it.보조 ? `<span class="sg-sub">${esc(it.보조)}</span>` : ''}</div>`;
+        <span class="sg-nm">${글자강조(it.이름, j.q)}${it.표 ? ` <span class="sg-tag">${esc(it.표)}</span>` : ''}</span>${it.보조 ? `<span class="sg-sub">${esc(it.보조)}</span>` : ''}</div>`;
     }
     html += '</div>';
   }
@@ -1125,6 +1125,11 @@ async function 제안고르기(it) {
         + ` · 경계 통계청 SGIS ${esc(p.year)}`, 6000);
     } catch (e) { 상자로(d.bbox); 오류토스트('행정동 경계', null, e); }
     return;
+  }
+  if (d.종류 === '폐쇄') {   /* 2026-10-22 닫힌 대장 — 필지가 지금도 있으면 그 자리 말풍선, 없으면 같은 필지 지금 단지, 둘 다 없으면 말로만 */
+    if (d.lat != null) { 보기전환('map'); map.setView([d.lat, d.lng], 18); setTimeout(() => 폐쇄핀열기(d.key, [d.lat, d.lng]), 350); return; }
+    if (d.now) { detailTab = 'land'; return select(d.now, false); }
+    return toast(`${esc(it.이름)} — 닫힌 대장입니다. 그 필지가 지금은 없어서(합필·분필) 지도 자리를 찍지 않았습니다 · ${esc(it.보조 || '')}`, 7000);
   }
   if (d.종류 === '정비' && d.sn) return selectRedevZone(d.sn);   // 2026-10-22 사장님: 누르면 바로 구역 상세로
   if (d.종류 === '정비') {
@@ -1759,7 +1764,8 @@ function renderList() {
       <span class="mid">
         <span class="nm">${주소이름인가(c) && c.실거래이름
             ? esc(c.실거래이름)
-            : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}</span>
+            : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}${
+            Number(c.폐쇄) ? ` <span class="sg-tag" title="이 단지 필지에 닫힌(폐쇄·말소) 건축물대장 ${Number(c.폐쇄)}묶음 — 단지 자체는 지금 대장이 있습니다">폐쇄·말소 대장 ${Number(c.폐쇄)}</span>` : ''}</span>
         <span class="ad">${esc(c.rep_plat_plc || '')}</span>
       </span>
       <span class="d">${c.거리m != null
@@ -4766,6 +4772,7 @@ function renderDetail(payload) {
   $('#detail').innerHTML = `
     ${shotsMarkup(c)}
     <span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '총괄표제부' : '단독'}</span>
+    <span class="pill cl" data-clpill="${esc(String(c.complex_id))}" role="button" tabindex="0" hidden></span>
     <h2>${esc(표시이름(c) || '(이름 없음)')}</h2>
     ${주소이름인가(c) && c.실거래이름
       ? `<p class="sub muted" title="건축물대장에 건물 이름이 없어, 이 지번으로 신고된 실거래가 가장 많이 쓴 이름을 보입니다.">이름은 실거래 신고 이름입니다 — 대장에는 이름이 없습니다</p>`
@@ -4783,6 +4790,7 @@ function renderDetail(payload) {
   분양채우기();            // 분양(청약홈) 칸 — 실거래 탭에 있을 때만 그릇이 있다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
+  폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
   어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
 
@@ -5849,18 +5857,44 @@ function 폐쇄묶음줄(s, 동들, 열기 = false) {
       ${동줄 ? `<ul class="lu">${동줄}</ul>` : '<p class="sm muted">이 묶음에는 총괄표제부만 있습니다(동별 표제부 없음).</p>'}
     </details>`;
 }
+async function 폐쇄받기(키) {
+  let r = 폐쇄캐시.get(키);
+  if (r) return r;
+  try {
+    const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/closed`);
+    if (!x.ok) return null;                               // 덤 — 못 받아도 상세는 그대로
+    r = await x.json(); 폐쇄캐시.set(키, r); return r;
+  } catch { return null; }
+}
+/* 2026-10-22 사장님 "검색할 때 아무 표시가 없으니 그냥 라이브 건축물 같아" — 머리에 표를 단다.
+   ★ 이 단지는 **지금 대장이 있는** 단지다. 표는 '같은 필지에 닫힌 대장도 있다' 는 뜻 — 문구로 가른다. */
+async function 폐쇄머리표() {
+  const el = document.querySelector('#detail [data-clpill]');
+  if (!el) return;
+  const 키 = el.dataset.clpill;
+  const r = await 폐쇄받기(키);
+  const 지금 = document.querySelector('#detail [data-clpill]');
+  if (!r || !지금 || 지금.dataset.clpill !== 키) return;
+  const 묶 = r.묶음 || [];
+  if (!묶.length) return;
+  const 최근 = 묶.find(s => s.shter_day) || 묶[0];
+  지금.textContent = `폐쇄·말소 대장 ${fmt(묶.length)}`;
+  지금.title = `이 단지 필지에 닫힌 건축물대장이 ${묶.length}묶음 있습니다(최근: ${최근.폐쇄구분 || ''} ${날8(최근.shter_day) || ''}).
+이 단지 자체는 지금 대장이 있는 현재 건물입니다. 누르면 토지 탭의 폐쇄·말소 대장 칸으로 갑니다.`;
+  지금.hidden = false;
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('#detail [data-clpill]');
+  if (!el) return;
+  detailTab = 'land'; renderDetail(lastDetail);
+  setTimeout(() => { const b = document.querySelector('#detail .clbox'); if (b) b.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 400);
+});
 async function 폐쇄채우기() {
   const box = document.querySelector('#detail .clbox');
   if (!box) return;
   const 키 = box.dataset.cl;
-  let r = 폐쇄캐시.get(키);
-  if (!r) {
-    try {
-      const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/closed`);
-      if (!x.ok) return;                                  // 덤 칸 — 못 받아도 상세는 그대로
-      r = await x.json(); 폐쇄캐시.set(키, r);
-    } catch { return; }
-  }
+  const r = await 폐쇄받기(키);
+  if (!r) return;
   const 지금 = document.querySelector('#detail .clbox');
   if (!지금 || 지금.dataset.cl !== 키) return;
   const 범 = r.범위 || {}, 묶 = r.묶음 || [];

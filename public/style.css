@@ -1720,3 +1720,7 @@ ul.lu li:last-child{border-bottom:0}
 #detail [data-lushape]{cursor:pointer}
 #detail [data-lushape]:hover{background:var(--surface-2)}
 #detail [data-lushape].on{background:var(--surface-2);box-shadow:inset 3px 0 0 #7c3aed}
+
+/* (2026-10-22) 닫힌 대장 표 — 지금 건물 표(단독·총괄표제부)와 색을 가른다 */
+.pill.cl{border-color:#7a6a58;color:#7a6a58;background:transparent;cursor:pointer;margin-left:4px}
+.sg-tag{display:inline-block;font:500 9.5px var(--mono);padding:0 5px;border-radius:3px;border:1px solid #7a6a58;color:#7a6a58;vertical-align:1px}
