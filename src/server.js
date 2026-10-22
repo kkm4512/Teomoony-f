@@ -2850,7 +2850,7 @@ app.get('/api/applyhome', async (req, res) => {
        ORDER BY m.house_manage_no, m.전용m2, m.model_no;
       /* ★ 2026-10-21 밤: 분양권·입주권 전매 실거래(SILV_TRADE, 291)를 **지번(PNU)으로** 붙인다 — 이름으로 잇지 않는다.
          지번 = 공고 지번(사업 전) ∪ 이어진 K-apt 지번 ∪ 이어진 단지 필지. 첫 모집공고일 **이후** 계약만(같은 땅의 옛 사업을 막는다).
-         취소된 거래는 빼고 몇 건인지만 센다. */
+         ★ 2026-10-22 12:16 사장님 "분양거래에서 취소 빼지마" — 취소된 거래도 **같이 보이고** 취소 표시와 해제일(원문)을 단다. */
       IF OBJECT_ID('tempdb..#ahpn') IS NOT NULL DROP TABLE #ahpn;
       SELECT DISTINCT x.pnu INTO #ahpn FROM (
         SELECT p.pnu FROM #ahkey a JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no
@@ -2862,10 +2862,11 @@ app.get('/api/applyhome', async (req, res) => {
       DECLARE @첫 CHAR(8) = (SELECT REPLACE(MIN(p.rcrit_pblanc_de), '-', '') FROM #ahkey a
           JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no);
       SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
-             구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn
+             구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn,
+             취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), '')
         FROM silver.rtms_trade t
        WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn)
-         AND ISNULL(t.is_canceled, 0) = 0 AND @첫 IS NOT NULL AND t.deal_ymd >= @첫
+         AND @첫 IS NOT NULL AND t.deal_ymd >= @첫
        ORDER BY t.deal_ymd DESC, t.trade_sk DESC;
       SELECT 건수 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 THEN 1 ELSE 0 END),
              취소 = SUM(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END),

@@ -1724,3 +1724,13 @@ ul.lu li:last-child{border-bottom:0}
 /* (2026-10-22) 닫힌 대장 표 — 지금 건물 표(단독·총괄표제부)와 색을 가른다 */
 .pill.cl{border-color:#7a6a58;color:#7a6a58;background:transparent;cursor:pointer;margin-left:4px}
 .sg-tag{display:inline-block;font:500 9.5px var(--mono);padding:0 5px;border-radius:3px;border:1px solid #7a6a58;color:#7a6a58;vertical-align:1px}
+
+/* (2026-10-22) 분양권 취소 거래 — 지우지 않고 흐리게 */
+table.mini tr.cxl td{color:var(--ink-3)}
+
+
+/* (2026-10-22) 청약 공고 정보 — 세로로 한 줄씩 */
+dl.ahkv{margin:6px 0 8px;display:block}
+dl.ahkv>div{display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px;font-size:12.5px;line-height:1.6}
+dl.ahkv dt{color:var(--ink-3)}
+dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans, inherit)}

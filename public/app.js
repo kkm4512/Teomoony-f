@@ -5441,9 +5441,16 @@ function 분양칸(공고) {
       return `<div class="ahrow">
         <div class="ah1"><b>${esc(p.house_nm || '')}</b>
           <span class="muted">${esc([p.공고종류 && p.공고종류 !== 'APT' ? 공고종류말[p.공고종류] : null, p.house_secd_nm, p.house_dtl_secd_nm, p.rent_secd_nm].filter(Boolean).join(' · '))}</span></div>
-        <div class="ah2">모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대${
-          p.cnstrct_entrps_nm ? ' · 시공 ' + esc(p.cnstrct_entrps_nm) : ''}${
-          p.pblanc_url ? ` · <a href="${esc(p.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>` : ''}</div>
+        <!-- 2026-10-22 사장님 "가로 말고 세로로" — 공고 정보를 한 줄씩 -->
+        <dl class="ahkv">${[
+          ['모집공고', 날(p.rcrit_pblanc_de)],
+          p.rcept_bgnde ? ['청약 접수', 날(p.rcept_bgnde)] : null,
+          p.przwner_de ? ['당첨자 발표', 날(p.przwner_de)] : null,
+          ['입주예정', 월(p.mvn_prearnge_ym)],
+          ['공급', `${fmt(p.tot_suply || 0)}세대`],
+          p.cnstrct_entrps_nm ? ['시공', esc(p.cnstrct_entrps_nm)] : null,
+          p.pblanc_url ? ['공고 원문', `<a href="${esc(p.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>`] : null,
+        ].filter(Boolean).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
         ${형.length ? `<table class="mini"><thead><tr><th>주택형(전용)</th><th class="n">공급</th><th class="n">최고 분양가</th><th class="n">전용 평당</th>${
             형.some(m => m.경쟁 != null) ? '<th class="n">경쟁률</th>' : ''}${형.some(m => m.가점최저 != null) ? '<th class="n">당첨가점</th>' : ''}</tr></thead><tbody>
           ${형.map(m => `<tr><td>${esc(m.house_ty || '')}${m.전용m2 ? `<span class="muted"> ${(Number(m.전용m2) / 3.3058).toFixed(1)}평</span>` : ''}</td>
@@ -5624,18 +5631,20 @@ function 분양권칸(r) {
   const 억 = v => { const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4);
     return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
   const 날 = d => d ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : '—';
-  return `<div class="lt2">분양권·입주권 거래 <b>${fmt(n.건수 || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(취소 ${fmt(n.취소)}건 뺌)</span>` : ''}</div>
+  /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
+  return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 취소 ${fmt(n.취소)}건)</span>` : ''}</div>
     <table class="mini"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
     ${t.slice(0, 15).map(x => {
-      const 기준 = x.구분 === '입' ? null : 최고(x.전용);
+      const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);
       const 차 = 기준 != null && x.거래원 ? Number(x.거래원) - 기준 : null;
-      return `<tr><td>${날(x.계약일)}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
+      return `<tr${Number(x.취소) ? ' class="cxl"' : ''}><td>${날(x.계약일)}${Number(x.취소) ? ` <span class="warnx" title="${esc(x.해제일 ? '해제(취소)일 ' + x.해제일 + ' — 원문' : '해제(취소) 신고된 거래')}">취소</span>` : ''}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
         <td class="n">${x.거래원 ? 억(Number(x.거래원)) : '—'}</td><td>${x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '<span class="muted">빈칸</span>'}</td>
         <td class="n">${차 == null ? '—' : (차 >= 0 ? '+' : '−') + 억(Math.abs(차))}</td></tr>`; }).join('')}
     </tbody></table>
     <p class="note sm">국토교통부 분양권전매 실거래가를 <b>지번</b>으로 이었습니다(공고 지번 · 준공 후 지번). 첫 모집공고일 이후 계약만 셉니다.
       '분양가와 차이' 는 같은 전용면적의 <b>최고</b> 분양가를 뺀 값이라 옵션·발코니 확장·층 차이는 들어 있지 않습니다.
-      <b>입주권</b>은 조합원 권리라 분양가와 견주지 않았고, 원본 구분 칸이 빈 거래는 빈칸으로 둡니다.${t.length > 15 ? ` 최근 15건만 보입니다.` : ''}</p>`;
+      <b>입주권</b>은 조합원 권리라 분양가와 견주지 않았고, 원본 구분 칸이 빈 거래는 빈칸으로 둡니다.
+      <b>취소</b>는 신고 후 해제(취소)된 거래입니다 — 지우지 않고 그대로 보이며, 분양가와 견주지 않습니다.${t.length > 15 ? ` 최근 15건만 보입니다.` : ''}</p>`;
 }
 
 /* ================= 폰 바텀시트 (2026-10-22, 사장님 "너 생각대로 ㄱㄱ") =================
