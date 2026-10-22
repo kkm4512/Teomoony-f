@@ -5864,6 +5864,7 @@ function 폐쇄묶음줄(s, 동들, 열기 = false) {
       ${꼬리 ? `<div class="muted sm">${esc(꼬리)}</div>` : ''}</summary>
       ${s.이름 && s.plat_plc ? `<p class="sm muted">${esc(s.plat_plc)}${s.new_plat_plc ? ` · ${esc(s.new_plat_plc)}` : ''}</p>` : ''}
       ${동줄 ? `<ul class="lu">${동줄}</ul>` : '<p class="sm muted">이 묶음에는 총괄표제부만 있습니다(동별 표제부 없음).</p>'}
+      ${s.lat != null ? `<button type="button" class="popbtn" data-clsite="${esc(s.site_key)}">지도에 ✕ 로 보기</button>` : '<p class="sm muted">그 필지가 지금은 없어(합필·분필) 지도에 자리를 찍지 않습니다.</p>'}
     </details>`;
 }
 async function 폐쇄받기(키) {
@@ -6000,6 +6001,34 @@ async function 공고상세(house, lat, lng) {
       ${lat != null ? '지도의 표는 <b>공고 지번</b> 자리입니다.' : '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'}</p>
     <div class="ahbox">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`;
 }
+/* 닫힌 대장 자리: ✕ 표 + 회색 점선 필지(필지의 **지금** 경계). 구역층을 같이 써서 한 번에 하나 */
+function 닫힌자리그리기(r, 표) {
+  const s = r.묶음 || {};
+  구역지우기();
+  if (!(r.필지 || s.lat != null)) return false;
+  const g = L.featureGroup().addTo(map);
+  if (r.필지) L.geoJSON(r.필지, { interactive: false,
+    style: { color: '#6b7280', weight: 2, dashArray: '4 4', fillColor: '#9ca3af', fillOpacity: 0.28 } }).addTo(g);
+  const c = s.lat != null ? [Number(s.lat), Number(s.lng)] : g.getBounds().getCenter();
+  L.marker(c, { interactive: false, zIndexOffset: 900, icon: L.divIcon({ className: 'clx-wrap', iconSize: [26, 26], iconAnchor: [13, 13],
+    html: '<div class="clx" aria-label="닫힌 대장">✕</div>' }) }).addTo(g);
+  구역층 = g; 구역지금 = 표;
+  지도맞추기(r.필지 ? g.getBounds() : c, 18);
+  return true;
+}
+/* 단지 상세 토지 탭의 닫힌 대장 줄 → 지도에 ✕ (12:36 사장님 "그대론데??" — 지금 단지는 그대로 두고, 닫힌 대장 자리만 따로 표시) */
+document.addEventListener('click', async e => {
+  const b = e.target.closest('#detail [data-clsite]');
+  if (!b) return;
+  e.preventDefault();
+  const 표 = 'clmap:' + b.dataset.clsite;
+  if (구역지금 === 표) { 구역지우기(); return; }
+  try {
+    const r = await fetch(`/api/closed/site/${encodeURIComponent(b.dataset.clsite)}`).then(x => x.json());
+    if (r.error) throw new Error(r.error);
+    if (닫힌자리그리기(r, 표)) { b.classList.add('on'); if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half'); }
+  } catch (x) { toast('닫힌 대장 자리를 불러오지 못했습니다', 2500); }
+});
 async function 폐쇄상세(key) {
   const 표 = 'cl:' + key;
   보기전환('map');
@@ -6009,17 +6038,7 @@ async function 폐쇄상세(key) {
   catch (e) { if (selectedRedev === 표) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '닫힌 대장을 불러오지 못했습니다 — ' + (e.message || e))}</p>`; return; }
   if (selectedRedev !== 표) return;
   const s = r.묶음;
-  구역지우기();
-  if (r.필지 || s.lat != null) {
-    const g = L.featureGroup().addTo(map);
-    if (r.필지) L.geoJSON(r.필지, { interactive: false, className: 'closedpoly',
-      style: { color: '#6b7280', weight: 2, dashArray: '4 4', fillColor: '#9ca3af', fillOpacity: 0.28 } }).addTo(g);
-    const c = s.lat != null ? [Number(s.lat), Number(s.lng)] : g.getBounds().getCenter();
-    L.marker(c, { interactive: false, icon: L.divIcon({ className: 'clx-wrap', iconSize: [26, 26], iconAnchor: [13, 13],
-      html: '<div class="clx" aria-label="닫힌 대장">✕</div>' }) }).addTo(g);
-    구역층 = g; 구역지금 = 표;
-    지도맞추기(r.필지 ? g.getBounds() : c, 18);
-  }
+  닫힌자리그리기(r, 표);
   box.innerHTML = `<span class="pill cl">폐쇄·말소 대장</span>
     <h2>${esc(s.이름 || s.plat_plc || s.pnu)}</h2>
     <p class="sub">${esc(s.plat_plc || '')}${s.new_plat_plc ? '<br>' + esc(s.new_plat_plc) : ''}</p>
@@ -6039,7 +6058,7 @@ let 구역층 = null, 구역지금 = null;
 function 구역지우기() {
   if (구역층) { try { map.removeLayer(구역층); } catch (e) {} }
   구역층 = null; 구역지금 = null;
-  document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on').forEach(el => el.classList.remove('on'));
+  document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on, #detail [data-clsite].on').forEach(el => el.classList.remove('on'));
 }
 /* 토지이용계획 줄 → 구역 경계 (2026-10-22). 정비구역과 같은 층 · 같은 토글(한 번에 하나) */
 async function 토지구역보이기(el) {
