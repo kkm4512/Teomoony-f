@@ -2172,6 +2172,7 @@ function closeDetail() {
   const box = $('#detail');
   if (box) { box.hidden = true; box.innerHTML = ''; }
   구역지우기();
+  닫힌자리지우기();
   selectedRedev = null;
   주소맞춤('/');
   시트(($('#q') && $('#q').value.trim()) ? 'half' : 'peek');
@@ -5882,10 +5883,12 @@ async function 폐쇄머리표() {
   const el = document.querySelector('#detail [data-clpill]');
   if (!el) return;
   const 키 = el.dataset.clpill;
+  if (닫힌자리단지 !== 키) 닫힌자리지우기();        // 다른 단지의 ✕ 가 남지 않게
   const r = await 폐쇄받기(키);
   const 지금 = document.querySelector('#detail [data-clpill]');
   if (!r || !지금 || 지금.dataset.clpill !== 키) return;
   const 묶 = r.묶음 || [];
+  닫힌자리자동(키, r);
   if (!묶.length) return;
   const 최근 = 묶.find(s => s.shter_day) || 묶[0];
   지금.textContent = `폐쇄·말소 대장 ${fmt(묶.length)}`;
@@ -6000,6 +6003,34 @@ async function 공고상세(house, lat, lng) {
     <p class="note sm">이 공고는 아직 <b>단지에 이어지지 않았습니다</b>(이름으로 잇지 않는다 — 지번·입주월·세대·거리로만).
       ${lat != null ? '지도의 표는 <b>공고 지번</b> 자리입니다.' : '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'}</p>
     <div class="ahbox">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`;
+}
+/* 12:44 사장님 "따로 버튼 안 눌러도 X 누른 것처럼" — 단지 상세를 열면 그 단지 필지 중 닫힌 대장이 있는 필지에 **저절로** ✕ + 회색 점선.
+   ★ 구역층(정비·토지이용 토글)과 따로 둔다 — 그걸 켜고 꺼도 이 표시는 남는다. 단지를 닫거나 바꾸면 지운다.
+   ★ 필지마다 ✕ 하나(같은 필지에 묶음이 여럿이면 말풍선에 다). 지금 단지 모양은 건드리지 않는다. */
+let 닫힌자리층 = null, 닫힌자리단지 = null;
+function 닫힌자리지우기() { if (닫힌자리층) { try { map.removeLayer(닫힌자리층); } catch (e) {} } 닫힌자리층 = null; 닫힌자리단지 = null; }
+function 닫힌자리자동(cid, r) {
+  if (닫힌자리단지 === cid && 닫힌자리층) return;          // 탭만 바꿨다 — 다시 그리지 않는다
+  닫힌자리지우기();
+  const 필 = (r.필지 || []).filter(x => x.geometry || x.lat != null);
+  if (!필.length || typeof map === 'undefined' || !map) return;
+  const g = L.featureGroup().addTo(map);
+  for (const f of 필) {
+    const 묶 = (r.묶음 || []).filter(s => s.pnu === f.pnu);
+    const 말 = 묶.map(s => `${s.폐쇄구분 || ''} ${날8(s.shter_day) || '날짜 없음'} · ${s.이름 || s.주용도 || '이름 없음'}`).join('\n');
+    if (f.geometry) L.geoJSON(f.geometry, { interactive: false,
+      style: { color: '#6b7280', weight: 1.5, dashArray: '4 4', fillColor: '#9ca3af', fillOpacity: 0.22 } }).addTo(g);
+    if (f.lat != null) {
+      const m = L.marker([Number(f.lat), Number(f.lng)], { zIndexOffset: 800, keyboard: false,
+        title: `닫힌 대장 ${묶.length}묶음 — 지금 건물이 아닙니다\n${말}`,
+        icon: L.divIcon({ className: 'clx-wrap', iconSize: [20, 20], iconAnchor: [10, 10],
+          html: `<div class="clx sm" aria-label="닫힌 대장">✕${묶.length > 1 ? `<i>${묶.length}</i>` : ''}</div>` }) });
+      m.on('click', () => { detailTab = 'land'; renderDetail(lastDetail);
+        setTimeout(() => { const b = document.querySelector('#detail .clbox'); if (b) b.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 400); });
+      m.addTo(g);
+    }
+  }
+  닫힌자리층 = g; 닫힌자리단지 = cid;
 }
 /* 닫힌 대장 자리: ✕ 표 + 회색 점선 필지(필지의 **지금** 경계). 구역층을 같이 써서 한 번에 하나 */
 function 닫힌자리그리기(r, 표) {

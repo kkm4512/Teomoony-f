@@ -1741,3 +1741,7 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 .clx-wrap{background:none;border:0}
 .clx{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
   background:#4b5563;color:#fff;font:700 15px/1 system-ui,sans-serif;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+
+.clx.sm{width:20px;height:20px;font-size:12px;border-width:1.5px;position:relative}
+.clx i{position:absolute;right:-7px;top:-7px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#fff;color:#4b5563;
+  font:600 9px/14px var(--mono);font-style:normal;text-align:center;box-shadow:0 0 0 1px #4b5563}

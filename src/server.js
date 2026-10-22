@@ -3122,8 +3122,13 @@ app.get('/api/complexes/:id/closed', async (req, res) => {
       SELECT site_key = s.site_key, ${폐쇄동칸}
         FROM gold.closed_site s JOIN #clp p ON p.pnu = s.pnu
         JOIN silver.bld_closed_title t ON t.pnu = s.pnu AND ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0')
-       ORDER BY s.site_key, t.dong_nm, t.mgm_shtreg_pk;`);
-    res.json({ 범위: r.recordsets[0][0] || {}, 묶음: r.recordsets[1], 동: r.recordsets[2] });
+       ORDER BY s.site_key, t.dong_nm, t.mgm_shtreg_pk;
+      /* 12:44 사장님 "버튼 안 눌러도 X 처럼" — 닫힌 대장이 있는 필지의 **지금** 경계(지도에 자동으로 회색 점선 + ✕) */
+      SELECT cp.pnu, cp.geojson, cp.centroid_lat, cp.centroid_lng
+        FROM silver.cadastral_parcel cp
+       WHERE cp.is_current = 1 AND cp.pnu IN (SELECT DISTINCT s.pnu FROM gold.closed_site s JOIN #clp p ON p.pnu = s.pnu);`);
+    res.json({ 범위: r.recordsets[0][0] || {}, 묶음: r.recordsets[1], 동: r.recordsets[2],
+               필지: (r.recordsets[3] || []).map(x => ({ pnu: x.pnu, lat: x.centroid_lat, lng: x.centroid_lng, geometry: x.geojson ? JSON.parse(x.geojson) : null })) });
   } catch (e) { fail(res, e, 'complex-closed'); }
 });
 
