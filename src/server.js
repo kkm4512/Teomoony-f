@@ -2883,6 +2883,72 @@ app.get('/api/applyhome/pins', async (req, res) => {
   } catch (e) { fail(res, e, 'applyhome-pins'); }
 });
 
+/* ===================== 폐쇄·말소 건축물대장 (2026-10-22, 사장님 "장위동,수색동 먼저해봐") =====================
+   출처: 공공데이터포털 15137093 건축HUB 폐쇄말소대장(ShtRgstHubService). deploy/sql/302.
+   ★ 현재 단지와 섞지 않는다(gold.closed_site 따로). '폐쇄' ≠ '철거' — 구분은 원문(말소·폐쇄·일부말소·일부폐쇄) 그대로 보인다.
+   ★ 지금 단지와는 **같은 필지(PNU)** 로만 — 이름으로 잇지 않는다. 같은 필지라고 '이어 지은 것' 이라는 뜻은 아니다. */
+const 폐쇄칸 = `s.site_key, s.pnu, s.shter_day, s.이름, s.이름출처, s.주용도, s.동수, s.총괄세대, s.사용승인일, s.폐쇄구분,
+                s.plat_plc, s.new_plat_plc, s.lat, s.lng, s.now_complex_id, now_nm = c.complex_nm`;
+const 폐쇄동칸 = `t.mgm_shtreg_pk, t.pnu, t.shter_day, t.shter_gb_nm, t.regstr_kind_nm, t.bld_nm, t.dong_nm, t.main_atch_gb_nm,
+                  t.main_purps_nm, t.etc_purps, t.strct_nm, t.hhld_cnt, t.fmly_cnt, t.ho_cnt, t.grnd_flr_cnt, t.ugrnd_flr_cnt,
+                  t.tot_area, t.plat_area, t.use_apr_day`;
+app.get('/api/closed/pins', async (req, res) => {
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (b.length !== 4 || b.some(v => !Number.isFinite(v))) return res.status(400).json({ error: 'bbox=서,남,동,북' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3]).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 800 ${폐쇄칸}
+        FROM gold.closed_site s LEFT JOIN gold.complex c ON c.complex_id = s.now_complex_id
+       WHERE s.lat BETWEEN @y0 AND @y1 AND s.lng BETWEEN @x0 AND @x1
+       ORDER BY s.동수 DESC, s.shter_day DESC;`);
+    res.json({ 핀: r.recordset });
+  } catch (e) { fail(res, e, 'closed-pins'); }
+});
+app.get('/api/closed/site/:key', async (req, res) => {
+  const k = String(req.params.key || '');
+  if (!/^\d{19}-\d{1,8}$/.test(k)) return res.status(400).json({ error: 'bad key' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('k', sql.VarChar(30), k).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT ${폐쇄칸} FROM gold.closed_site s LEFT JOIN gold.complex c ON c.complex_id = s.now_complex_id WHERE s.site_key = @k;
+      SELECT ${폐쇄동칸} FROM silver.bld_closed_title t JOIN gold.closed_site s ON s.site_key = @k
+       WHERE t.pnu = s.pnu AND ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') ORDER BY t.dong_nm, t.mgm_shtreg_pk;`);
+    const site = r.recordsets[0][0];
+    if (!site) return res.status(404).json({ error: 'not found' });
+    res.json({ 묶음: site, 동: r.recordsets[1] });
+  } catch (e) { fail(res, e, 'closed-site'); }
+});
+app.get('/api/complexes/:id/closed', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
+  if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
+  try {
+    const pool = await getPool();
+    if (!(await 단지있나(pool, id))) return res.status(404).json({ error: 'not found' });
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('tempdb..#clp') IS NOT NULL DROP TABLE #clp;
+      SELECT DISTINCT pnu INTO #clp FROM gold.complex_pnu WHERE complex_id = @id;
+      /* 받은 범위: 이 단지 필지의 법정동 중 폐쇄대장을 받은 곳(그 동에 폐쇄 표제부가 한 줄이라도 있으면 받은 것으로 본다) */
+      SELECT 법정동 = COUNT(DISTINCT LEFT(p.pnu, 10)),
+             받은동 = COUNT(DISTINCT CASE WHEN x.lw IS NOT NULL THEN LEFT(p.pnu, 10) END)
+        FROM #clp p
+        LEFT JOIN (SELECT DISTINCT lw = LEFT(pnu, 10) FROM silver.bld_closed_title WHERE pnu IS NOT NULL) x ON x.lw = LEFT(p.pnu, 10);
+      SELECT ${폐쇄칸} FROM gold.closed_site s JOIN #clp p ON p.pnu = s.pnu
+        LEFT JOIN gold.complex c ON c.complex_id = s.now_complex_id
+       ORDER BY s.shter_day DESC;
+      SELECT site_key = s.site_key, ${폐쇄동칸}
+        FROM gold.closed_site s JOIN #clp p ON p.pnu = s.pnu
+        JOIN silver.bld_closed_title t ON t.pnu = s.pnu AND ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0')
+       ORDER BY s.site_key, t.dong_nm, t.mgm_shtreg_pk;`);
+    res.json({ 범위: r.recordsets[0][0] || {}, 묶음: r.recordsets[1], 동: r.recordsets[2] });
+  } catch (e) { fail(res, e, 'complex-closed'); }
+});
+
 /* ===================== 동네 고르기 (2026-10-21 18:56, 사장님 "만들어봐 ㄱㄱ") =====================
    지도 왼쪽 위 창: [법정동|행정동] 탭 · [구 ▾] · [동 ▾]. 고르면 그 동으로 가고 테두리를 강조하고,
    그 동 안의 **다른 체계** 경계를 얇게 같이 그린다('법정동 장위동 = 행정동 장위1·2·3동').

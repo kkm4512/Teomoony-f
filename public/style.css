@@ -1708,3 +1708,10 @@ ul.lu li:last-child{border-bottom:0}
    #view-home 의 hidden 은 app.js 가 나중에 푼다. 그 사이에도 홈이 보이도록. */
 .app[data-view="home"] #view-home[hidden]{display:flex}
 .app[data-view="usage"] #view-usage[hidden]{display:flex}
+
+/* (2026-10-22) 폐쇄·말소 대장 칸 */
+.clsite{border-top:1px solid var(--line);padding:6px 0}
+.clsite summary{cursor:pointer;list-style:none}
+.clsite summary::-webkit-details-marker{display:none}
+.clgb{display:inline-block;font:500 10px var(--mono);padding:1px 5px;border-radius:3px;margin-right:4px;
+  background:var(--line);color:var(--ink-2)}

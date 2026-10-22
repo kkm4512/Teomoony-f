@@ -763,6 +763,7 @@ function initMap() {
   markerLayer = L.layerGroup().addTo(map);
   newbuildLayer = L.layerGroup().addTo(map);
   분양핀층 = L.layerGroup().addTo(map);
+  폐쇄핀층 = L.layerGroup().addTo(map);
 
   map.on('moveend', refreshMap);
   /* 줌만 바뀌어도 이름표를 다시 판단한다. loadOverlay 는 bbox 가 그대로면
@@ -881,6 +882,7 @@ let redevItems = [], selectedRedev = null;
 let selectedKapt = null;
 let newbuildLayer = null;
 let 분양핀층 = null, 분양핀켜짐 = true, 분양핀차례 = 0;
+let 폐쇄핀층 = null, 폐쇄핀켜짐 = false, 폐쇄핀차례 = 0;   /* 2026-10-22 폐쇄·말소 대장 — 점이 많아 기본은 끔 */
 
 function newbuildMarkerHtml(n, sel) {
   const amt = n.최고가 != null ? eok(n.최고가) : null;
@@ -1270,6 +1272,7 @@ function refreshMap() {
     지도알림('마커', '');              /* 법정동 보기에는 '단지 400개까지만' 이 해당 없다 */
     newbuildLayer.clearLayers();
     if (분양핀층) 분양핀층.clearLayers();
+    if (폐쇄핀층) 폐쇄핀층.clearLayers();
     loadLawds();
   } else {
     lawdLayer.clearLayers(); lawdMarkerLayer.clearLayers();
@@ -1277,6 +1280,7 @@ function refreshMap() {
     loadMarkers();
     loadNewbuilds();
     분양핀불러오기();
+    폐쇄핀불러오기();
   }
   if (showPolys) loadParcels(); else { parcelLayer.clearLayers(); buildingLayer.clearLayers(); }
   loadOverlay();
@@ -3651,6 +3655,7 @@ const SRC = {
             note: '연 2회 공시 · 직선거리' },
   applyhome: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 APT 분양정보)', note: '추정 연결' },
   applyhome0: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 분양정보) — 단지에 아직 안 이어진 공고' },
+  closed: { t: '폐쇄·말소 건축물대장', s: '국토교통부 건축HUB 폐쇄말소대장정보', note: '현재 대장과 따로' },
   landuse: { t: '토지이용규제정보', s: '국토교통부 토지이용규제정보서비스 (VWorld getLandUseAttr)' },
   hira: { t: '심평원 병원·약국', s: '건강보험심사평가원 병원정보서비스 · 약국정보서비스 (요양기관 신고)' },
   academy: { t: 'NEIS 학원·교습소', s: '교육부 NEIS 교육정보 개방포털 (교육청 등록 현황)',
@@ -4717,6 +4722,7 @@ function renderDetail(payload) {
         '이 법정동의 용도지역을 아직 받아오지 않았습니다 (현재 종로·성북·은평)')}</p>`}
 
     <div class="lubox" data-lu="${esc(String(c.complex_id))}"></div>
+    <div class="clbox" data-cl="${esc(String(c.complex_id))}"></div>
 
     ${sect('정비사업 구역', 'redev', rv.length ? ` ${fmt(rv.length)}` : '')}
     ${rv.length ? rv.map(r => `<div class="rdv"${r.sn ? ` data-redev="${esc(String(r.sn))}" role="button" tabindex="0" title="누르면 지도에 이 구역 경계를 그립니다 · 다시 누르면 지웁니다"` : ''}>
@@ -4773,6 +4779,7 @@ function renderDetail(payload) {
   document.querySelectorAll('#detail [data-redev]').forEach(el => el.classList.toggle('on', el.dataset.redev === 구역지금));
   분양채우기();            // 분양(청약홈) 칸 — 실거래 탭에 있을 때만 그릇이 있다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
+  폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
 
   $('#detail').querySelectorAll('.tab').forEach(b =>
@@ -5763,6 +5770,97 @@ document.addEventListener('click', e => {
   분양핀켜짐 = !분양핀켜짐;
   b.setAttribute('aria-pressed', String(분양핀켜짐));
   분양핀불러오기();
+});
+
+/* ---------------- 폐쇄·말소 건축물대장 (2026-10-22, 사장님 "폐쇄된 것들도 단지화" · "장위동,수색동 먼저") ----------------
+   ★ 현재 단지와 섞지 않는다 — 토지 탭의 따로 칸 · 지도의 따로 점(기본 끔).
+   ★ '폐쇄' 는 '철거' 가 아니다(대장을 새로 만들며 닫은 것도 있다 — 장위동 우방아파트는 '일부폐쇄' 인데 지금도 있다).
+     그래서 구분은 원문(말소 · 폐쇄 · 일부말소 · 일부폐쇄) 그대로 적는다.
+   ★ 묶음 = 같은 대지(PNU) + 같은 말소일. 세대수는 총괄표제부 원문만(동별 합을 만들지 않는다). */
+const 폐쇄캐시 = new Map();
+const 날8 = v => (v && /^\d{8}$/.test(v) ? `${v.slice(0, 4)}.${v.slice(4, 6)}.${v.slice(6, 8)}` : null);
+function 폐쇄묶음줄(s, 동들, 열기 = false) {
+  const 이름 = s.이름 || s.plat_plc || s.pnu;
+  const 꼬리 = [s.주용도, s.동수 ? `${fmt(s.동수)}동` : null, s.총괄세대 != null ? `총괄표제부 ${fmt(s.총괄세대)}세대` : null,
+              날8(s.사용승인일) ? `사용승인 ${날8(s.사용승인일)}` : null].filter(Boolean).join(' · ');
+  const 동줄 = (동들 || []).map(t => `<li><b>${esc(t.dong_nm || t.bld_nm || t.main_atch_gb_nm || '동')}</b>
+      <span class="muted">${esc([t.main_purps_nm, t.strct_nm, t.grnd_flr_cnt != null ? `지상 ${t.grnd_flr_cnt}층` : null,
+        t.ugrnd_flr_cnt != null ? `지하 ${t.ugrnd_flr_cnt}층` : null, t.hhld_cnt != null ? `${fmt(t.hhld_cnt)}세대` : null,
+        t.fmly_cnt != null ? `${fmt(t.fmly_cnt)}가구` : null, t.tot_area != null ? `연면적 ${fmt(Math.round(t.tot_area * 100) / 100)}㎡` : null,
+        날8(t.use_apr_day) ? `사용승인 ${날8(t.use_apr_day)}` : null, t.shter_gb_nm].filter(Boolean).join(' · '))}</span></li>`).join('');
+  return `<details class="clsite"${열기 ? ' open' : ''}><summary><span class="clgb">${esc(s.폐쇄구분 || '구분 없음')}</span>
+      <b>${esc(이름)}</b> <span class="muted">${esc(날8(s.shter_day) ? `${날8(s.shter_day)} ${s.폐쇄구분 || ''}` : '말소일 원문에 없음')}</span>
+      ${꼬리 ? `<div class="muted sm">${esc(꼬리)}</div>` : ''}</summary>
+      ${s.이름 && s.plat_plc ? `<p class="sm muted">${esc(s.plat_plc)}${s.new_plat_plc ? ` · ${esc(s.new_plat_plc)}` : ''}</p>` : ''}
+      ${동줄 ? `<ul class="lu">${동줄}</ul>` : '<p class="sm muted">이 묶음에는 총괄표제부만 있습니다(동별 표제부 없음).</p>'}
+    </details>`;
+}
+async function 폐쇄채우기() {
+  const box = document.querySelector('#detail .clbox');
+  if (!box) return;
+  const 키 = box.dataset.cl;
+  let r = 폐쇄캐시.get(키);
+  if (!r) {
+    try {
+      const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/closed`);
+      if (!x.ok) return;                                  // 덤 칸 — 못 받아도 상세는 그대로
+      r = await x.json(); 폐쇄캐시.set(키, r);
+    } catch { return; }
+  }
+  const 지금 = document.querySelector('#detail .clbox');
+  if (!지금 || 지금.dataset.cl !== 키) return;
+  const 범 = r.범위 || {}, 묶 = r.묶음 || [];
+  if (!Number(범.받은동)) { 지금.innerHTML = ''; return; }   // 이 동네는 아직 안 받음 — 칸을 안 보인다(받은 동: 장위동·수색동)
+  const 동 = {};
+  for (const t of (r.동 || [])) (동[t.site_key] ||= []).push(t);
+  지금.innerHTML = `${sect('이 필지의 폐쇄·말소 대장', 'closed', 묶.length ? ` ${fmt(묶.length)}` : '')}
+    ${묶.length ? 묶.map(s => 폐쇄묶음줄(s, 동[s.site_key])).join('')
+      : '<p class="note muted">이 단지 필지에는 폐쇄·말소된 대장이 없습니다.</p>'}
+    <p class="srcline">같은 필지(PNU)에 있던 <b>닫힌 대장</b>입니다 — 같은 필지라는 것만 맞췄고, 지금 단지가 그 자리에 이어 지은 것이라는 뜻은 아닙니다.
+      '폐쇄' 는 철거와 다를 수 있습니다(대장을 새로 만들며 닫은 경우). 묶음은 같은 필지 · 같은 말소일입니다.${
+      Number(범.받은동) < Number(범.법정동) ? ` 이 단지 필지의 법정동 ${fmt(범.법정동)}곳 중 ${fmt(범.받은동)}곳만 받았습니다.` : ''}</p>`;
+}
+async function 폐쇄핀불러오기() {
+  if (!폐쇄핀층) return;
+  if (!폐쇄핀켜짐 || map.getZoom() < LAWD_ZOOM) { 폐쇄핀층.clearLayers(); return; }
+  const 차례 = ++폐쇄핀차례;
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(n => n.toFixed(7)).join(',');
+  let r;
+  try { r = await fetch(`/api/closed/pins?bbox=${bbox}`).then(x => x.json()); } catch (e) { return; }
+  if (차례 !== 폐쇄핀차례 || r.error) return;
+  폐쇄핀층.clearLayers();
+  for (const s of (r.핀 || [])) {
+    const 큰 = s.동수 > 1 || (s.총괄세대 || 0) > 0;
+    const mk = L.circleMarker([s.lat, s.lng], { radius: 큰 ? 6 : 4, weight: 1.5, color: '#7a6a58', fillColor: '#b9a58c',
+      fillOpacity: 0.55, className: 'clpt' });
+    mk.bindTooltip(`${esc(s.이름 || s.plat_plc || '')} · ${esc(s.폐쇄구분 || '')} ${esc(날8(s.shter_day) || '')}`, { direction: 'top' });
+    mk.on('click', () => 폐쇄핀열기(s.site_key, [s.lat, s.lng]));
+    mk.addTo(폐쇄핀층);
+  }
+  if ((r.핀 || []).length >= 800) 지도알림('폐쇄', '폐쇄·말소 점은 한 화면에 800개까지만 보입니다 — 더 확대하세요');
+  else 지도알림('폐쇄', '');
+}
+async function 폐쇄핀열기(key, ll) {
+  const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
+    .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
+  try {
+    const r = await fetch(`/api/closed/site/${encodeURIComponent(key)}`).then(x => x.json());
+    if (r.error) throw new Error(r.error);
+    const s = r.묶음;
+    pop.setContent(`<div class="ahpopin">${sect('폐쇄·말소 대장', 'closed')}${폐쇄묶음줄(s, r.동, true)}
+      ${s.now_complex_id ? `<p class="sm">같은 필지의 지금 단지: <a href="/c/${s.now_complex_id}" data-goc="${s.now_complex_id}">${esc(s.now_nm || '단지')}</a>
+        <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}</div>`);
+  } catch (e) { pop.setContent(`<p class="note">불러오지 못했습니다 — ${esc(e.message || String(e))}</p>`); }
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-goc]');
+  if (a) { e.preventDefault(); map.closePopup(); select(Number(a.dataset.goc)); return; }
+  const b = e.target.closest('#clpins');
+  if (!b) return;
+  폐쇄핀켜짐 = !폐쇄핀켜짐;
+  b.setAttribute('aria-pressed', String(폐쇄핀켜짐));
+  폐쇄핀불러오기();
 });
 
 /* ---------------- 정비사업 구역 경계 (2026-10-22, 사장님 "재개발 부분을 누르면 그 폴리곤") ----------------
