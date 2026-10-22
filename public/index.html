@@ -24,6 +24,10 @@
 </head>
 <body>
 <div class="app">
+<!-- ★ (2026-10-22) 첫 화면이 지도로 잠깐 떴다가 홈으로 바뀌던 것: .app 에 data-view 가 app.js 가
+     다 받아진 뒤에야 붙어서, 그 전까지는 지도 화면 모양으로 그려졌다. 그리기 전에 여기서 붙인다.
+     규칙은 app.js 탭달기·주소로열기와 같다 — /c/숫자 는 지도, #home·#map·#usage 는 그대로, 나머지는 홈. -->
+<script>(function(){var a=document.currentScript.parentNode,h=(location.hash||'').slice(1),v=/^\/c\/\d+\/?$/.test(location.pathname)?'map':(h==='map'||h==='usage'||h==='home')?h:'home';a.dataset.view=v;})()</script>
   <!-- ★ 헤더는 패널 밖, 화면 전체 폭(2026-10-19). 왼쪽에 이름, 오른쪽에 적재 수치.
        수치를 지우지 않고 올린 이유: 이 화면에서 "무엇을 얼마나 받았는가" 를
        알려주는 **유일한 표시**다. 서초동을 '없다' 고 답할 뻔한 날 배웠다. -->

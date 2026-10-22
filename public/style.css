@@ -1703,3 +1703,8 @@ ul.lu li:last-child{border-bottom:0}
   background:var(--surface);color:var(--ink);cursor:pointer}
 .popbtn:hover{background:var(--surface-2)}
 #detail [data-goto]:hover,#detail [data-ahhouse]:hover{background:var(--surface-2)}
+
+/* (2026-10-22) 첫 그림에서 홈이 바로 보이게 — index.html 의 첫 스크립트가 data-view 만 먼저 붙이고,
+   #view-home 의 hidden 은 app.js 가 나중에 푼다. 그 사이에도 홈이 보이도록. */
+.app[data-view="home"] #view-home[hidden]{display:flex}
+.app[data-view="usage"] #view-usage[hidden]{display:flex}
