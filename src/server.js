@@ -2944,6 +2944,30 @@ app.get('/api/complexes/:id/landuse-shape', async (req, res) => {
        ORDER BY CASE WHEN p.저촉 = '1' THEN 0 ELSE 1 END, x.is_representative DESC;`);
     const 필지 = r.recordset;
     if (!필지.length) return res.json({ 레이어: layer, 구역: [], 말: '이 지정이 걸린 이 단지 필지를 찾지 못했습니다' });
+    /* ★ 304(2026-10-22): 그 시군구·레이어를 미리 다 받았으면(실패 조각 0) **DB 만** 본다 — 같은 규칙(그 필지와 닿고 이름이 같은 것).
+         안 받은 곳만 VWorld 를 그때 부른다. */
+    const d = await pool.request().input('id', sql.Int, id).input('code', sql.VarChar(20), code)
+      .input('layer', sql.VarChar(20), layer).input('nm', sql.NVarChar(200), nm.replace(/\s/g, '')).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('tempdb..#lup304') IS NOT NULL DROP TABLE #lup304;
+      SELECT TOP 3 cp.pnu, cp.geom INTO #lup304
+        FROM gold.complex_pnu x
+        JOIN silver.land_use_plan p ON p.pnu = x.pnu AND p.is_current = 1 AND p.코드 = @code
+        JOIN silver.cadastral_parcel cp ON cp.pnu = x.pnu AND cp.is_current = 1
+       WHERE x.complex_id = @id AND cp.geom IS NOT NULL
+       ORDER BY CASE WHEN p.저촉 = '1' THEN 0 ELSE 1 END, x.is_representative DESC;
+      SELECT 받음 = CASE WHEN EXISTS (SELECT 1 FROM silver.vworld_zone_done d JOIN #lup304 f ON d.sgg_cd = LEFT(f.pnu, 5)
+                                      WHERE d.layer = @layer AND d.빈조각 = 0) THEN 1 ELSE 0 END;
+      SELECT DISTINCT z.zone_sk, z.이름, z.dyear, z.dnum, z.sigg_name, z.geojson, z.마지막본시각
+        FROM silver.vworld_zone z JOIN #lup304 f ON z.geom.STIntersects(f.geom) = 1
+       WHERE z.layer = @layer AND z.is_current = 1 AND REPLACE(z.이름, ' ', '') = @nm;`);
+    if (d.recordsets[0][0] && d.recordsets[0][0].받음) {
+      const 구역 = d.recordsets[1].map(z => ({ type: 'Feature', geometry: JSON.parse(z.geojson),
+        properties: { 이름: z.이름, 고시연도: z.dyear || null, 고시번호: z.dnum || null, 시군구: z.sigg_name || null } }));
+      const 받은 = d.recordsets[1].map(z => z.마지막본시각).filter(Boolean).sort().pop() || null;
+      return res.json({ 레이어: layer, 출처: '미리 받음', 받은시각: 받은, 구역,
+                        말: 구역.length ? null : '같은 이름의 구역 경계를 찾지 못했습니다(레이어에 없거나 이름이 다르게 적힘)' });
+    }
     const 이름칸 = f => { const p = f.properties || {}; return p.uname || p.dgm_nm || p.zonename || ''; };
     const 같다 = s => String(s || '').replace(/\s/g, '') === nm.replace(/\s/g, '');
     const 본 = new Map(); let 실패 = null;
@@ -2965,7 +2989,7 @@ app.get('/api/complexes/:id/landuse-shape', async (req, res) => {
       return { type: 'Feature', geometry: f.geometry,
                properties: { 이름: 이름칸(f), 고시연도: p.dyear || null, 고시번호: p.dnum || null, 시군구: p.sigg_name || null } };
     });
-    res.json({ 레이어: layer, 구역, 말: 구역.length ? null : '같은 이름의 구역 경계를 찾지 못했습니다(레이어에 없거나 이름이 다르게 적힘)' });
+    res.json({ 레이어: layer, 출처: 'VWorld 바로', 구역, 말: 구역.length ? null : '같은 이름의 구역 경계를 찾지 못했습니다(레이어에 없거나 이름이 다르게 적힘)' });
   } catch (e) { fail(res, e, 'landuse-shape'); }
 });
 

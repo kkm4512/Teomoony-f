@@ -5948,7 +5948,7 @@ async function 토지구역보이기(el) {
     if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half');
     setTimeout(() => map.fitBounds(b, { paddingTopLeft: [24, (폰() ? top : 0) + 24], paddingBottomRight: [24, sh + 24], maxZoom: 17 }), 폰() ? 280 : 0);
     const 고시 = [...new Set(r.구역.map(f => f.properties.고시연도).filter(Boolean))].sort().join('·');
-    toast(`${nm} — 경계 ${r.구역.length}개${고시 ? ` · 고시 ${고시}년` : ''} (VWorld)`, 3000);
+    toast(`${nm} — 경계 ${r.구역.length}개${고시 ? ` · 고시 ${고시}년` : ''} (VWorld${r.출처 === '미리 받음' && r.받은시각 ? ` · ${String(r.받은시각).slice(0, 10)} 받음` : ''})`, 3000);
   } catch (e) { toast('구역 경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 2500); }
 }
 document.addEventListener('click', e => {
