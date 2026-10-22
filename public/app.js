@@ -5097,9 +5097,10 @@ async function boot() {
     const b = e.target.closest('.row');
     if (!b) return;
     if (b.dataset.redevzone) return;      // 정비구역 줄은 문서 단위 처리기(selectRedevZone)가 받는다
+    if (b.dataset.rkLawd || b.dataset.rkSgg) return;   // 지역 순위 줄은 문서 단위 처리기가 받는다 — 여기서 select(NaN) 로 /c/NaN 이 열렸다(문의 #1)
     if (b.dataset.lawd) selectLawd(b.dataset.lawd);
     else if (b.dataset.kapt) selectNewbuild(b.dataset.kapt, true);
-    else select(Number(b.dataset.id), true);
+    else if (b.dataset.id && Number.isInteger(Number(b.dataset.id))) select(Number(b.dataset.id), true);
   });
 
   탭달기();
