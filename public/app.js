@@ -2401,8 +2401,18 @@ function renderShots(c) {
      한 숫자로 뭉치면 그게 거짓말이다 - 개월 차이를 그대로 보여주고,
      많이 벌어진 건 눈에 띄게 표시한다.
    ★ 순수 전세(월세 0)와 중개거래만 쓴다 - 서버에서 이미 걸렀고, 화면도 그렇게 적는다. */
-function jeonseBlock(rows) {
-  if (!rows || !rows.length) return '';
+function jeonseBlock(rows0, area = null) {
+  if (!rows0 || !rows0.length) return '';
+  /* ★ 2026-10-22 사장님 "66㎡ 를 골랐는데 다른 평형들도 나와" — 위 평형 칩을 따른다.
+     전세가율은 전용 평형으로만 낸다 — 칩이 '건물 84㎡' 같은 다른 면적이면 맞는 줄이 없다. */
+  let rows = rows0;
+  if (area !== null) {
+    const [n, src] = String(area).split('|');
+    rows = src ? [] : rows0.filter(r => String(r.평형) === n);
+    if (!rows.length) return sect('전세가율', 'rtms', '', '매매·전세 각각의 최근 1건')
+      + `<p class="note">${gapCell('', 'NA', `${esc(src ? src + ' ' : '')}${esc(n)}㎡ 는 전세가율을 낼 수 없습니다 — 이 평형의 중개 매매와 순수 전세(월세 0)가 둘 다 있어야 합니다`)}
+         <span class="muted">(다른 ${fmt(rows0.length)}개 평형은 '전체' 에서 보입니다)</span></p>`;
+  }
   const far = rows.filter(r => Number(r.개월차) >= 12).length;
   return sect('전세가율', 'rtms', ` ${fmt(rows.length)}개 평형`,
               '매매·전세 각각의 최근 1건') + `
@@ -4406,7 +4416,7 @@ function renderDetail(payload) {
     ${areaPick}
     ${statTable(stats.filter(고른거래[1]), 거래탭)}
     ${tradeList(거래목록, 거래탭, tradeArea)}
-    ${jeonseBlock(jeonse)}
+    ${jeonseBlock(jeonse, tradeArea)}
     ${prcBlock(호공시, scope, 공시적재, dongs)}
     ${offsiteBlock(offsite)}
     ${stats.length ? '' : `<p class="note">${gapCell('', 'NA',
