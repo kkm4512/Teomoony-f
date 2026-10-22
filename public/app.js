@@ -5069,6 +5069,8 @@ const 홈칸 = [
   ['stores', '상권 점포'], ['schools', '학교'], ['kinders', '유치원'],
   ['academies', '학원'], ['subways', '지하철역'], ['bus_stops', '버스 정류장'],
   ['redev', '정비사업 구역'], ['zones', '용도지역'], ['land_char', '토지특성'],
+  /* 308: 서울·안양 · 지금 기준(국가데이터처 법정동 연계정보 최신 분기) */
+  ['bdongs', '법정동', '서울·안양'], ['hdongs', '행정동', '서울·안양'], ['hdongs_old', '바뀐 옛 행정동', '2013년 이후'],
 ];
 async function 홈그리기() {
   const el = $('#homestats');

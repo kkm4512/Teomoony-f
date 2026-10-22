@@ -555,7 +555,12 @@ app.get('/api/health', async (req, res) => {
           (SELECT COUNT(*) FROM silver.bld_expos_pubuse_area WHERE is_current=1)   AS exar,
           (SELECT COUNT(*) FROM silver.bld_expos          WHERE is_current=1)      AS expos,
           (SELECT COUNT(*) FROM silver.bld_hsprc          WHERE is_current=1)      AS hsprc,
-          (SELECT COUNT(*) FROM silver.bld_flr_outline    WHERE is_current=1)      AS flr`;
+          (SELECT COUNT(*) FROM silver.bld_flr_outline    WHERE is_current=1)      AS flr,
+          /* 308 (2026-10-22 사장님 "법정동·행정동 갯수도 홈에서"): **서울·안양 · 지금 있는 것**만(마스터 = 연계정보 최신 분기).
+             법정동은 리까지 센다(서울·안양엔 리가 없다). 바뀐 행정동 = 2013.07 이후 없어진 옛 행정동 수. */
+          (SELECT COUNT(*) FROM gold.region_bdong WHERE 현행 = 1 AND (LEFT(법정동코드, 2) = '11' OR LEFT(법정동코드, 4) = '4117') AND RIGHT(법정동코드, 5) <> '00000') AS bdongs,
+          (SELECT COUNT(*) FROM gold.region_hdong WHERE 현행 = 1 AND (LEFT(행정동코드, 2) = '11' OR LEFT(행정동코드, 4) = '4117') AND RIGHT(행정동코드, 5) <> '00000') AS hdongs,
+          (SELECT COUNT(*) FROM gold.region_hdong WHERE 현행 = 0 AND (LEFT(행정동코드, 2) = '11' OR LEFT(행정동코드, 4) = '4117') AND RIGHT(행정동코드, 5) <> '00000') AS hdongs_old`;
       const a = Date.now();
       const r1 = await pool.request().query(핵심);
       const 몸 = { ok: true, approx: true, ...r1.recordset[0] };
