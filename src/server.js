@@ -2710,26 +2710,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
         LEFT JOIN gold.applyhome_link l ON l.house_manage_no = p.house_manage_no AND l.pblanc_no = p.pblanc_no
        WHERE z.is_current = 1 AND z.present_sn = @sn
        ORDER BY p.rcrit_pblanc_de DESC;
-      /* ★ 2026-10-22 08:59 사장님 "여기 용적률·건폐율은 못 알아내나?" — 정비**계획** 용적률은 원본에 칸이 없다.
-         **지금 서 있는 건물**로 낸다: 필지의 절반 넘게 구역 안인 필지 위의 대장 건물(일반·표제부 — 총괄표제부는 겹치므로 뺀다).
-         분모는 **구역 면적**(도로·공원 포함) — 그래서 '구역 면적 대비' 라고 부른다. 대지 기준 용적률보다 낮게 나온다.
-         노후 = 사용승인 30년 넘은 건물(올해 - 30 이하). 사용승인일이 없는 건물은 따로 센다 — 모르는 것을 새것으로 치지 않는다. */
-      IF OBJECT_ID('tempdb..#zp') IS NOT NULL DROP TABLE #zp;
-      SELECT cp.pnu INTO #zp
-        FROM silver.redev_zone z
-        JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
-         AND cp.bbox_minx <= z.bbox_maxx AND cp.bbox_maxx >= z.bbox_minx AND cp.bbox_miny <= z.bbox_maxy AND cp.bbox_maxy >= z.bbox_miny
-         AND cp.geom.STIntersects(z.geom) = 1
-       WHERE z.is_current = 1 AND z.present_sn = @sn
-         AND cp.geom.STIntersection(z.geom).STArea() >= 0.5 * cp.geom.STArea();
-      SELECT 필지 = (SELECT COUNT(*) FROM #zp),
-             건물 = COUNT(*), 연면적 = SUM(b.tot_area), 용적연면적 = SUM(COALESCE(NULLIF(b.vl_rat_estm_tot_area, 0), b.tot_area)),
-             건축면적 = SUM(b.arch_area),
-             노후 = SUM(CASE WHEN TRY_CAST(LEFT(b.use_apr_day, 4) AS INT) <= YEAR(SYSDATETIME()) - 30 THEN 1 ELSE 0 END),
-             승인모름 = SUM(CASE WHEN TRY_CAST(LEFT(b.use_apr_day, 4) AS INT) IS NULL THEN 1 ELSE 0 END),
-             세대 = SUM(ISNULL(b.hhld_cnt, 0)),
-             최고층 = MAX(b.grnd_flr_cnt)
-        FROM #zp zp JOIN silver.bld_title b ON b.pnu = zp.pnu AND b.is_current = 1 AND ISNULL(b.regstr_kind_cd, '1') <> '3';`);
+      /* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물 기준 용적률·건폐율·노후도 셈을 뺐다 */`);
     const z = r.recordsets[0][0];
     if (!z) return res.status(404).json({ error: 'not found' });
     res.json({ 출처: '서울 열린데이터광장 정비사업 구역(OA-22712)',
@@ -2738,7 +2719,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       geometry: z.geojson ? JSON.parse(z.geojson) : null,
       /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
       단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
-      공고: r.recordsets[2], 건물: (r.recordsets[3] || [])[0] || null });
+      공고: r.recordsets[2] });
   } catch (e) { fail(res, e, 'redev-detail'); }
 });
 

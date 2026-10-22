@@ -5858,13 +5858,8 @@ function 구역상세(d) {
       ${row('추진단계', z.stage ? esc(z.stage) + (z.pct != null ? ` <span class="muted">· 진행 ${z.pct}%</span>` : '')
                                 : gapCell('', 'EMPTY', `추진단계 코드 ${esc(z.cd || '')} 가 코드표에 없습니다`))}
       ${row('구역 면적', z.area ? fmt(Math.round(z.area)) + ' ㎡' : '—')}
-      ${(() => { const b = d.건물; if (!b || !Number(b.건물)) return '';
-          const A = Number(z.area) || 0, 퍼 = v => (A ? (100 * Number(v || 0) / A).toFixed(0) + '%' : '—');
-          return row('지금 건물', `${fmt(b.건물)}동${b.최고층 ? ` <span class="muted">· 최고 ${fmt(b.최고층)}층</span>` : ''}`)
-            /* 2026-10-22 09:03 사장님 "그렇게 세면 안 돼" — 구역 면적으로 나눈 용적률·건폐율은 뺐다(정비계획 값과 다른 숫자라 헷갈린다) */
-            + row('노후도', `${(100 * Number(b.노후) / Math.max(1, Number(b.건물) - Number(b.승인모름 || 0))).toFixed(0)}% <span class="muted">· 30년 넘은 건물 ${fmt(b.노후)}동${
-                Number(b.승인모름) ? ` · 사용승인일 없는 ${fmt(b.승인모름)}동은 셈에서 뺌` : ''}</span>`); })()}
-      ${row('걸친 단지', `${fmt(단.length)}곳${세대합 ? ` <span class="muted">· 절반 넘게 들어간 공동주택 ${fmt(세대합)}세대(대장 세대수 — 단독주택은 0 으로 셈)</span>` : ''}`)}
+      ${/* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물·노후도도 뺐다. 원본에 있는 값만 보인다 */''}
+      ${row('걸친 단지', `${fmt(단.length)}곳`)}
     </dl>
     ${sect('구역 안 청약 공고', 'applyhome0', 공.length ? ` ${fmt(공.length)}` : '')}
     ${공.length ? `<ul class="lu">${공.map(p => `<li${p.이은단지 ? ` data-goto="${p.이은단지}"` : ` data-ahhouse="${esc(p.house_manage_no)}" data-lat="${p.lat}" data-lng="${p.lng}"`} style="cursor:pointer">
@@ -5877,8 +5872,7 @@ function 구역상세(d) {
       ${단.length > 60 ? `<p class="note sm">세대수 많은 순으로 60곳만 보입니다(전체 ${fmt(단.length)}곳).</p>` : ''}`
       : `<p class="note">${gapCell('', 'NA', '이 구역과 겹치는 대장 단지가 없습니다')}</p>`}
     <p class="srcline">구역 경계 · 단계: ${esc(d.출처 || '')}. 걸친 단지는 단지 필지와 구역 경계의 <b>겹친 넓이</b>로 셉니다(단지 상세의 '정비사업 구역' 칸과 같은 셈).
-      경계에 겨우 닿은(1% 미만) ${fmt(d.뺀단지 || 0)}곳은 뺐습니다. 세대 합은 구역 안에 절반 넘게 들어간 단지만 더했습니다.<br>
-      <b>지금 건물 · 노후도</b>는 필지의 절반 넘게 구역 안인 필지${d.건물 ? ` ${fmt(d.건물.필지)}개` : ''} 위의 건축물대장(총괄표제부 제외)으로 셉니다.
+      경계에 겨우 닿은(1% 미만) ${fmt(d.뺀단지 || 0)}곳은 뺐습니다. <br>
       정비계획의 용적률·건폐율·계획 세대수는 받은 자료에 없습니다.</p>`;
 }
 document.addEventListener('click', e => {
