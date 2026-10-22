@@ -2893,6 +2893,35 @@ app.get('/api/applyhome/pins', async (req, res) => {
   } catch (e) { fail(res, e, 'applyhome-pins'); }
 });
 
+/* ===================== 어린이집 (2026-10-22, 303) =====================
+   보육정보공개 cpmsapi030. 유치원과 같은 500m · 가까운 순. 인원은 원문 기준일 값이다(유형별 셈은 줄 수를 센 것). */
+app.get('/api/complexes/:id/childcare', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
+  if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
+  try {
+    const pool = await getPool();
+    if (!(await 단지있나(pool, id))) return res.status(404).json({ error: 'not found' });
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      DECLARE @g GEOGRAPHY = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
+                               WHERE complex_id = @id AND centroid_lat IS NOT NULL);
+      IF OBJECT_ID('tempdb..#cc303') IS NOT NULL DROP TABLE #cc303;
+      SELECT k.stcode, k.이름, k.유형, k.상태, k.정원, k.현원, k.반수, k.교직원수, k.통학차량, k.제공서비스, k.기준일, k.lat, k.lng,
+             m = CAST(k.geog.STDistance(@g) AS INT)
+        INTO #cc303
+        FROM silver.childcare k
+       WHERE @g IS NOT NULL AND k.is_current = 1 AND k.geog IS NOT NULL AND k.geog.STDistance(@g) <= 500;
+      SELECT TOP 10 * FROM #cc303 ORDER BY m;
+      SELECT 유형, n = COUNT(*) FROM #cc303 GROUP BY 유형 ORDER BY COUNT(*) DESC;
+      SELECT 받은곳 = (SELECT COUNT(*) FROM silver.childcare WHERE is_current = 1),
+             이시군구 = (SELECT COUNT(*) FROM silver.childcare k JOIN gold.complex c ON c.complex_id = @id
+                          WHERE k.is_current = 1 AND k.arcode = CASE WHEN LEFT(c.sigungu_cd, 4) = '4117' THEN '41170' ELSE c.sigungu_cd END),
+             좌표 = CASE WHEN @g IS NULL THEN 0 ELSE 1 END;`);
+    res.json({ 곳: r.recordsets[0], 유형: r.recordsets[1], 범위: r.recordsets[2][0] || {} });
+  } catch (e) { fail(res, e, 'complex-childcare'); }
+});
+
 /* ===================== 폐쇄·말소 건축물대장 (2026-10-22, 사장님 "장위동,수색동 먼저해봐") =====================
    출처: 공공데이터포털 15137093 건축HUB 폐쇄말소대장(ShtRgstHubService). deploy/sql/302.
    ★ 현재 단지와 섞지 않는다(gold.closed_site 따로). '폐쇄' ≠ '철거' — 구분은 원문(말소·폐쇄·일부말소·일부폐쇄) 그대로 보인다.
@@ -3187,13 +3216,15 @@ app.get('/api/complexes/:id/points', async (req, res) => {
        파 보니 뷰에 **좌표가 없었다**(239 로 더했다). 거름칸은 없다 — 유치원은
        갈래가 없고 반경 500m 안 전부를 한 번에 보여준다. */
     kinder: ['gold.v_complex_kinder',  'kinder_nm', null,           'establish'],
+    /* 2026-10-22 어린이집(303) — 거름칸 = 유형(국공립·민간·가정 …). 키를 비우면 500m 안 전부 */
+    childcare: ['gold.v_complex_childcare', 'cr_nm', 'cr_type', 'cr_type'],
     /* ★ 2026-10-21 19:48 사장님 "학원은 좌표가 없나? 갖다대도 안 찍혀서" — 뷰에 좌표(lat·lon)는 있었고
        **여기 등록이 없었다**(학원 칸을 만들 때 점 찍기를 안 붙였다). 분야 묶음(grp) · 이름(가까운 목록 한 줄) 두 가지 */
     academy:   ['gold.v_complex_academy', 'aca_nm', 'grp',    'le_crse_nm'],
     academynm: ['gold.v_complex_academy', 'aca_nm', 'aca_nm', 'le_crse_nm'],
   }[kind];
   if (!표 && kind !== 'busroute' && kind !== 'hira')
-    return res.status(400).json({ error: 'kind 는 scls|life|brand|subway|bus|school|kinder|academy|academynm|busroute|hira' });
+    return res.status(400).json({ error: 'kind 는 scls|life|brand|subway|bus|school|kinder|childcare|academy|academynm|busroute|hira' });
 
   const [뷰, 이름칸, 거름칸, 보조칸] = 표 || [];
   const 상한 = 400;

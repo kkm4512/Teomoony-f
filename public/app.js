@@ -3656,6 +3656,7 @@ const SRC = {
   applyhome: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 APT 분양정보)', note: '추정 연결' },
   applyhome0: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 분양정보) — 단지에 아직 안 이어진 공고' },
   closed: { t: '폐쇄·말소 건축물대장', s: '국토교통부 건축HUB 폐쇄말소대장정보', note: '현재 대장과 따로' },
+  childcare: { t: '보육정보공개', s: '교육부 · 한국사회보장정보원 (어린이집별 기본정보)', note: '기준일 값 · 직선거리' },
   landuse: { t: '토지이용규제정보', s: '국토교통부 토지이용규제정보서비스 (VWorld getLandUseAttr)' },
   hira: { t: '심평원 병원·약국', s: '건강보험심사평가원 병원정보서비스 · 약국정보서비스 (요양기관 신고)' },
   academy: { t: 'NEIS 학원·교습소', s: '교육부 NEIS 교육정보 개방포털 (교육청 등록 현황)',
@@ -4584,11 +4585,13 @@ function renderDetail(payload) {
         ★ 원아·학급 수의 <b>공시 시점은 유치원마다 다릅니다</b> — 그래서
         줄마다 적었습니다. 유치원은 <b>1년에 두 번만</b> 공시하고, 몇 해 전
         공시가 마지막인 곳도 있습니다. <b>오늘 숫자가 아닙니다.</b>
-        <b>어린이집은 아직 없습니다</b>(유치원만 적재했습니다).</p>`
+        어린이집은 아래 따로 적었습니다(출처가 다릅니다).</p>`
       : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
           kinderLoaded
             ? '이 단지 500m 안에 유치원이 없습니다'
             : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
+
+    <div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>
 
     ${학원칸(academy)}
 
@@ -4780,6 +4783,7 @@ function renderDetail(payload) {
   분양채우기();            // 분양(청약홈) 칸 — 실거래 탭에 있을 때만 그릇이 있다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
+  어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
 
   $('#detail').querySelectorAll('.tab').forEach(b =>
@@ -5772,6 +5776,50 @@ document.addEventListener('click', e => {
   b.setAttribute('aria-pressed', String(분양핀켜짐));
   분양핀불러오기();
 });
+
+/* ---------------- 어린이집 (2026-10-22, 사장님 "어린이집 운영 승인 됐엉") ----------------
+   주변 탭 유치원 밑에 그릇(.ccbox). 유치원과 같은 500m · 가까운 순 10곳. 인원은 원문 '기준일' 값. */
+const 어린이집캐시 = new Map();
+async function 어린이집채우기() {
+  const box = document.querySelector('#detail .ccbox');
+  if (!box) return;
+  const 키 = box.dataset.cc;
+  let r = 어린이집캐시.get(키);
+  if (!r) {
+    try {
+      const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/childcare`);
+      if (!x.ok) return;
+      r = await x.json(); 어린이집캐시.set(키, r);
+    } catch { return; }
+  }
+  const 지금 = document.querySelector('#detail .ccbox');
+  if (!지금 || 지금.dataset.cc !== 키) return;
+  const 곳 = r.곳 || [], 유 = r.유형 || [], 범 = r.범위 || {};
+  const 전체 = 유.reduce((t, x) => t + (Number(x.n) || 0), 0);
+  if (!Number(범.이시군구)) {
+    지금.innerHTML = `${sect('어린이집', 'childcare')}<p class="note">${gapCell('', 'SCOPE',
+      '이 시군구의 어린이집을 아직 받지 않았습니다 (지금은 서울 25구 · 안양) — 없는 게 아니라 안 받은 것입니다')}</p>`;
+    return;
+  }
+  const 기준 = 곳.map(x => x.기준일).filter(Boolean).sort().pop();
+  지금.innerHTML = `${sect('어린이집', 'childcare', 전체 ? ` ${fmt(전체)}` : '')}
+    ${곳.length ? `
+      <p class="sm">${유.map(x => `<span class="lt2" data-pt="childcare|${esc(x.유형 || '')}" data-pt-r="500">${esc(x.유형 || '—')} <b>${fmt(x.n)}</b></span>`).join(' · ')}</p>
+      <div class="schrow">${곳.map(x => `
+        <div class="scell" data-pt="childcare|${esc(x.유형 || '')}" data-pt-r="500">
+          <span class="sg">${esc(x.유형 || '—')}</span>
+          <b>${esc(x.이름 || '—')}</b>
+          <span class="sd">${fmt(x.m)}m${x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${x.현원 != null ? ` · 현원 ${fmt(x.현원)}` : ''}</span>
+          <span class="sn">${[x.반수 != null ? `${fmt(x.반수)}반` : null, x.통학차량 === '운영' ? '통학차량' : null,
+            x.상태 && x.상태 !== '정상' ? `<b>${esc(x.상태)}</b>` : null,
+            x.제공서비스 && x.제공서비스 !== '일반' ? esc(x.제공서비스) : null].filter(Boolean).join(' · ')}</span>
+        </div>`).join('')}</div>
+      <p class="note sm">500m 안 <b>${fmt(전체)}곳</b> 중 가까운 순 ${fmt(곳.length)}곳 — 단지 중심점에서 잰 <b>직선거리</b>입니다.
+        정원·현원은 보육정보공개의 <b>기준일${기준 ? ` ${esc(기준)}` : ''}</b> 값이고, 입소 대기나 배정은 이 자료에 없습니다.
+        유형 이름에 올리면 지도에 그 유형만 찍힙니다.</p>`
+      : `<p class="note">${gapCell('', Number(범.좌표) ? 'NA' : 'SCOPE',
+          Number(범.좌표) ? '이 단지 500m 안에 어린이집이 없습니다' : '단지 좌표가 없어 주변을 잴 수 없습니다')}</p>`}`;
+}
 
 /* ---------------- 폐쇄·말소 건축물대장 (2026-10-22, 사장님 "폐쇄된 것들도 단지화" · "장위동,수색동 먼저") ----------------
    ★ 현재 단지와 섞지 않는다 — 토지 탭의 따로 칸 · 지도의 따로 점(기본 끔).
