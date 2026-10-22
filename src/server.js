@@ -3887,18 +3887,16 @@ app.get('/api/applyhome', async (req, res) => {
            분양권·입주권은 이 단지 것이다(거래 때 아직 없던 새 건물 = 이 단지). 같은 필지에 거래 뒤 준공된 다른 단지가 있으면 누구 것인지
            모르므로 안 붙인다. 철거된 옛 단지는 '거래 뒤 준공' 이 아니라서 끼어들 수 없다(10/21 의 걱정 — 291). 이름은 보지 않는다. */
       /* 세대가 있는 단지만 — 같은 필지의 상가 단지(예: 원베일리 스퀘어)에 아파트 분양권이 붙던 것(시험에서 잡음) */
-      DECLARE @준공 CHAR(8) = (SELECT CASE WHEN LEN(oldest_use_apr) = 8 AND hhld_cnt_sum > 0 THEN oldest_use_apr END FROM gold.complex WHERE complex_id = @cid);
+      /* 316: 단지면 gold.fn_complex_silv(실거래 탭 매매 목록과 **같은 함수**) — 공고 지번 + 같은 필지 · 거래 뒤 준공.
+         K-apt · 관리번호(지도 핀)로 열면 예전 그대로 공고 지번만. */
       IF OBJECT_ID('tempdb..#sv') IS NOT NULL DROP TABLE #sv;
-      SELECT trade_sk = CAST(t.trade_sk AS BIGINT), 근거 = CAST(N'공고 지번' AS NVARCHAR(30)) INTO #sv FROM silver.rtms_trade t   -- CAST: 원표의 IDENTITY·글자 길이를 물려받지 않게
-       WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL AND t.deal_ymd >= @첫;
-      INSERT INTO #sv (trade_sk, 근거)
-      SELECT t.trade_sk, N'같은 필지 · 거래 뒤 준공' FROM silver.rtms_trade t
-       WHERE @cid IS NOT NULL AND @준공 IS NOT NULL AND t.trade_kind LIKE 'SILV%' AND t.deal_ymd <= @준공
-         AND t.match_pnu IN (SELECT cp.pnu FROM gold.complex_pnu cp WHERE cp.complex_id = @cid)
-         AND NOT EXISTS (SELECT 1 FROM #sv v WHERE v.trade_sk = t.trade_sk)
-         AND NOT EXISTS (SELECT 1 FROM gold.complex_pnu cp2 JOIN gold.complex c2 ON c2.complex_id = cp2.complex_id AND c2.is_active = 1
-                          WHERE cp2.pnu = t.match_pnu AND c2.complex_id <> @cid AND c2.hhld_cnt_sum > 0
-                            AND LEN(c2.oldest_use_apr) = 8 AND c2.oldest_use_apr >= t.deal_ymd);
+      CREATE TABLE #sv (trade_sk BIGINT NOT NULL, 근거 NVARCHAR(30) NOT NULL);
+      IF @cid IS NOT NULL
+        INSERT INTO #sv (trade_sk, 근거) SELECT trade_sk, 근거 FROM gold.fn_complex_silv(@cid);
+      ELSE
+        INSERT INTO #sv (trade_sk, 근거)
+        SELECT t.trade_sk, N'공고 지번' FROM silver.rtms_trade t
+         WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL AND t.deal_ymd >= @첫;
       SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
              구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn,
              취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
@@ -5727,19 +5725,31 @@ app.get('/api/complexes/:id', async (req, res) => {
                평형 = CAST(FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)) AS INT),
                층 = floor_no,
                직거래 = CASE WHEN dealing_gbn LIKE N'%직거래%' THEN 1 ELSE 0 END,
-               갱신 = CASE WHEN contract_type = N'갱신' THEN 1 ELSE 0 END
+               갱신 = CASE WHEN contract_type = N'갱신' THEN 1 ELSE 0 END,
+               분양권 = CAST(NULL AS NVARCHAR(10)), 근거 = CAST(NULL AS NVARCHAR(30))
           FROM silver.rtms_trade
          WHERE match_complex_id = @id
+        /* 316 (사장님 "매매 탭에 섞고 분양권임을 표시"): 준공 전 분양권·입주권 거래를 **매매 목록에만** 섞는다 — 날짜순이라 아래쪽(준공 전)에 온다.
+           집계(_q_tradeStats) · 전세가율 · 최고가에는 넣지 않는다(권리 거래라 완공 아파트 값과 다르다). 고르는 규칙은 gold.fn_complex_silv 한 곳. */
+        UNION ALL
+        SELECT t.deal_ymd, CAST(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END AS INT), CAST(0 AS BIT), 0,
+               t.deal_amount, NULL, NULL, t.exclu_use_ar, N'전용', CAST(FLOOR(t.exclu_use_ar) AS INT), t.floor_no,
+               CASE WHEN t.dealing_gbn LIKE N'%직거래%' THEN 1 ELSE 0 END, 0,
+               CASE WHEN t.ownership_gbn = N'입' THEN N'입주권' WHEN t.ownership_gbn = N'분' THEN N'분양권' ELSE N'분양권·입주권' END, s.근거
+          FROM gold.fn_complex_silv(@id) s JOIN silver.rtms_trade t ON t.trade_sk = s.trade_sk
       ), r AS (
-        SELECT *, 전체 = COUNT(*) OVER (PARTITION BY 전월세, 월세냐),
-               rn = ROW_NUMBER() OVER (PARTITION BY 전월세, 월세냐
+        /* 316: 분양권·입주권은 **따로 120건**까지 — 매매가 120건을 넘는 단지에서 준공 전 거래가 잘려 안 보이던 것.
+           '전체' 는 매매만(분모가 섞이지 않게) · 분양권수는 따로. 목록은 매매 다음에 분양권·입주권(준공 전이라 날짜도 그 뒤). */
+        SELECT *, 전체 = SUM(CASE WHEN 분양권 IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐),
+               분양권수 = SUM(CASE WHEN 분양권 IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐),
+               rn = ROW_NUMBER() OVER (PARTITION BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END
                                        ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
           FROM t
       )
       SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세,
-             면적, 면적칸, 평형, 층, 직거래, 갱신
+             면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수
         FROM r WHERE rn <= 120
-       ORDER BY 전월세, 월세냐, 날짜 DESC, ISNULL(금액, 보증금) DESC`);
+       ORDER BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END, 날짜 DESC, ISNULL(금액, 보증금) DESC`);
 
     /* 전세가율 (2026-10-19)
        ★ 새로 받은 데이터가 아니다 - 매매와 전월세를 **둘 다 갖고 있어서** 나온다.

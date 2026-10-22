@@ -1899,3 +1899,5 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 #view-my .iptab th{position:sticky;top:0;background:var(--surface-2);font-weight:600}
 #view-my .iptab td:nth-child(n+4):nth-child(-n+7){text-align:right;font-variant-numeric:tabular-nums}
 #view-my .iptab tr.own td{background:var(--mark-soft)}
+#detail .trow.silv .tx .muted{color:var(--mark)}
+#detail .trow.tsep{display:block;padding:6px 0 3px;border-top:1px dashed var(--line-2)} #detail .trow.tsep .tx{font-size:11.5px;color:var(--mark);font-weight:600}
