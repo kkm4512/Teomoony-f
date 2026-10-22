@@ -1722,6 +1722,7 @@ function renderAskRegion(d) {
       ${줄('기간', R.기간 ? `${날(R.기간.부터)} ~ ${날(R.기간.까지)} (계약일)` : '', '이번 달·지난달은 신고가 덜 끝나 뺐습니다')}
       ${줄('정렬', h.방향)}
       ${h.종목바꿈 ? `<div class="arow"><span class="ak">종목</span><b>아파트</b><i>${esc(h.종목바꿈)}</i></div>` : ''}
+      ${(h.조건안씀 || []).length ? `<div class="arow bad"><span class="ak">안 썼습니다</span><b>${h.조건안씀.map(esc).join(' · ')}</b><i>지역 순위에는 단지 조건을 걸지 않습니다</i></div>` : ''}
       ${(h.못알아들은말 || []).length ? `<div class="arow bad"><span class="ak">못 알아들음</span><b>${h.못알아들은말.map(esc).join(' · ')}</b><i>이 말은 <b>걸러지지 않았습니다</b></i></div>` : ''}
     </li>
     ${(R.덜받음 || []).length ? `<li class="asknote scope"><span class="gap">SCOPE</span>순위에서 뺀 곳 — 이 기간의 아파트 실거래를 <b>다 받지 않았습니다</b>:
@@ -1744,6 +1745,20 @@ document.addEventListener('click', e => {
   const g = e.target.closest('[data-rk-sgg]');
   if (g) { $('#q').value = `${g.dataset.rkSgg.replace(/^\S+\s/, '')} 제일 비싼 동네`; ask(); }
 });
+
+/* 312: 쓴 조건의 사실을 줄마다 — 조건을 걸었으면 왜 걸렸는지 보여야 한다 */
+function 조건사실(c, 켬) {
+  const m = v => `${Math.round(Number(v)).toLocaleString()}m`;
+  const 줄 = [];
+  if (c.면적최소 != null) 줄.push(`전용 ${Number(c.면적최소)}${Number(c.면적최대) !== Number(c.면적최소) ? '~' + Number(c.면적최대) : ''}㎡ · ${fmt(c.면적호수)}호`);
+  if (c.역거리 != null) 줄.push(`${c.역이름 || ''}역(${c.역노선 || ''}) ${m(c.역거리)}`);
+  if (c.학교거리 != null) 줄.push(`${c.학교이름 || ''} ${m(c.학교거리)}`);
+  if (c.정비이름) 줄.push(`${c.정비이름} · ${c.정비종류 || ''}${c.정비포함률 != null ? ` · 필지 ${c.정비포함률}% 걸침` : ''}`);
+  if (c.용도지역) 줄.push(`${c.용도지역}${c.용도비중 != null ? ` ${c.용도비중}%` : ''}`);
+  if (켬 && c.oldest_use_apr) 줄.push(`사용승인 ${String(c.oldest_use_apr).slice(0, 4)}`);
+  if (켬 && c.hhld_cnt_sum) 줄.push(`${fmt(c.hhld_cnt_sum)}세대`);
+  return 줄.length ? `<span class="s cx">${esc(줄.join(' · '))}</span>` : '';
+}
 
 function renderAsk(d) {
   if (d.종류 === '지역순위') return renderAskRegion(d);
@@ -1771,6 +1786,13 @@ function renderAsk(d) {
             h.종목 ? '' : '상가·토지도 섞입니다 — 종목을 함께 보여드립니다')}
       ${줄('정렬', h.정렬, h.정렬추정 ? '말에 없어서 기본값으로 했습니다' : '')}
       ${(h.필터 || []).map(f => 줄('조건', f)).join('')}
+      ${(h.조건 || []).map(f => 줄('조건', f)).join('')}
+      ${(h.모름 || []).length ? `
+        <div class="arow bad"><span class="ak">모름</span>
+          <b>${h.모름.map(x => `${esc(x.이름)} ${fmt(x.n)}곳`).join(' · ')}</b>
+          <i>값이 없어 조건을 따질 수 없는 단지 — 맞는 척 넣지 않고 뺐습니다</i></div>` : ''}
+      ${h.굳힌때 ? 줄('기준', new Date(h.굳힌때).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }),
+                    '면적·역·학교·정비·용도 요약을 센 때') : ''}
       ${줄('개수', `${h.개수}곳`)}
       ${(ai.보탠것 || []).length ? `
         <div class="arow ai"><span class="ak">AI 가 보탬</span>
@@ -1795,13 +1817,13 @@ function renderAsk(d) {
           <i>이 말은 <b>걸러지지 않았습니다</b></i></div>` : ''}
     </li>`) + `
     ${(d.알림 || []).map(a => `<li class="asknote ${
-       a.종류 === 'SCOPE' ? 'scope' : (a.종류 === '무관' ? 'off' : '')}">
-       <span class="gap">${esc(a.종류)}</span>${esc(a.말).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</li>`).join('')}
+       a.종류 === 'SCOPE' ? 'scope' : (a.종류 === '무관' || a.종류 === 'HINT' ? 'off' : '')}">
+       <span class="gap">${esc(a.종류 === 'HINT' ? '안내' : a.종류)}</span>${esc(a.말).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</li>`).join('')}
     ${d.items.map((c, i) => `
       <li><button class="row ask" data-id="${c.complex_id}">
         <span class="n"><span class="rk">${i + 1}</span>${esc(c.complex_nm || '(이름 없음)')}
           ${c.trade_kind ? `<span class="kd">${esc(KINDNM[c.trade_kind] || c.trade_kind)}</span>` : ''}
-          <span class="s">${esc(c.rep_plat_plc || '')}</span></span>
+          <span class="s">${esc(c.rep_plat_plc || '')}</span>${조건사실(c, (h.조건 || []).length > 0)}</span>
         <span class="d"><b>${억(c.max_amount)}</b><br>${
           c.unit_won ? 평당(c.unit_won) : `${fmt(c.hhld_cnt_sum)}세대`}</span>
       </button></li>`).join('')}`;
@@ -5246,6 +5268,11 @@ const 정책 = [
   { 키: '지역순위', 제목: 'AI 검색 · 지역 순위', 글: [
     'AI는 문장을 정해진 조건으로 바꾸기만 합니다. <b>숫자는 전부 DB가 셉니다.</b> 어떻게 알아들었는지를 먼저 보여 드리고, 못 알아들은 말은 그렇다고 적습니다.',
     '<b>지역 순위</b>: 아파트 매매 · 해제·직거래 뺌 · 평당가(거래가 ÷ 전용면적 × 3.3058)의 <b>중위값</b>. 기간은 지난 12개월에서 신고가 덜 끝난 이번 달·지난달을 뺀 것입니다. 거래 20건 미만인 곳과, 그 기간 실거래를 다 받지 않은 시군구는 순위에서 빼고 따로 적습니다.',
+    '<b>단지 조건</b>(2026-10-22): 평형 · 사용승인 · 세대수 · 역 거리 · 학교 거리 · 정비구역 · 용도지역. 숫자와 단위가 있는 말만 조건이 됩니다 — <b>\'역세권\' \'초품아\'처럼 정해진 기준이 없는 말은 조건으로 바꾸지 않고</b> 거리로 적어 달라고 말합니다. AI가 문장에 없는 숫자를 만들어 오면 버립니다.',
+    '<b>평형은 전용면적</b>입니다(\'30평대\' = 전용 99~132㎡). 공급면적은 원본에 주거공용·기타공용 구분이 없어 정확히 못 내므로 쓰지 않습니다. 대장의 주거 호(아파트·연립·다세대·오피스텔) 전유면적으로 보고, 대장 호가 없는 단지는 실거래 전용면적으로 봅니다. 평형을 걸면 실거래가도 그 면적의 거래로만 봅니다.',
+    '사용승인은 단지에서 <b>가장 먼저 승인된 동</b> 기준입니다. 역(1.5km 안)·학교(2km 안, 운영 중)는 단지 중심점에서 잰 <b>직선거리</b>로, 단지 상세의 지하철·학교 칸과 같은 값입니다. 학교 거리는 배정(학구도)이 아닙니다.',
+    '정비구역은 서울 정비사업 자료(서울만)에서 <b>필지가 구역과 겹친 단지</b>입니다 — 걸친 비율을 같이 적습니다. 서울 밖 단지는 \'안 걸침\'이 아니라 모름입니다. 재개발·재건축은 사업명에 그 말이 든 것만이고 재정비촉진(뉴타운)·모아타운·가로주택은 따로 고릅니다. 용도지역은 필지 면적 비중이 가장 큰 것입니다.',
+    '가격이 아닌 정렬(신축 순 · 역 가까운 순 …)에서 종목(아파트 등)은 <b>그 종류 매매가 있는 단지</b>로 가립니다 — 종류는 실거래로만 압니다. 조건을 따질 값이 없는 단지는 맞는 척 넣지 않고 \'모름\'으로 수만 적습니다.',
     'AI 검색 질문 문장은 기능 개선을 위해 로그인 아이디와 함께 보관합니다.',
   ] },
   { 키: 'kapt', 제목: 'K-apt 공동주택관리정보', 글: [

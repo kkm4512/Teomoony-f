@@ -734,7 +734,7 @@ app.get('/api/_apply', async (req, res) => {
   const 배치 = sqlText.split(/^\s*GO\s*$/mi).map(x => x.trim()).filter(Boolean);
   const out = [];
   try {
-    const pool = await getPool();
+    const pool = await require('./db').getLongPool();   // 2026-10-22: 집안 전용 — 한 배치 20분까지(db.js)
     for (let i = 0; i < 배치.length; i++) {
       const a = Date.now();
       try {
@@ -1973,11 +1973,16 @@ const SORTS = [
     words: ['구축', '오래된', '낡은'] },
   { key: 'trades', label: '거래 많은 순',             dir: 'desc',
     words: ['거래 많은', '거래가 많은', '활발'] },
+  /* 312 (2026-10-22): 역 가까운 순 — gold.complex_station(단지 상세 지하철 칸과 같은 거리, 1.5km 안만) */
+  { key: 'station', label: '역 가까운 순(1.5km 안)', dir: 'asc',
+    words: ['역 가까운', '역에서 가까운', '역이 가까운', '역과 가까운', '역 근처', '지하철 가까운', '지하철역 가까운', '역 바로 앞', '역 앞'] },
 ];
 /* 문장에 있어도 조건이 되지 않는, 그냥 말버릇. 못 알아들은 말로 보고하지 않는다. */
 const 군말 = new Set(['보여줘', '보여줘요', '알려줘', '찾아줘', '찾아', '보여',
   '줘', '해줘', '목록', '리스트', '어디', '뭐야', '실거래', '실거래가', '거래',
-  '단지', '곳', '것', '걸', '거', '좀', '그', '저', '요', '제일', '가장']);
+  '단지', '곳', '것', '걸', '거', '좀', '그', '저', '요', '제일', '가장',
+  /* 312: 조건 말 뒤에 붙는 꾸밈 — '2015년 이후 지은' 의 '지은' 은 조건이 아니다 */
+  '지은', '지어진', '준공', '사용승인', '입주', '근처', '주변', '있는', '걸친']);
 
 /* 거래 종목 — ★ 2026-10-19 첫 시험에서 **상가가 1위로 올라왔다.**
    "은평구 실거래 제일 높은" 에 효민아크로뷰 C&C미술학원 30.97억(42세대)이
@@ -2197,8 +2202,11 @@ async function lookupRegion(pool, cands) {
        ORDER BY CASE WHEN emd_nm IS NULL THEN 0 ELSE 1 END, lawd_cd`);
     const rows = lr.recordset;
     /* 동 이름이 **정확히** 맞으면 그 동. 아니면 시군구. (안양 -> 만안+동안) */
+    /* ★ 2026-10-22 QA: '성수동' 은 법정동이 성수동1가 · 성수동2가 로 나뉘어 **정확히 맞는 이름이 없었다** → 지역이 통째로 빠지고
+       서울 전체가 나갔다. 'X동' 이 'X동N가' 들로만 있으면 그 가들 전부로 본다(이름이 그 꼴로 **정확히** 맞을 때만). */
+    const 가맞음 = (c, nm) => c.v.endsWith('동') && new RegExp('^' + c.v.replace(/[.*+?^${}()|[\]\\]/g, '') + '\\d+가$').test(nm || '');
     const emdExact = rows.filter(r => r.수준 === 'emd'
-      && cands.some(c => c.v === r.emd_nm));
+      && cands.some(c => c.v === r.emd_nm || 가맞음(c, r.emd_nm)));
     let sggRows = rows.filter(r => r.수준 === 'sgg');
     /* ★ '안양시' 처럼 **하위 구가 따로 있는 시 레벨** 행은 뺀다(2026-10-19).
        '안양' 으로 찾으면 안양시 / 안양시만안구 / 안양시동안구 셋이 잡혀
@@ -2213,7 +2221,7 @@ async function lookupRegion(pool, cands) {
       이름: r.수준 === 'sgg' ? `${r.sido_nm} ${r.sgg_nm}` : r.full_nm }));
     for (const c of cands) {
       const hit = picked.some(r =>
-        (r.emd_nm && r.emd_nm === c.v) || (!r.emd_nm && r.sgg_nm && r.sgg_nm.includes(c.v)));
+        (r.emd_nm && (r.emd_nm === c.v || 가맞음(c, r.emd_nm))) || (!r.emd_nm && r.sgg_nm && r.sgg_nm.includes(c.v)));
       if (hit) 맞은말.push(c.t);
     }
     /* ★ 2026-10-22 ('서울에서 제일 비싼 지역' — '서울에서' 를 못 알아들음): **시도**도 찾는다.
@@ -2329,7 +2337,7 @@ async function 지역순위(pool, { 지역, 단위, 방향, 개수 }) {
 const LLM_PROMPT = `당신은 한국 부동산 '단지 검색'의 조건 번역기다.
 사용자 문장을 아래 JSON 으로만 바꿔라. 설명·인사·코드블록 없이 JSON 만 출력한다.
 
-{"무관함":false,"무관이유":null,"지역표현":[],"단지이름":null,"정렬":null,"종목":null,"최소억":null,"최대억":null,"개수":null,"못알아들은말":[]}
+{"무관함":false,"무관이유":null,"지역표현":[],"단지이름":null,"정렬":null,"종목":null,"최소억":null,"최대억":null,"개수":null,"조건말":[],"못알아들은말":[]}
 
 규칙
 - 지역표현: 문장에 나온 **행정구역** 이름을 **그대로** 넣는다. 코드로 바꾸지 마라.
@@ -2342,16 +2350,26 @@ const LLM_PROMPT = `당신은 한국 부동산 '단지 검색'의 조건 번역�
   ★ 이름 안에 '빌라' '아파트' '타운' 이 들어 있어도 그건 **이름의 일부**다.
     그것만 떼어 종목으로 쓰지 마라.
 - 정렬은 다음 중 하나이거나 null:
-  unit(전용면적당 단가 높은 순) amount(최고 실거래가 높은 순)
+  station(역 가까운 순) unit(전용면적당 단가 높은 순) amount(최고 실거래가 높은 순)
   amount_asc(최고 실거래가 낮은 순) hhld(세대수 많은 순)
   newest(최근 지은 순) oldest(오래된 순) trades(거래 많은 순)
 - 종목은 APT(아파트) RH(연립·다세대) OFFI(오피스텔) 중 하나이거나 null
 - 최소억/최대억은 **억 단위 숫자**. "20억 넘는"->최소억 20, "10억 이하"->최대억 10
 - 개수는 "10개"처럼 적혀 있을 때만. 없으면 null
 
+- 조건말: 문장 속 조건을 **아래 꼴 그대로** 다시 적는다. {"원문":"문장에 있던 말","바꿈":"아래 꼴"} 의 배열.
+    전용 N㎡ · 전용 N~M㎡ · N평대 · N평 이상 · N년 이후 · N년 이전 · N년대 · 사용승인 N년 이내 · N년 넘은 ·
+    N세대 이상 · N세대 이하 · 역 Nm 안 · N호선 역 Nm 안 · 초등학교 Nm 안 · 중학교 Nm 안 ·
+    재개발 구역 · 재건축 구역 · 재개발 구역 아닌 · 모아타운 · 가로주택 · 신속통합 · 제N종일반주거 · 준주거 · 일반상업
+  예) "지은 지 얼마 안 된" 은 숫자가 없으니 **만들지 마라**(못알아들은말).
+      "도보 5분" 은 거리가 아니다 - 만들지 마라.  "삼십평대" -> {"원문":"삼십평대","바꿈":"30평대"}
+      "천 세대 넘는" -> {"원문":"천 세대 넘는","바꿈":"1000세대 이상"}
+  ★ 문장에 **숫자(또는 숫자로 읽히는 한글 수)가 없으면** 거리·면적·연도·세대 조건을 만들지 마라.
+  ★ '역세권' '초품아' 는 정해진 기준이 없다 - 조건말로 바꾸지 말고 못알아들은말에 넣어라.
+
 ★ 우리가 가진 것은 이것뿐이다: 실거래가 · 세대수 · 사용승인일 · 거래건수 ·
-  거래종목 · 지역. 그 밖의 말(조용함, 학군, 역세권, 조망, 향, 주차, 브랜드,
-  투자가치, 신혼, 평형 등)은 **반드시 '못알아들은말' 에 그대로 넣어라.**
+  거래종목 · 지역 · 전용면적 · 역 거리 · 학교 거리 · 정비구역 · 용도지역. 그 밖의 말(조용함, 학군, 역세권, 초품아, 조망, 향, 주차, 브랜드,
+  투자가치, 신혼 등)은 **반드시 '못알아들은말' 에 그대로 넣어라.**
   억지로 정렬이나 조건으로 바꾸지 마라. 모르는 것은 모른다고 하는 게 맞다.
 
 ★★ 여기는 **부동산 단지를 찾는 검색창**이다. 아래에 해당하면
@@ -2444,6 +2462,9 @@ async function llmParse(q) {
       개수: num(d.개수, 1, 200),
       못알아들은말: Array.isArray(d.못알아들은말)
         ? d.못알아들은말.filter(x => typeof x === 'string' && x.trim()).slice(0, 8) : [],
+      조건말: Array.isArray(d.조건말)
+        ? d.조건말.filter(x => x && typeof x.원문 === 'string' && typeof x.바꿈 === 'string' && x.바꿈.trim())
+            .slice(0, 6).map(x => ({ 원문: x.원문.slice(0, 40), 바꿈: x.바꿈.slice(0, 40) })) : [],
       usage: j.usage || null,
     };
   } catch (e) { return null; } finally { clearTimeout(timer); }
@@ -2465,6 +2486,284 @@ function 질문남기기(req, q, 종류, 해석, 결과수) {
     .catch(e => console.error('[ask_log]', e.message));
 }
 
+/* ---------- AI 검색 조건 — 평형 · 연식 · 세대 · 역 · 학교 · 정비구역 · 용도지역 (312, 2026-10-22) ----------
+   사장님 "AI 검색 고도화 1번 — 가진 데이터로 조건 늘리기".
+   ★ 말은 **규칙으로** 읽는다(숫자·단위가 분명한 말뿐이다). LLM 은 흐린 말을 이 꼴로 **다시 적어** 주기만 하고,
+     그 글도 같은 규칙으로 읽는다 — 읽는 곳이 하나라야 두 길이 서로 다른 뜻을 만들지 않는다.
+   ★ 기준이 없는 말(역세권 · 초품아)은 조건으로 바꾸지 않는다. 정해진 거리가 없다 — 우리가 숫자를 고르면 그게 거짓 기준이 된다.
+     대신 "거리로 적어 달라"고 말한다.
+   ★ 값은 312 의 요약표에서 읽는다(뷰와 같은 식으로 센 것). 모르는 단지는 **맞는 척 넣지 않고** 몇 곳인지 따로 센다. */
+const 평 = 3.3058;
+const 조건노선 = ['신분당선', '경의중앙선', '분당선', '수인선', '우이신설선', '신림선', '경춘선', '서해선', '경강선',
+  '인천국제공항선', '김포도시철도', '에버라인', '경부선', '경인선', '경원선', '안산과천선', '일산선', '진접선'];
+const 노선별칭 = { '공항철도': '인천국제공항선', '김포골드라인': '김포도시철도', '수인분당선': null, '중앙선': '경의중앙선', '경의선': '경의중앙선' };
+const 정비말 = [
+  [/모아\s*타운/, "r.biz_nm = N'모아타운'", '모아타운'],
+  [/가로\s*주택/, "r.biz_nm LIKE N'가로주택%'", '가로주택정비'],
+  [/신속\s*통합|신통/, "r.biz_nm = N'신속통합기획'", '신속통합기획'],
+  [/소규모\s*재건축/, "r.biz_nm = N'소규모재건축사업'", '소규모재건축'],
+  [/소규모\s*재개발/, "r.biz_nm = N'소규모재개발사업'", '소규모재개발'],
+  [/재정비\s*촉진|뉴타운/, "r.biz_lclas_nm = N'재정비촉진사업'", '재정비촉진(뉴타운)'],
+  [/리모델링/, "r.biz_nm LIKE N'리모델링%'", '리모델링활성화'],
+  /* 사업 이름에 그 말이 든 것만 — 재정비촉진(뉴타운) · 모아타운 · 가로주택은 원본에서 따로 갈래라 섞지 않고 말로 적는다 */
+  [/재개발/, "r.biz_nm LIKE N'%재개발%'", '재개발(사업명에 재개발 — 재정비촉진·모아타운은 따로)'],
+  [/재건축/, "r.biz_nm LIKE N'%재건축%'", '재건축(사업명에 재건축 — 재정비촉진·가로주택은 따로)'],
+  [/정비\s*(구역|사업)/, "r.biz_lclas_nm IN (N'정비사업', N'소규모 정비사업', N'재정비촉진사업')", '정비구역(정비·소규모정비·재정비촉진)'],
+];
+const 용도말 = [
+  [/제?\s*([123])\s*종\s*(일반\s*)?주거/, m => `제${m[1]}종일반주거지역`],
+  [/제?\s*([12])\s*종\s*전용\s*주거/, m => `제${m[1]}종전용주거지역`],
+  [/준\s*주거/, () => '준주거지역'],
+  [/(일반|근린|중심|유통)\s*상업/, m => `${m[1]}상업지역`],
+  [/준\s*공업/, () => '준공업지역'],
+  [/자연\s*녹지/, () => '자연녹지지역'],
+];
+const 날8 = d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+const 거리m = (n, u) => /k|킬로/i.test(u) ? Number(n) * 1000 : Number(n);
+const 소수 = v => Math.round(v * 100) / 100;
+
+/* 한글 수 읽기(일~구 · 십 · 백 · 천 · 만) — '삼십평대' · '천 세대' · '십 년' */
+function 한글수(t) {
+  const 자리 = { 일: 1, 이: 2, 삼: 3, 사: 4, 오: 5, 육: 6, 칠: 7, 팔: 8, 구: 9 }, 단위 = { 십: 10, 백: 100, 천: 1000 };
+  let 합 = 0, 지금 = 0, 만 = 0, 본 = false;
+  for (const ch of t) {
+    if (자리[ch]) { 지금 = 자리[ch]; 본 = true; }
+    else if (단위[ch]) { 합 += (지금 || 1) * 단위[ch]; 지금 = 0; 본 = true; }
+    else if (ch === '만') { 만 += (합 + 지금 || 1) * 10000; 합 = 0; 지금 = 0; 본 = true; }
+    else return null;
+  }
+  return 본 ? 만 + 합 + 지금 : null;
+}
+function 숫자맞음(원문, 바꿈) {
+  const 있 = new Set((String(원문).match(/\d+(?:\.\d+)?/g) || []).map(Number));
+  for (const m of String(원문).match(/[일이삼사오육칠팔구십백천만]+/g) || []) { const n = 한글수(m); if (n != null) 있.add(n); }
+  const 쓴 = (String(바꿈).match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  return 쓴.every(n => 있.has(n));
+}
+
+function 조건읽기(q0) {
+  let q = ` ${String(q0 || '')} `;
+  const 조건 = {}, 쓴글 = [], 알림 = [];
+  /* 잡은 글은 지운다 — 같은 글자를 두 조건이 잡지 않게(뒤 정렬어 '세대' · '신축' 이 '500세대 이상' 을 또 잡지 않게) */
+  const 잡 = (re) => { const m = q.match(re); if (m) { 쓴글.push(m[0].trim()); q = q.replace(m[0], ' '); } return m; };
+  let m;
+
+  /* ---- 면적: 전용 기준 ----
+     ★ 공급면적(흔히 말하는 '34평')은 내지 않는다 — 원본에 주거공용 · 기타공용 구분이 없어 공급을 정확히 못 낸다(전용률 칸과 같은 이유).
+       그래서 'N평' 은 **전용 N평**(N × 3.3058㎡)으로 읽고 화면에 그렇게 적는다. */
+  const 면 = (lo, hi, 말) => { 조건.면적 = { lo: lo == null ? null : 소수(lo), hi: hi == null ? null : 소수(hi), 말 }; };
+  if ((m = 잡(/국민\s*평형|국평/))) 면(84, 85, '전용 84㎡대 (국민평형)');
+  else if ((m = 잡(/(\d+(?:\.\d+)?)\s*(평|㎡|m2|m²|제곱미터)?\s*[~∼\-]\s*(\d+(?:\.\d+)?)\s*(평(?!\s*당)|㎡(?!\s*당)|m2|m²|제곱미터|타입)/i))) {
+    const k = m[4].startsWith('평') ? 평 : 1; let a = Number(m[1]), b = Number(m[3]); if (a > b) [a, b] = [b, a];
+    면(a * k, (b + 1) * k, `전용 ${a}~${b}${k === 1 ? '㎡' : '평'}`);
+  }
+  else if ((m = 잡(/(\d{1,2})0\s*평\s*대/))) { const a = Number(m[1]) * 10; 면(a * 평, (a + 10) * 평, `전용 ${a}평대`); }
+  else if ((m = 잡(/(?<![\d.])(\d+(?:\.\d+)?)\s*(평(?!\s*당)|㎡(?!\s*당)|m2|m²|제곱미터|타입)\s*(이상|넘는|넘은|초과|이하|미만|아래|보다\s*큰|보다\s*작은)?/i))) {
+    const n = Number(m[1]); const k = m[2].startsWith('평') ? 평 : 1; const 단 = k === 1 ? '㎡' : '평'; const w = m[3] || '';
+    if (n > 0 && n < (k === 1 ? 1000 : 300)) {
+      if (/이상|넘|초과|큰/.test(w)) 면(n * k, null, `전용 ${n}${단} 이상`);
+      else if (/미만|작은/.test(w)) 면(null, n * k, `전용 ${n}${단} 미만`);
+      else if (/이하|아래/.test(w)) 면(null, n * k + 0.01, `전용 ${n}${단} 이하`);
+      else 면(n * k, (n + 1) * k, `전용 ${n}${단}대`);
+    }
+  }
+
+  /* ---- 연식: 사용승인(가장 먼저 승인된 동) ---- */
+  const 오늘 = new Date();
+  const 년전 = n => { const d = new Date(오늘); d.setFullYear(d.getFullYear() - n); return 날8(d); };
+  const 연 = (from, to, 말) => { 조건.연식 = { from, to, 말 }; };
+  if ((m = 잡(/(\d{4})\s*년\s*(이후|부터|이상|넘어서|뒤|후)/))) 연(`${m[1]}0101`, null, `${m[1]}년 이후 사용승인`);
+  else if ((m = 잡(/(\d{4})\s*년\s*(이전|전|까지|이하)/))) {
+    const 포함 = /까지|이하/.test(m[2]);
+    연(null, 포함 ? `${m[1]}1231` : `${Number(m[1]) - 1}1231`, `${m[1]}년 ${포함 ? '까지' : '이전'} 사용승인`);
+  }
+  else if ((m = 잡(/(?<!\d)(\d{4}|\d{2})\s*년대/))) {
+    let y = Number(m[1]); if (y < 100) y += y >= 50 ? 1900 : 2000; y -= y % 10;
+    연(`${y}0101`, `${y + 9}1231`, `${y}년대 사용승인`);
+  }
+  else if ((m = 잡(/(?<!\d)(\d{4})\s*년\s*(준공|사용승인|입주|식|에\s*지은)/))) 연(`${m[1]}0101`, `${m[1]}1231`, `${m[1]}년 사용승인`);
+  else if ((m = 잡(/(?<!(최근|지난)\s*)(?<!\d)(\d{1,2})\s*년\s*(이내|안쪽|미만|안\s*된|안\s*넘은|이하|안(?=\s|$))/))) {
+    const n = Number(m[2]); 연(년전(n), null, `사용승인 ${n}년 이내`);
+  }
+  else if ((m = 잡(/(?<!\d)(\d{1,2})\s*년\s*(이상|넘은|넘는|초과|이상\s*된|된|차)/))) {
+    const n = Number(m[1]); 연(null, 년전(n), `사용승인 ${n}년 넘음`);
+  }
+
+  /* ---- 세대수 ---- */
+  if ((m = 잡(/(\d[\d,]*|\d*\s*천)\s*세대\s*(이상|넘는|넘은|초과|이하|미만|아래|정도|안팎)?/))) {
+    let s = m[1].replace(/[,\s]/g, ''); let n = s.endsWith('천') ? (Number(s.slice(0, -1) || 1) * 1000) : Number(s);
+    const w = m[2] || '';
+    if (n > 0) {
+      if (/이하|미만|아래/.test(w)) 조건.세대 = { lo: null, hi: /미만/.test(w) ? n - 1 : n, 말: `${n.toLocaleString()}세대 ${/미만/.test(w) ? '미만' : '이하'}` };
+      else 조건.세대 = { lo: /초과/.test(w) ? n + 1 : n, hi: null,
+        말: `${n.toLocaleString()}세대 ${/초과/.test(w) ? '초과' : '이상'}${w ? '' : ' (말에 이상·이하가 없어 이상으로 봤습니다)'}` };
+    }
+  }
+
+  /* ---- 역 ---- */
+  let 노선 = null;
+  if ((m = 잡(/(?<!(부산|대구|인천|광주|대전)[^\s]*\s*)(?<!\d)([1-9])\s*호선/))) 노선 = { 종류: '번호', 값: `${m[2]}호선` };
+  else {
+    for (const [별, 진] of Object.entries(노선별칭)) if (q.includes(별)) {
+      if (!진) { 알림.push({ 종류: 'HINT', 말: `'${별}' 은 원본에서 분당선 · 수인선으로 나뉘어 있습니다 — 둘 중 하나로 적어 주세요. 이번엔 노선을 쓰지 않았습니다` }); 잡(new RegExp(별)); }
+      else { 잡(new RegExp(별)); 노선 = { 종류: '이름', 값: 진 }; }
+      break;
+    }
+    if (!노선) for (const n of 조건노선) if (q.includes(n)) { 잡(new RegExp(n)); 노선 = { 종류: '이름', 값: n }; break; }
+  }
+  const 역거리re = [/(역|지하철|전철|정거장)\s*(까지|에서|으로부터|부터|과|와)?\s*(걸어서|직선)?\s*(\d+(?:\.\d+)?)\s*(m(?![2²])|미터|km|킬로(?:미터)?)\s*(안|이내|내|이하|안쪽|거리)?/i,
+                  /(\d+(?:\.\d+)?)\s*(m(?![2²])|미터|km|킬로(?:미터)?)\s*(안|이내|내|이하|안쪽)\s*(에|의)?\s*(있는\s*)?(역|지하철|전철)/i];
+  let 역m = null;
+  if ((m = 잡(역거리re[0]))) 역m = 거리m(m[4], m[5]);
+  else if ((m = 잡(역거리re[1]))) 역m = 거리m(m[1], m[2]);
+  else if (노선 && (m = 잡(/(\d+(?:\.\d+)?)\s*(m(?![2²])|미터|km|킬로(?:미터)?)\s*(안|이내|내|이하|안쪽)?/i))) 역m = 거리m(m[1], m[2]);
+  if (역m != null && 역m > 1500) {
+    알림.push({ 종류: 'SCOPE', 말: `역 거리는 **1.5km 까지만** 셉니다(단지 상세의 지하철 칸과 같은 범위) — ${Math.round(역m).toLocaleString()}m 조건은 쓰지 않았습니다` });
+    역m = null;
+  }
+  if (역m != null || 노선) 조건.역 = { m: 역m ?? 1500, 노선, 말: `${노선 ? 노선.값 + ' ' : ''}역 ${(역m ?? 1500).toLocaleString()}m 안${역m == null ? ' (거리가 없어 1.5km 로 봤습니다)' : ''}` };
+  if ((m = 잡(/역세권/))) 알림.push({ 종류: 'HINT', 말: `'역세권' 은 정해진 거리가 없습니다 — '역 500m 안' 처럼 거리로 적어 주세요. 이번엔 쓰지 않았습니다` });
+
+  /* ---- 학교 ---- */
+  const 학교re = /(초등학교|초등|초교|중학교|중학|고등학교|고교|고등)\s*(까지|에서|과|와)?\s*(\d+(?:\.\d+)?)\s*(m(?![2²])|미터|km|킬로(?:미터)?)\s*(안|이내|내|이하|안쪽|거리)?/i;
+  const 학교re2 = /(\d+(?:\.\d+)?)\s*(m(?![2²])|미터|km|킬로(?:미터)?)\s*(안|이내|내|이하|안쪽)\s*(에|의)?\s*(있는\s*)?(초등학교|초등|초교|중학교|중학|고등학교|고교|고등)/i;
+  let 학 = null;
+  if ((m = 잡(학교re))) 학 = { 종: m[1], m: 거리m(m[3], m[4]) };
+  else if ((m = 잡(학교re2))) 학 = { 종: m[6], m: 거리m(m[1], m[2]) };
+  if (학) {
+    const se = /초/.test(학.종) ? '초등학교' : /중/.test(학.종) ? '중학교' : '고등학교';
+    if (학.m > 2000) 알림.push({ 종류: 'SCOPE', 말: `학교 거리는 **2km 까지만** 셉니다(단지 상세의 학교 칸과 같은 범위) — 이번엔 쓰지 않았습니다` });
+    else 조건.학교 = { se, m: 학.m, 말: `${se} ${학.m.toLocaleString()}m 안 (직선거리 · 배정 아님)` };
+  }
+  if ((m = 잡(/초품아/))) 알림.push({ 종류: 'HINT', 말: `'초품아' 는 정해진 기준이 없고, 배정은 거리가 아니라 학구도로 정해집니다 — '초등학교 300m 안' 처럼 거리로 적어 주세요. 이번엔 쓰지 않았습니다` });
+
+  /* ---- 정비구역 (서울 정비사업 자료) ---- */
+  const 정비 = []; let 정비아님 = false;
+  for (const [re, s2, 말] of 정비말) {
+    /* 뒤따르는 '구역 · 아닌/밖/빼고' 까지 한 번에 잡는다 — 부정을 놓치면 정반대 목록이 나간다 */
+    const re2 = new RegExp(`(?:${re.source})\\s*(?:촉진지구|구역|사업|지구)?\\s*(?:이|가|은|는|에|의)?\\s*(?<neg>아닌|밖|제외|빼고|없는|안\\s*걸친|아니)?(?:\\s*(?:안|내|에\\s*걸친|걸친|포함|들어간))?`);
+    if ((m = 잡(re2))) { 정비.push({ s: s2, 말 }); if (m.groups && m.groups.neg) 정비아님 = true; }
+  }
+  if (정비.length)
+    조건.정비 = { 목록: 정비, 아님: 정비아님, 말: `${정비.map(x => x.말).join(' · ')} 구역에 ${정비아님 ? '안 걸친' : '걸친'} 단지 (서울 정비사업 자료)` };
+
+  /* ---- 용도지역 (필지 면적 비중이 가장 큰 것) ---- */
+  for (const [re, f] of 용도말) if ((m = 잡(re))) {
+    const u = f(m); 조건.용도 = { uname: u, 말: `용도지역 ${u} (필지 면적 비중이 가장 큰 것)` }; 잡(/지역/); break;
+  }
+  if (!조건.용도 && (m = 잡(/상업\s*지역/))) 조건.용도 = { like: '%상업지역', 말: '용도지역 상업지역(일반·근린·중심·유통) — 비중이 가장 큰 것' };
+
+  return { 조건, 쓴글, 알림, 남은말: q.replace(/\s+/g, ' ').trim() };
+}
+
+/* 조건 → SQL 조각. 별칭 c = gold.complex. 같은 조각을 후보 고르기와 본 조회에 똑같이 넣는다 — 후보가 조건을 모르면 결과가 덜 나온다. */
+function 조건SQL(조건, rq) {
+  const 조각 = [];
+  const 면 = 조건.면적;
+  if (면) {
+    rq.input('alo', sql.Decimal(9, 2), 면.lo ?? 0).input('ahi', sql.Decimal(9, 2), 면.hi ?? 9999999);
+    조각.push(`AND (EXISTS (SELECT 1 FROM gold.complex_area a WHERE a.complex_id = c.complex_id AND a.전용 >= @alo AND a.전용 < @ahi)
+               OR (NOT EXISTS (SELECT 1 FROM gold.complex_area a WHERE a.complex_id = c.complex_id)
+                   AND EXISTS (SELECT 1 FROM gold.complex_area_trade x WHERE x.종류 = 'ALL' AND x.complex_id = c.complex_id
+                                 AND x.전용 >= @alo AND x.전용 < @ahi)))`);
+  }
+  if (조건.연식) {
+    rq.input('yfrom', sql.Char(8), 조건.연식.from || '00000000').input('yto', sql.Char(8), 조건.연식.to || '99999999');
+    조각.push(`AND LEN(c.oldest_use_apr) = 8 AND c.oldest_use_apr >= @yfrom AND c.oldest_use_apr <= @yto`);
+  }
+  if (조건.세대) {
+    rq.input('hlo', sql.Int, 조건.세대.lo ?? 1).input('hhi', sql.Int, 조건.세대.hi ?? 2147483647);
+    조각.push(`AND c.hhld_cnt_sum >= @hlo AND c.hhld_cnt_sum <= @hhi`);
+  }
+  if (조건.역) {
+    rq.input('sm', sql.Float, 조건.역.m);
+    조건.역.lnSQL = 노선SQL(조건.역.노선, rq);     // 결과 칸(가까운 역)도 같은 노선 조건을 쓴다
+    조각.push(`AND EXISTS (SELECT 1 FROM gold.complex_station s WHERE s.complex_id = c.complex_id AND s.dist_m <= @sm ${조건.역.lnSQL})`);
+  }
+  if (조건.학교) {
+    rq.input('kse', sql.NVarChar(20), 조건.학교.se).input('km', sql.Float, 조건.학교.m);
+    조각.push(`AND EXISTS (SELECT 1 FROM gold.complex_school_near k WHERE k.complex_id = c.complex_id AND k.school_se = @kse AND k.dist_m <= @km)`);
+  }
+  if (조건.정비) {
+    const 안 = `EXISTS (SELECT 1 FROM gold.complex_redev_hit h JOIN silver.redev_zone r ON r.present_sn = h.present_sn AND r.is_current = 1
+                         WHERE h.complex_id = c.complex_id AND (${조건.정비.목록.map(x => x.s).join(' OR ')}))`;
+    /* 정비 자료는 서울만 있다 — 서울 밖 단지는 '안 걸침' 이 아니라 '모름' 이다 */
+    조각.push(`AND LEFT(c.sigungu_cd, 2) = '11' AND ${조건.정비.아님 ? 'NOT ' : ''}${안}`);
+  }
+  if (조건.용도) {
+    if (조건.용도.uname) rq.input('zu', sql.NVarChar(100), 조건.용도.uname);
+    조각.push(`AND EXISTS (SELECT 1 FROM (SELECT TOP 1 z.uname FROM gold.complex_zone_hit z WHERE z.complex_id = c.complex_id ORDER BY z.xarea DESC) t
+                          WHERE ${조건.용도.uname ? 't.uname = @zu' : `t.uname LIKE N'${조건.용도.like}'`})`);
+  }
+  return 조각.join('\n         ');
+}
+function 노선SQL(노선, rq) {
+  if (!노선) return '';
+  rq.input('ln', sql.NVarChar(100), 노선.값);
+  /* 'N호선' 은 다른 도시의 N호선과 **코레일 구간 이름**(경부선 · 경원선 …)을 섞지 않는다 — 원본 노선 이름 그대로 */
+  if (노선.종류 === '번호')
+    return `AND s.line_nm LIKE N'%' + @ln AND s.line_nm NOT LIKE N'%부산%' AND s.line_nm NOT LIKE N'%대구%'
+            AND s.line_nm NOT LIKE N'%인천%' AND s.line_nm NOT LIKE N'%광주%' AND s.line_nm NOT LIKE N'%대전%'`;
+  return `AND s.line_nm = @ln`;
+}
+/* 결과 줄에 붙일 사실 — 쓴 조건만. 값은 같은 요약표에서. */
+function 조건칸SQL(조건, 정렬역) {
+  const 칸 = [], 붙 = [];
+  if (조건.면적) {
+    칸.push('ar.면적최소, ar.면적최대, ar.면적호수');
+    붙.push(`OUTER APPLY (SELECT 면적최소 = MIN(a.전용), 면적최대 = MAX(a.전용), 면적호수 = SUM(a.호수)
+                 FROM gold.complex_area a WHERE a.complex_id = c.complex_id AND a.전용 >= @alo AND a.전용 < @ahi) ar`);
+  }
+  if (조건.역 || 정렬역) {
+    칸.push('st.역이름, st.역노선, st.역거리');
+    붙.push(`OUTER APPLY (SELECT TOP 1 역이름 = s.sttn_nm, 역노선 = s.line_nm, 역거리 = s.dist_m
+                 FROM gold.complex_station s WHERE s.complex_id = c.complex_id ${조건.역 ? 'AND s.dist_m <= @sm' : ''} ${조건.역 ? 조건.역.lnSQL || '' : ''}
+                ORDER BY s.dist_m) st`);
+  }
+  if (조건.학교) {
+    칸.push('sk.학교이름, sk.학교거리');
+    붙.push(`OUTER APPLY (SELECT TOP 1 학교이름 = k.school_nm, 학교거리 = k.dist_m FROM gold.complex_school_near k
+                WHERE k.complex_id = c.complex_id AND k.school_se = @kse) sk`);
+  }
+  if (조건.정비 && !조건.정비.아님) {     // '안 걸친' 을 물었으면 다른 구역 이름을 붙이지 않는다(헷갈린다)
+    칸.push('rz.정비이름, rz.정비종류, rz.정비포함률');
+    붙.push(`OUTER APPLY (SELECT TOP 1 정비이름 = r.zone_nm, 정비종류 = r.biz_nm,
+                       정비포함률 = CAST(100.0 * h.xarea / NULLIF(h.parea, 0) AS DECIMAL(5,1))
+                  FROM gold.complex_redev_hit h JOIN silver.redev_zone r ON r.present_sn = h.present_sn AND r.is_current = 1
+                 WHERE h.complex_id = c.complex_id ${조건.정비.아님 ? '' : `AND (${조건.정비.목록.map(x => x.s).join(' OR ')})`}
+                 ORDER BY h.xarea DESC) rz`);
+  }
+  if (조건.용도) {
+    칸.push('zn.용도지역, zn.용도비중');
+    붙.push(`OUTER APPLY (SELECT TOP 1 용도지역 = z.uname,
+                       용도비중 = CAST(100.0 * z.xarea / NULLIF(SUM(z.xarea) OVER (), 0) AS DECIMAL(5,1))
+                  FROM gold.complex_zone_hit z WHERE z.complex_id = c.complex_id ORDER BY z.xarea DESC) zn`);
+  }
+  return { 칸: 칸.length ? ', ' + 칸.join(', ') : '', 붙: 붙.join('\n        ') };
+}
+/* 모름 세기 — 지역 안에서 이 조건을 따질 값이 없는 단지 수. 조건마다 따로(어느 칸이 비었는지 말하려고). */
+function 모름SQL(조건, 지역조건) {
+  /* ★ 집계 안에 하위질의를 못 쓴다(SQL Server) — 단지마다 0/1 을 먼저 만들고 바깥에서 더한다 */
+  const 칸 = [];
+  /* 면적: 단독·상가처럼 '호' 가 없는 건물은 전용면적이라는 말이 없다(모름이 아니라 해당 없음). 그래서 **아파트·연립·오피스텔 매매가
+     있는데**(그 종류의 집이 있다는 근거) 대장 면적도 거래 면적도 없는 단지만 모름으로 센다 */
+  if (조건.면적) 칸.push(`면적 = CASE WHEN EXISTS (SELECT 1 FROM gold.complex_trade_max k WHERE k.complex_id = c.complex_id AND k.종류 IN ('APT', 'RH', 'OFFI'))
+                                   AND NOT EXISTS (SELECT 1 FROM gold.complex_area a WHERE a.complex_id = c.complex_id)
+                                   AND NOT EXISTS (SELECT 1 FROM gold.complex_area_trade x WHERE x.종류 = 'ALL' AND x.complex_id = c.complex_id) THEN 1 ELSE 0 END`);
+  if (조건.연식) 칸.push(`연식 = CASE WHEN LEN(ISNULL(c.oldest_use_apr, '')) <> 8 THEN 1 ELSE 0 END`);
+  /* 세대 0 은 '모름' 이 아니다 — 상가·사무실 건물은 정말 0세대다. 값이 없는 것(NULL)만 모름 */
+  if (조건.세대) 칸.push(`세대 = CASE WHEN c.hhld_cnt_sum IS NULL THEN 1 ELSE 0 END`);
+  if (조건.역 || 조건.학교) 칸.push(`좌표 = CASE WHEN c.centroid_lat IS NULL THEN 1 ELSE 0 END`);
+  if (조건.정비) 칸.push(`정비 = CASE WHEN LEFT(c.sigungu_cd, 2) <> '11' THEN 1 ELSE 0 END`);
+  if (조건.용도) 칸.push(`용도 = CASE WHEN NOT EXISTS (SELECT 1 FROM gold.complex_zone_hit z WHERE z.complex_id = c.complex_id) THEN 1 ELSE 0 END`);
+  const 이름 = 칸.map(x => x.split(' = ')[0]);
+  return `SELECT ${이름.map(n => `${n} = SUM(x.${n})`).join(', ')}
+            FROM (SELECT ${칸.join(',\n                         ')} FROM gold.complex c WHERE c.is_active = 1 AND ${지역조건}) x;`;
+}
+const 모름이름 = { 면적: '전용면적(아파트·연립·오피스텔 매매는 있는데 대장·거래 면적이 없음)', 연식: '사용승인일', 세대: '세대수',
+  좌표: '단지 좌표(거리를 못 잼)', 정비: '정비구역(서울 밖 — 자료가 서울만 있음)', 용도: '용도지역' };
+
+
 app.get('/api/ask', requireAuth, async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: '문장이 필요합니다' });
@@ -2472,6 +2771,12 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     const pool = await getPool();
     const 쓴말 = new Set();           // 조건으로 쓰인 토큰
     const toks = 토큰들(q);
+    /* ---- 0) 조건 (312): 평형·연식·세대·역·학교·정비·용도 — 잡은 글은 정렬·종목 찾기에서 뺀다 ---- */
+    const 조읽 = 조건읽기(q);
+    const 조건 = 조읽.조건;
+    const qs = 조읽.남은말;
+    const 조건으로 = (글) => { for (const t of 토큰들(글)) if (t.length >= 2) 쓴말.add(t); };
+    조읽.쓴글.forEach(조건으로);
 
     /* ---- 1) 지역: 법정동 사전에서 찾는다 (LLM 없이도 정확하다) ---- */
     const cands = [];
@@ -2484,7 +2789,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
        '세대 많은' 처럼 띄어쓴 말이면 '많은' 이 안 걸러져 거짓 경고가 뜬다.
        그래서 매칭된 말을 **토큰으로 쪼개** 각각 지운다. */
     let 정렬 = SORTS.find(s => s.words.some(w => {
-      if (!q.includes(w)) return false;
+      if (!qs.includes(w)) return false;
       for (const wt of w.split(/\s+/))
         toks.filter(t => t.includes(wt)).forEach(t => 쓴말.add(t));
       return true; })) || null;
@@ -2493,7 +2798,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
        멈추는 바람에 '비싼' 이 "못 알아들음" 에 남아 거짓 경고가 떴다.
        고른 것과 알아들은 것은 다르다 - 알아듣고도 안 쓸 수 있다. */
     for (const s2 of SORTS) for (const w of s2.words) {
-      if (!q.includes(w)) continue;
+      if (!qs.includes(w)) continue;
       for (const wt of w.split(/\s+/))
         toks.filter(t => t.includes(wt)).forEach(t => 쓴말.add(t));
     }
@@ -2506,10 +2811,10 @@ app.get('/api/ask', requireAuth, async (req, res) => {
        ★ 고른 정렬과 무관한 사실이므로 **일반 규칙**으로 쓴다 - 더 긴 말이
          문장에 있고 그 말이 이 말을 품고 있으면, 이 말은 그 조각이다. */
     const 조각인가 = (w) => SORTS.some(s3 => s3.words.some(lw =>
-      lw !== w && lw.includes(w) && q.includes(lw)));
+      lw !== w && lw.includes(w) && qs.includes(lw)));
     const 안쓴정렬 = SORTS
       .filter(s2 => s2 !== 정렬
-        && s2.words.some(w => q.includes(w) && !조각인가(w)))
+        && s2.words.some(w => qs.includes(w) && !조각인가(w)))
       .map(s2 => s2.label);
 
     let 정렬추정 = !정렬;
@@ -2549,7 +2854,8 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         q, 종류: '지역순위',
         해석: { 지역: 지역.length ? 지역.map(x => x.이름) : ['전체(받은 곳)'], 단위, 방향: 방향 === 'asc' ? '낮은 순' : '높은 순',
                 기준: '아파트 매매 · 평당가(전용) 중위값 · 해제·직거래 뺌', 개수: mN ? 개수 : 25,
-                못알아들은말: 남은말, 종목바꿈: 종목 && 종목.key !== 'APT' ? `지역 순위는 아파트 매매로만 셉니다 — '${종목.label}' 은 쓰지 않았습니다` : null },
+                못알아들은말: 남은말, 종목바꿈: 종목 && 종목.key !== 'APT' ? `지역 순위는 아파트 매매로만 셉니다 — '${종목.label}' 은 쓰지 않았습니다` : null,
+                조건안씀: Object.values(조건).map(x => x.말) },
         지역순위: 결과,
         ai: { 썼음: false, 보탠것: [], 실패: false, 키없음: false },
       };
@@ -2641,6 +2947,18 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         필터.push(`최고 실거래가 ${ai.최소억}억 이상`); ai보탬.push(`${ai.최소억}억 이상`);
       }
       if (!mN && ai.개수) { 개수 = ai.개수; ai보탬.push(`${ai.개수}개`); }
+      /* 312: LLM 은 흐린 조건을 **우리 꼴로 다시 적어** 준다 — 그 글도 같은 규칙(조건읽기)으로 읽는다. 규칙이 이미 잡은 칸은 건드리지 않는다 */
+      for (const x of ai.조건말 || []) {
+        /* ★ 숫자는 **문장에 있던 것만** 받는다 — '걸어서 오분' 을 '역 500m' 로 바꿔 왔다(실측). 거리·면적의 숫자를 LLM 이 고르면 거짓 기준이다 */
+        if (!숫자맞음(x.원문, x.바꿈)) {
+          조읽.알림.push({ 종류: 'HINT', 말: `'${x.원문}' 은 조건으로 바꾸지 않았습니다 — 문장에 없는 숫자(${x.바꿈})가 필요합니다. 거리·면적·연도는 숫자로 적어 주세요` });
+          continue;
+        }
+        const r2 = 조건읽기(x.바꿈);
+        let 보탬 = false;
+        for (const [k, v] of Object.entries(r2.조건)) if (!조건[k]) { 조건[k] = v; ai보탬.push(v.말); 보탬 = true; }
+        if (보탬) 못알아들음 = 못알아들음.filter(t => !(x.원문.includes(t.replace(조사, '')) || t.includes(x.원문)));
+      }
     }
 
     /* ---- 6) 실행: SQL 은 **이것 하나뿐**이다 ---- */
@@ -2662,7 +2980,18 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         parts.push(`LEFT(c.rep_pnu, 10) IN (${emd.map((_, i) => '@emd' + i).join(',')})`); }
       지역조건 = parts.length ? '(' + parts.join(' OR ') + ')' : '1 = 1';
     }
+    const 조건조각 = 조건SQL(조건, rq2);
+    /* 312 QA: 날짜로 줄 세울 때 '840416  ' 같은 깨진 사용승인일이 맨 앞(신축 순)이나 NULL 이 맨 앞(오래된 순)에 왔다 — 날짜 꼴인 것만 줄 세운다 */
+    const 날짜정렬 = ['newest', 'oldest'].includes(정렬.key);
+    /* 312 QA: 가격이 아닌 정렬에서는 종목이 아무것도 거르지 않아 '신축 아파트' 에 사무실 건물이 섞였다. 종목의 근거는 실거래뿐이다 —
+       그 종류 매매가 있는 단지만(288 요약표). 가격 정렬은 원래 그 종목 거래로 줄 세우니 그대로. */
+    const 종목근거 = Boolean(종목) && !['unit', 'amount', 'amount_asc'].includes(정렬.key);
+    if (종목근거) { rq2.input('kg3', sql.VarChar(4), 종목.key); 필터.push(`${종목.label} — 그 종류 매매가 있는 단지(종류는 실거래로 압니다)`); }
+    const 정렬역 = 정렬.key === 'station';
+    const 조건칸 = 조건칸SQL(조건, 정렬역);
+    const 면적거래 = 조건.면적 ? 'AND CAST(r.exclu_use_ar AS DECIMAL(9,2)) >= @alo AND CAST(r.exclu_use_ar AS DECIMAL(9,2)) < @ahi' : '';
     const ORDER = {
+      station:    'st.역거리 ASC',
       unit:       't.unit_won DESC',
       amount:     't.max_amount DESC',
       amount_asc: 't.max_amount ASC',
@@ -2684,11 +3013,40 @@ app.get('/api/ask', requireAuth, async (req, res) => {
        gold.complex_trade_max(288, 거래 요약과 같은 자리·같은 규칙)에서 위쪽 몇 배수만 뽑고, 보여 줄 값은 아래에서
        지금처럼 다시 읽는다. 표가 아직 비었으면(288 전) 예전 길로 간다. */
     let 후보 = '';
+    if (정렬역) {
+      /* 312: 역 가까운 순은 **역 거리로 후보를 먼저** 고른다 — 지역 안 단지마다 최고가를 찾은 뒤 줄 세우면 강남구 하나에 37초였다.
+         종목을 말했으면 그 종목 매매가 있는 단지만(288 요약표) — 종목의 근거는 실거래뿐이다. */
+      rq2.input('cand', sql.Int, 개수 * 3 + 30).input('kg2', sql.VarChar(4), 종목 ? 종목.key : null);
+      후보 = `AND c.complex_id IN (
+        SELECT TOP (@cand) c.complex_id FROM gold.complex c
+         CROSS APPLY (SELECT d = MIN(s.dist_m) FROM gold.complex_station s WHERE s.complex_id = c.complex_id
+                       ${조건.역 ? 'AND s.dist_m <= @sm ' + (조건.역.lnSQL || '') : ''}) s
+         WHERE c.is_active = 1 AND ${지역조건} AND s.d IS NOT NULL
+           AND (@nm IS NULL OR c.complex_nm LIKE @nm)
+           AND (@kg2 IS NULL OR EXISTS (SELECT 1 FROM gold.complex_trade_max k2 WHERE k2.complex_id = c.complex_id AND k2.종류 = @kg2))
+           ${조건조각}
+         ORDER BY s.d)`;
+    }
     if (가격정렬) {
       const kg = 종목 ? 종목.key : 'ALL';
       const 있 = await pool.request().input('kg', sql.VarChar(4), kg)
         .query(`SELECT TOP 1 1 AS y FROM gold.complex_trade_max WHERE 종류 = @kg`);
-      if (있.recordset.length) {
+      if (조건.면적) {
+        /* 312: 평형 조건이 있으면 후보도 **그 면적의 거래**로 고른다 — 단지 전체 최고가로 고르면 그 평형이 없는 단지가 후보를 채운다 */
+        rq2.input('kg', sql.VarChar(4), kg).input('cand', sql.Int, 개수 * 3 + 30);
+        const 후보순 = { unit: 'm.max_unit DESC', amount: 'm.max_amt DESC', amount_asc: 'm.max_amt ASC' }[정렬.key];
+        후보 = `AND c.complex_id IN (
+          SELECT TOP (@cand) m.complex_id
+            FROM (SELECT x.complex_id, max_amt = MAX(x.max_amt), max_unit = MAX(x.max_amt / (x.전용 / 3.3058))
+                    FROM gold.complex_area_trade x WHERE x.종류 = @kg AND x.전용 >= @alo AND x.전용 < @ahi
+                   GROUP BY x.complex_id) m
+            JOIN gold.complex c ON c.complex_id = m.complex_id
+           WHERE c.is_active = 1 AND ${지역조건}
+             AND (@nm IS NULL OR c.complex_nm LIKE @nm)
+             AND (@hi IS NULL OR m.max_amt <= @hi) AND (@lo IS NULL OR m.max_amt >= @lo)
+             ${조건조각}
+           ORDER BY ${후보순})`;
+      } else if (있.recordset.length) {
         rq2.input('kg', sql.VarChar(4), kg).input('cand', sql.Int, 개수 * 3 + 30);
         const 후보순 = { unit: 'm.max_unit DESC', amount: 'm.max_amt DESC', amount_asc: 'm.max_amt ASC' }[정렬.key];
         후보 = `AND c.complex_id IN (
@@ -2698,15 +3056,17 @@ app.get('/api/ask', requireAuth, async (req, res) => {
              AND (@nm IS NULL OR c.complex_nm LIKE @nm)
              AND (@hi IS NULL OR m.max_amt <= @hi) AND (@lo IS NULL OR m.max_amt >= @lo)
              ${정렬.key === 'unit' ? 'AND m.max_unit IS NOT NULL' : ''}
+             ${조건조각}
            ORDER BY ${후보순})`;
       }
     }
 
+    const 알림 = [];
     const r = await rq2.query(`
       SELECT TOP (@lim)
              c.complex_id, c.complex_nm, c.rep_plat_plc, c.hhld_cnt_sum,
              c.oldest_use_apr, c.trade_cnt, c.centroid_lat, c.centroid_lng,
-             t.max_amount, t.max_ymd, t.area_m2, t.unit_won, t.trade_kind
+             t.max_amount, t.max_ymd, t.area_m2, t.unit_won, t.trade_kind${조건칸.칸}
         FROM gold.complex c
         OUTER APPLY (
           SELECT TOP 1 r.deal_amount AS max_amount, r.deal_ymd AS max_ymd,
@@ -2720,17 +3080,41 @@ app.get('/api/ask', requireAuth, async (req, res) => {
            WHERE r.match_complex_id = c.complex_id AND r.is_rent = 0
              AND r.is_canceled = 0 AND r.deal_amount IS NOT NULL
              ${종목 ? 종목.sql.replace(/\bt\./g, 'r.').replace(/^/, 'AND ') : ''}
+             ${면적거래}
            ORDER BY r.deal_amount DESC) t
+        ${조건칸.붙}
        WHERE c.is_active = 1 AND ${지역조건}
          ${후보}
+         ${조건조각}
+         ${정렬역 ? 'AND st.역거리 IS NOT NULL' : ''}
+         ${날짜정렬 ? "AND c.oldest_use_apr LIKE '[12][0-9][0-9][0-9][01][0-9][0-3][0-9]'" : ''}
+         ${종목근거 ? 'AND EXISTS (SELECT 1 FROM gold.complex_trade_max k3 WHERE k3.complex_id = c.complex_id AND k3.종류 = @kg3)' : ''}
          AND (@nm IS NULL OR c.complex_nm LIKE @nm)
          ${가격정렬 ? 'AND t.max_amount IS NOT NULL' : ''}
          AND (@hi IS NULL OR t.max_amount <= @hi)
          AND (@lo IS NULL OR t.max_amount >= @lo)
-       ORDER BY ${ORDER}`);
+       ORDER BY ${ORDER};
+      ${Object.keys(조건).length ? `
+      ${모름SQL(조건, 지역조건)}
+      SELECT 표, 굳힌때 FROM gold.ask_attr_meta;` : ''}`);
+    /* 312: 조건마다 '모름' 수 · 요약표 굳힌 때 */
+    const 모름 = [];
+    let 굳힌때 = null;
+    if (Object.keys(조건).length && r.recordsets.length >= 3) {
+      for (const [k, v] of Object.entries(r.recordsets[1][0] || {}))
+        if (Number(v) > 0) 모름.push({ 이름: 모름이름[k] || k, n: Number(v) });
+      const 쓴표 = new Set([조건.면적 && 'complex_area', 조건.면적 && 'complex_area_trade', (조건.역 || 정렬역) && 'complex_station',
+        조건.학교 && 'complex_school_near', 조건.정비 && 'complex_redev_hit', 조건.용도 && 'complex_zone_hit'].filter(Boolean));
+      const 때 = r.recordsets[2].filter(x => 쓴표.has(x.표)).map(x => x.굳힌때);
+      if (때.length) 굳힌때 = new Date(Math.min(...때.map(d => new Date(d).getTime())));
+    }
+    if (정렬역 && !Object.keys(조건).length) {
+      const m2 = await pool.request().query(`SELECT 굳힌때 FROM gold.ask_attr_meta WHERE 표 = 'complex_station'`);
+      if (m2.recordset[0]) 굳힌때 = m2.recordset[0].굳힌때;
+    }
+    알림.push(...조읽.알림);
 
     /* ---- 7) 0건이면 '없다' 와 '안 받았다' 를 가른다 ---- */
-    const 알림 = [];
     /* ★ 이름으로 찾아 0건이면 **'없다' 고 말해선 안 된다**(2026-10-19).
        우리는 전국이 아니라 몇 개 구만 적재했다. 이름이 없는 게 아니라
        그 동네를 아직 안 받은 것일 수 있다 - 정책 1장. */
@@ -2810,7 +3194,8 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       else 알림.push({ 종류: 'NA', 말: '조건에 맞는 단지가 없습니다' });
     }
 
-    질문남기기(req, q, '단지', { 지역: 지역.map(x => x.이름), 단지이름, 정렬: 정렬.label, 종목: 종목 ? 종목.label : null, 못알아들은말: 못알아들음, ai보탬 }, r.recordset.length);
+    질문남기기(req, q, '단지', { 지역: 지역.map(x => x.이름), 단지이름, 정렬: 정렬.label, 종목: 종목 ? 종목.label : null,
+      조건: Object.values(조건).map(x => x.말), 못알아들은말: 못알아들음, ai보탬 }, r.recordset.length);
     res.json({
       q,
       해석: {
@@ -2824,6 +3209,9 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         필터,
         못알아들은말: 못알아들음,
         안쓴조건: 안쓴정렬,
+        조건: Object.values(조건).map(x => x.말),
+        모름,
+        굳힌때,
       },
       ai: {
         썼음: Boolean(ai),

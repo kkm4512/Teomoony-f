@@ -1843,3 +1843,4 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 #view-policy .polsec h3{margin:2px 0 6px;font-size:15px}
 #view-policy .polsec ul{margin:0;padding-left:18px}
 #view-policy .polsec li{margin:5px 0;font-size:13.5px;line-height:1.6;color:var(--ink)}
+.row.ask .s.cx{display:block;margin-top:2px;color:var(--ink-2);font-size:11px;line-height:1.45;white-space:normal}

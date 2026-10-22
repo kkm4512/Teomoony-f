@@ -50,4 +50,17 @@ function getPool() {
   return poolPromise;
 }
 
-module.exports = { sql, getPool, config };
+/* ★ 2026-10-22: 집안 전용 /api/_apply 만 쓰는 **긴 풀**(한 배치 20분까지, 연결 2개).
+   파생표를 처음 세는 것처럼 한 문장이 60초를 넘는 일이 있다(312 — 면적표 전체를 한 번 훑는 편이
+   호마다 찾아가는 것보다 디스크에 훨씬 싸다). 화면 요청은 그대로 60초 풀을 쓴다 — 느린 화면을 숨기지 않게. */
+let longPromise = null;
+function getLongPool() {
+  if (!longPromise) {
+    longPromise = new sql.ConnectionPool({ ...config, pool: { max: 2, min: 0, idleTimeoutMillis: 30000 },
+                                           requestTimeout: 20 * 60 * 1000 })
+      .connect().catch(err => { longPromise = null; throw err; });
+  }
+  return longPromise;
+}
+
+module.exports = { sql, getPool, getLongPool, config };
