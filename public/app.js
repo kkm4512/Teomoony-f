@@ -1762,7 +1762,7 @@ function renderList() {
         <span class="nm">${주소이름인가(c) && c.실거래이름
             ? esc(c.실거래이름)
             : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}${
-            Number(c.폐쇄) ? ` <span class="sg-tag" title="이 단지 필지에 닫힌(폐쇄·말소) 건축물대장 ${Number(c.폐쇄)}묶음 — 단지 자체는 지금 대장이 있습니다">폐쇄·말소 대장 ${Number(c.폐쇄)}</span>` : ''}</span>
+            Number(c.폐쇄) ? ` <span class="sg-tag" title="현재 건물입니다. 같은 필지에 예전 건물의 닫힌(폐쇄·말소) 대장 ${Number(c.폐쇄)}묶음">옛 대장 ${Number(c.폐쇄)}</span>` : ''}</span>
         <span class="ad">${esc(c.rep_plat_plc || '')}</span>
       </span>
       <span class="d">${c.거리m != null
@@ -5891,9 +5891,10 @@ async function 폐쇄머리표() {
   닫힌자리자동(키, r);
   if (!묶.length) return;
   const 최근 = 묶.find(s => s.shter_day) || 묶[0];
-  지금.textContent = `폐쇄·말소 대장 ${fmt(묶.length)}`;
-  지금.title = `이 단지 필지에 닫힌 건축물대장이 ${묶.length}묶음 있습니다(최근: ${최근.폐쇄구분 || ''} ${날8(최근.shter_day) || ''}).
-이 단지 자체는 지금 대장이 있는 현재 건물입니다. 누르면 토지 탭의 폐쇄·말소 대장 칸으로 갑니다.`;
+  지금.textContent = `옛 대장 ${fmt(묶.length)}`;
+  지금.title = `이 단지는 지금 대장이 있는 현재 건물입니다.
+같은 필지에 예전 건물(또는 예전 서류)의 닫힌 대장이 ${묶.length}묶음 있습니다(최근: ${최근.폐쇄구분 || ''} ${날8(최근.shter_day) || ''}).
+누르면 토지 탭의 옛 대장 칸으로 갑니다.`;
   지금.hidden = false;
 }
 document.addEventListener('click', e => {
@@ -5914,10 +5915,12 @@ async function 폐쇄채우기() {
   if (!Number(범.받은동)) { 지금.innerHTML = ''; return; }   // 이 동네는 아직 안 받음 — 칸을 안 보인다(받은 동: 장위동·수색동)
   const 동 = {};
   for (const t of (r.동 || [])) (동[t.site_key] ||= []).push(t);
-  지금.innerHTML = `${sect('이 필지의 폐쇄·말소 대장', 'closed', 묶.length ? ` ${fmt(묶.length)}` : '')}
+  지금.innerHTML = `${sect('이 필지의 옛 대장 (폐쇄·말소)', 'closed', 묶.length ? ` ${fmt(묶.length)}` : '')}
     ${묶.length ? 묶.map(s => 폐쇄묶음줄(s, 동[s.site_key])).join('')
       : '<p class="note muted">이 단지 필지에는 폐쇄·말소된 대장이 없습니다.</p>'}
-    <p class="srcline">같은 필지(PNU)에 있던 <b>닫힌 대장</b>입니다 — 같은 필지라는 것만 맞췄고, 지금 단지가 그 자리에 이어 지은 것이라는 뜻은 아닙니다.
+    <p class="srcline"><b>이 단지는 지금 대장이 있는 현재 건물</b>이고, 아래는 같은 필지(PNU)에 있던 <b>예전 건물(또는 예전 서류)의 닫힌 대장</b>입니다 —
+      땅이 같을 뿐 시기가 다릅니다. 같은 필지라는 것만 맞췄고, 지금 단지가 그 자리에 이어 지은 것이라고 단정하지는 않습니다.
+      줄에 올리면 지도에 그 필지가 표시됩니다.
       '폐쇄' 는 철거와 다를 수 있습니다(대장을 새로 만들며 닫은 경우). 묶음은 같은 필지 · 같은 말소일입니다.${
       Number(범.받은동) < Number(범.법정동) ? ` 이 단지 필지의 법정동 ${fmt(범.법정동)}곳 중 ${fmt(범.받은동)}곳만 받았습니다.` : ''}</p>`;
 }
@@ -6010,15 +6013,18 @@ async function 공고상세(house, lat, lng) {
 let 닫힌자리층 = null, 닫힌자리단지 = null;
 const 닫힌자리들 = new Map();   // pnu → { 면, 표, n }  — 12:59 목록 줄 ↔ 지도 ✕ 짝 맞추기
 function 닫힌자리지우기() { if (닫힌자리층) { try { map.removeLayer(닫힌자리층); } catch (e) {} } 닫힌자리층 = null; 닫힌자리단지 = null; 닫힌자리들.clear(); }
-const 닫힌표아이콘 = (n, 켬) => L.divIcon({ className: 'clx-wrap', iconSize: 켬 ? [30, 30] : [20, 20], iconAnchor: 켬 ? [15, 15] : [10, 10],
-  html: `<div class="clx sm${켬 ? ' on' : ''}" aria-label="닫힌 대장">✕${n > 1 ? `<i>${n}</i>` : ''}</div>` });
-const 닫힌면모양 = 켬 => 켬 ? { color: '#c2410c', weight: 3, dashArray: null, fillColor: '#6b7280', fillOpacity: 0.6 }
-                         : { color: '#4b5563', weight: 2, dashArray: '5 4', fillColor: '#6b7280', fillOpacity: 0.5 };
+/* 13:06 사장님 "바꿔봐" — 단지 위에서는 ✕·회색 채움이 '이 단지가 폐쇄됐다' 로 읽혔다(52940 드림아트빌: 1962 옛 집 → 2001 지금 건물).
+   → 단지 상세에서는 **'옛 대장' 표**(작은 회색 글씨 표)만, 필지는 안 칠한다. 줄에 올리면 표가 주황 · 필지 테두리만 실선.
+   ✕ + 회색 채움은 검색으로 **닫힌 대장 자체를 열었을 때만**(폐쇄상세). */
+const 닫힌표아이콘 = (말, 켬) => L.divIcon({ className: 'oldtag-wrap', iconSize: null, iconAnchor: [0, 0],
+  html: `<div class="oldtag${켬 ? ' on' : ''}">${esc(말)}</div>` });
+const 닫힌면모양 = 켬 => 켬 ? { color: '#c2410c', weight: 3, dashArray: null, fillOpacity: 0, opacity: 1 }
+                         : { color: '#6b7280', weight: 0, fillOpacity: 0, opacity: 0 };
 /* 목록 줄에 올리거나 누르면 그 ✕ 를 키우고 주황으로, 그 필지는 진한 실선. 지도 ✕ 에 올리면 목록 줄을 밝힌다 */
 function 닫힌자리강조(pnu, 켬, 옮김 = false) {
   for (const [k, v] of 닫힌자리들) {
     const 이것 = 켬 && k === pnu;
-    if (v.표) { v.표.setIcon(닫힌표아이콘(v.n, 이것)); v.표.setZIndexOffset(이것 ? 1200 : 800); }
+    if (v.표) { v.표.setIcon(닫힌표아이콘(v.말, 이것)); v.표.setZIndexOffset(이것 ? 1200 : 800); }
     if (v.면) v.면.setStyle(닫힌면모양(이것));
   }
   document.querySelectorAll('#detail .clsite').forEach(el => el.classList.toggle('hl', !!켬 && el.dataset.clpnu === pnu));
@@ -6060,11 +6066,13 @@ function 닫힌자리자동(cid, r) {
   for (const f of 필) {
     const 묶 = (r.묶음 || []).filter(s => s.pnu === f.pnu);
     const 말 = 묶.map(s => `${s.폐쇄구분 || ''} ${날8(s.shter_day) || '날짜 없음'} · ${s.이름 || s.주용도 || '이름 없음'}`).join('\n');
-    const 짝 = { 면: null, 표: null, n: 묶.length };
+    const 최근 = 묶.filter(x => x.shter_day).sort((a, b) => b.shter_day.localeCompare(a.shter_day))[0] || 묶[0] || {};
+    const 짝 = { 면: null, 표: null, n: 묶.length,
+                 말: 묶.length > 1 ? `옛 대장 ${묶.length}` : `옛 대장 · ${최근.shter_day ? 최근.shter_day.slice(0, 4) + ' ' : ''}${최근.폐쇄구분 || ''}` };
     if (f.geometry) 짝.면 = L.geoJSON(f.geometry, { interactive: false, pane: 'closedPane', style: 닫힌면모양(false) }).addTo(g);
     if (f.lat != null) {
       const m = L.marker([Number(f.lat), Number(f.lng)], { zIndexOffset: 800, keyboard: false,
-        title: `닫힌 대장 ${묶.length}묶음 — 지금 건물이 아닙니다\n${말}`, icon: 닫힌표아이콘(묶.length, false) });
+        title: `이 필지의 옛 대장 ${묶.length}묶음 — 지금 이 단지 건물이 아니라 예전 건물(또는 예전 서류)입니다\n${말}`, icon: 닫힌표아이콘(짝.말, false) });
       m.on('mouseover', () => 닫힌자리강조(f.pnu, true));
       m.on('mouseout', () => 닫힌자리강조(닫힌자리고정, !!닫힌자리고정));
       m.on('click', () => { 닫힌자리고정 = f.pnu; detailTab = 'land'; renderDetail(lastDetail);

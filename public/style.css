@@ -1750,3 +1750,10 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 .clx.sm.on{width:30px;height:30px;font-size:17px;background:#c2410c;border-width:2px}
 #detail .clsite.hl{background:var(--surface-2);box-shadow:inset 3px 0 0 #c2410c}
 #detail .clsite[data-clpnu] > summary{cursor:pointer}
+
+/* (13:06) 단지 위 '옛 대장' 표 — 현재 건물 위에 ✕ 대신 */
+.oldtag-wrap{background:none;border:0}
+.oldtag{transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;padding:1px 6px;border-radius:4px;
+  background:rgba(255,255,255,.92);border:1px solid #6b7280;color:#4b5563;font:500 10px/1.5 var(--mono);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.oldtag.on{background:#c2410c;border-color:#c2410c;color:#fff;font-size:11px}
+[data-theme="dark"] .oldtag:not(.on){background:rgba(30,30,30,.9);color:#d1d5db}
