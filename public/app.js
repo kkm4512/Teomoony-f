@@ -4635,6 +4635,7 @@ function renderDetail(payload) {
           침술·물리치료 같은 '유사 의료업' 은 병원이 아니라 뺐습니다.<br>
           <b>학교는 여기 없습니다</b> — 상가 데이터라 학교는 애초에 들어 있지 않습니다.</p>` : ''}
       <div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>
+      <div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>
       <div class="lt2">그 밖에 많은 업종 (500m)</div>
       <div class="zlist">${pz.filter(r => Number(r.r500) > 0).slice(0, 8).map(r => `
         <div class="zrow"><span class="zn">${esc(r.소분류 || '')}</span>
@@ -4788,6 +4789,7 @@ function renderDetail(payload) {
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
   어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
+  약국채우기();            // 행안부 약국 인허가 칸 — 주변 탭에 있을 때만 그릇이 있다
 
   $('#detail').querySelectorAll('.tab').forEach(b =>
     b.addEventListener('click', () => { detailTab = b.dataset.tab; renderDetail(lastDetail); }));
@@ -5848,6 +5850,53 @@ async function 용도채우기(cid) {
       전.length > 5 ? ` · 그 밖 ${fmt(전.slice(5).reduce((t, x) => t + (Number(x.호) || 0), 0))}` : ''} <span class="muted">/ ${fmt(합)}호</span>`;
     comp.hidden = false;
   }
+}
+
+/* ---------------- 약국 인허가 · 행정안전부 (2026-10-22, 307) ----------------
+   심평원 칸(.hirabox) 밑에 따로(.phbox). ★ 출처가 다르다 — 숫자를 섞지 않는다.
+   ★ 폐업은 원문 좌표가 비어 있는 것이 많아 '좌표 있는 것만' 이라고 비율과 함께 적는다. */
+const 약국캐시 = new Map();
+async function 약국채우기() {
+  const box = document.querySelector('#detail .phbox');
+  if (!box) return;
+  const 키 = box.dataset.ph;
+  let r = 약국캐시.get(키);
+  if (!r) {
+    try {
+      const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/pharmacy`);
+      if (!x.ok) return;                         // 덤 — 못 받아도 상세는 그대로
+      r = await x.json();
+      if (Number((r.범위 || {}).적재)) 약국캐시.set(키, r);
+    } catch { return; }
+  }
+  const 지금 = document.querySelector('#detail .phbox');
+  if (!지금 || 지금.dataset.ph !== 키) return;
+  지금.innerHTML = 약국칸(r);
+}
+function 약국칸(r) {
+  const 범 = r.범위 || {}, 셈 = r.셈 || {}, 영 = r.영업 || [], 폐 = r.폐업 || [];
+  const 머리 = `<div class="lt2">약국 · 행정안전부 인허가 <span class="muted">(지방행정 인허가 · 영업/폐업)</span></div>`;
+  if (!Number(범.적재)) return `${머리}<p class="note sm">${gapCell('', 'SCOPE', '행안부 약국 인허가를 아직 받지 않았습니다')}</p>`;
+  if (!Number(범.좌표)) return '';
+  const 날 = v => (v ? String(v).slice(0, 10).replace(/-/g, '.') : '');
+  const 폐비 = Number(범.폐업전체) ? Math.round(100 * Number(범.폐업좌표) / Number(범.폐업전체)) : null;
+  return `${머리}
+    <div class="lifegrid">
+      <div class="lcell"><b>${fmt(Number(셈.영업) || 0)}</b><span>영업 중 <i>500m</i></span></div>
+      <div class="lcell" title="최근 5년 안에 인허가를 받은 곳(지금 영업 중)"><b>${fmt(Number(셈.개업5년) || 0)}</b><span>그중 5년 안 개업</span></div>
+      <div class="lcell far" title="좌표가 있는 폐업 기록만 셉니다"><b>${fmt(Number(셈.폐업) || 0)}</b><span>폐업 기록 <i>좌표 있는 것만</i></span></div>
+      <div class="lcell far" title="좌표가 있는 폐업 기록만 셉니다"><b>${fmt(Number(셈.폐업5년) || 0)}</b><span>그중 5년 안 폐업</span></div>
+    </div>
+    ${영.length ? `<ul class="lu">${영.map(x => `<li><b>${esc(x.이름 || '')}</b><span class="muted"> ${fmt(Number(x.m) || 0)}m${
+        x.인허가일 ? ` · ${날(x.인허가일)} 인허가` : ''}</span></li>`).join('')}</ul>`
+      : `<p class="note sm">${gapCell('', 'NA', '500m 안에 영업 중인 약국 기록이 없습니다')}</p>`}
+    ${폐.length ? `<div class="lt2">최근 폐업 <span class="muted">(500m · 좌표 있는 것만)</span></div>
+      <ul class="lu">${폐.map(x => `<li><s>${esc(x.이름 || '')}</s><span class="muted"> ${fmt(Number(x.m) || 0)}m${
+        x.폐업일 ? ` · ${날(x.폐업일)} ${esc(x.상세상태 || '폐업')}` : ` · ${esc(x.상세상태 || '폐업')} (폐업일 원문에 없음)`}${
+        x.인허가일 ? ` · ${날(x.인허가일)} 인허가` : ''}</span></li>`).join('')}</ul>` : ''}
+    <p class="note sm">행정안전부 지방행정 인허가(약국) 원문이고, 위 심평원 숫자와는 <b>출처가 달라</b> 다를 수 있습니다. 단지 중심점에서 <b>직선 500m</b>.
+      영업 중 ${fmt(Number(범.영업전체) || 0)}곳 가운데 ${fmt(Number(범.영업좌표없음) || 0)}곳은 원문에 좌표가 없어 셀 수 없습니다.
+      폐업 기록은 ${폐비 != null ? `<b>${폐비}%</b>만` : '일부만'} 좌표가 있어 실제보다 <b>적게</b> 잡힙니다.${범.받은날 ? ` ${esc(날(범.받은날))} 받음.` : ''}</p>`;
 }
 
 /* ---------------- 어린이집 (2026-10-22, 사장님 "어린이집 운영 승인 됐엉") ----------------

@@ -3187,6 +3187,45 @@ app.get('/api/complexes/:id/childcare', async (req, res) => {
   } catch (e) { fail(res, e, 'complex-childcare'); }
 });
 
+/* ===================== 약국 인허가 · 행정안전부 (2026-10-22, 307) =====================
+   지방행정 인허가(약국). 심평원(요양기관 신고)과 **출처가 다르다** — 섞지 않고 따로 준다.
+   ★ 영업과 폐업을 가른다. 폐업은 원문 좌표가 절반쯤 비어 있어 **좌표 있는 것만** 센다 — 그 비율을 같이 준다(숨기지 않는다).
+   ★ 거리 = 단지 중심점에서 직선. 500m. */
+app.get('/api/complexes/:id/pharmacy', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
+  if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
+  try {
+    const pool = await getPool();
+    if (!(await 단지있나(pool, id))) return res.status(404).json({ error: 'not found' });
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      DECLARE @g GEOGRAPHY = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
+                               WHERE complex_id = @id AND centroid_lat IS NOT NULL);
+      IF OBJECT_ID('tempdb..#ph307') IS NOT NULL DROP TABLE #ph307;
+      SELECT 관리번호, 이름, 영업상태, 상세상태, 인허가일, 폐업일, 도로명주소, 지번주소,
+             영업 = CASE WHEN 영업상태 LIKE N'영업%' THEN 1 ELSE 0 END, m = CAST(geog.STDistance(@g) AS INT)
+        INTO #ph307
+        FROM silver.mois_pharmacy
+       WHERE @g IS NOT NULL AND geog IS NOT NULL AND geog.STDistance(@g) <= 500;
+      SELECT TOP 8 이름, 인허가일, 도로명주소, 지번주소, m FROM #ph307 WHERE 영업 = 1 ORDER BY m;
+      SELECT TOP 5 이름, 상세상태, 인허가일, 폐업일, m FROM #ph307 WHERE 영업 = 0 ORDER BY 폐업일 DESC, m;
+      SELECT 영업 = SUM(CASE WHEN 영업 = 1 THEN 1 ELSE 0 END), 폐업 = SUM(CASE WHEN 영업 = 0 THEN 1 ELSE 0 END),
+             폐업5년 = SUM(CASE WHEN 영업 = 0 AND 폐업일 >= CONVERT(CHAR(10), DATEADD(YEAR, -5, GETDATE()), 23) THEN 1 ELSE 0 END),
+             개업5년 = SUM(CASE WHEN 영업 = 1 AND 인허가일 >= CONVERT(CHAR(10), DATEADD(YEAR, -5, GETDATE()), 23) THEN 1 ELSE 0 END)
+        FROM #ph307;
+      SELECT 적재 = COUNT(*),
+             영업좌표없음 = SUM(CASE WHEN 영업상태 LIKE N'영업%' AND geog IS NULL THEN 1 ELSE 0 END),
+             영업전체 = SUM(CASE WHEN 영업상태 LIKE N'영업%' THEN 1 ELSE 0 END),
+             폐업좌표 = SUM(CASE WHEN 영업상태 NOT LIKE N'영업%' AND geog IS NOT NULL THEN 1 ELSE 0 END),
+             폐업전체 = SUM(CASE WHEN 영업상태 NOT LIKE N'영업%' THEN 1 ELSE 0 END),
+             받은날 = CONVERT(CHAR(10), MAX(받은시각), 23),
+             좌표 = CASE WHEN @g IS NULL THEN 0 ELSE 1 END
+        FROM silver.mois_pharmacy;`);
+    res.json({ 영업: r.recordsets[0], 폐업: r.recordsets[1], 셈: r.recordsets[2][0] || {}, 범위: r.recordsets[3][0] || {} });
+  } catch (e) { fail(res, e, 'complex-pharmacy'); }
+});
+
 /* ===================== 폐쇄·말소 건축물대장 (2026-10-22, 사장님 "장위동,수색동 먼저해봐") =====================
    출처: 공공데이터포털 15137093 건축HUB 폐쇄말소대장(ShtRgstHubService). deploy/sql/302.
    ★ 현재 단지와 섞지 않는다(gold.closed_site 따로). '폐쇄' ≠ '철거' — 구분은 원문(말소·폐쇄·일부말소·일부폐쇄) 그대로 보인다.
