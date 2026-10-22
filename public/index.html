@@ -116,11 +116,8 @@
          (2026-10-19). 보면서 켜고 끄는 것이라서. 입력 요소의 id 는 그대로 두어
          기존 로직(app.js)이 손대지 않아도 되게 했다 - 체크박스는 눈에만 숨긴다. -->
     <div class="mapctl" role="group" aria-label="지도 표시 옵션">
-      <label class="mc" title="총괄표제부가 있는 단지만 보기">
-        <input type="checkbox" id="recap">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.6 17.6 7 10 11.4 2.4 7 10 2.6Z"/><path d="M3.6 10.2 10 13.9l6.4-3.7"/><path d="M3.6 13.4 10 17.1l6.4-3.7"/></svg>
-        <span>총괄</span>
-      </label>
+      <!-- 2026-10-22 사장님 "총괄 탭은 의미없어" — 버튼을 뺐다. app.js 가 #recap 을 읽으므로 칸만 숨겨 남긴다(늘 꺼짐). -->
+      <input type="checkbox" id="recap" hidden>
       <label class="mc" title="필지와 건물 외곽선 그리기">
         <input type="checkbox" id="polys">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.6 6.2 8 2.9l9.4 3.6-2 8.4L7.6 17 2.6 13.6V6.2Z"/><path d="M8 2.9v14.1"/><path d="M15.4 6.5 8 9.1"/></svg>

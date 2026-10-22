@@ -4747,25 +4747,7 @@ function renderDetail(payload) {
     </div>`).join('') : `<p class="note">${gapCell('', 'NA',
         '이 단지는 정비사업 구역에 걸쳐 있지 않습니다')}</p>`}
 
-    ${sect('건물 외곽선', 'bldg', (외곽선대기 || 외곽선실패) ? '' : ` ${fmt((buildings || []).length)}`)}
-    ${외곽선대기 ? `<p class="note muted">불러오는 중… <span class="muted">건물 외곽선은 땅과 공간으로 맞춰 찾아서 조금 걸립니다</span></p>`
-      : 외곽선실패 ? `<p class="note">${gapCell('', 'UNSURE',
-          '건물 외곽선을 불러오지 못했습니다 — ' + lastBgeo.실패
-          + '. 없다는 뜻이 아니라 못 본 것입니다')}</p>`
-      : (buildings || []).length ? `<table><thead><tr><th>건물</th><th class="n">층</th><th class="n">면적(근사)</th></tr></thead><tbody>
-      ${buildings.map(b => `<tr>
-        <td>${esc(b.buld_nm || [b.rd_nm, b.buld_no].filter(Boolean).join(' ') || b.bd_mgt_sn.slice(-6))}</td>
-        <td class="n">${b.gro_flo_co ?? '—'}</td>
-        <td class="n">${b.area_m2_approx ? fmt(Math.round(b.area_m2_approx)) : '—'}</td>
-      </tr>`).join('')}
-    </tbody></table>` : `<p class="note">${gapCell('', scope && Number(scope.건물) === 1 ? 'EMPTY' : 'SCOPE',
-        scope && Number(scope.건물) === 1
-          ? '이 단지 지번에 매칭되는 건물 외곽선이 없습니다'
-          : '이 법정동의 건물 외곽선을 아직 받아오지 않았습니다 (현재 종로 87동 + 장위동)')}</p>`}
-    ${(buildings || []).length && Number(c.dong_cnt) !== (buildings || []).length
-      ? `<p class="note">대장 동 수(${fmt(c.dong_cnt)})와 건물 외곽선 수(${fmt(buildings.length)})가 다릅니다.
-         두 데이터를 잇는 키가 없어 PNU 단위까지만 연결됩니다. 외곽선은 재개발·철거를
-         늦게 반영하므로, 신축지에서는 사라진 건물이 남아 있을 수 있습니다.</p>` : ''}
+    <!-- 2026-10-22 사장님 "건물 외곽선 표는 의미없어 — 지도에만" : 표를 뺐다. 외곽선은 지도에 그대로 그린다(층·면적은 동·호 탭의 대장 원문). -->
 
     ${permitBlock(permits, scope, permitDongs)}`;
 
