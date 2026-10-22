@@ -2087,6 +2087,7 @@ app.post('/api/inquiry', requireAuth, async (req, res) => {
   const b = req.body || {};
   const 글 = (v, n) => (v == null ? null : String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, n) || null);
   const uid = Number(req.user && req.user.uid) || null;
+  if (b.종류 === '일반' && !글(b.내용, 2000)) return res.status(400).json({ error: '문의 내용을 적어 주세요' });
   const 이제 = Date.now();
   const 기록 = (문의셈.get(uid) || []).filter(t => 이제 - t < 3600e3);
   if (기록.length >= 20) return res.status(429).json({ error: '문의를 너무 많이 남겼습니다 — 한 시간 뒤에 다시 남겨 주세요' });
@@ -2101,12 +2102,51 @@ app.post('/api/inquiry', requireAuth, async (req, res) => {
       .input('단지', sql.NVarChar(30), 글(b.단지코드, 30))
       .input('화면', sql.NVarChar(500), 글(b.화면, 500))
       .input('내용', sql.NVarChar(2000), 글(b.내용, 2000))
+      .input('종류', sql.NVarChar(20), b.종류 === '일반' ? '일반' : '오류')
       .query(`INSERT ops.inquiry (user_id, 아이디, 종류, 무엇, 말, 오류번호, 단지코드, 화면, 내용)
               OUTPUT inserted.inquiry_id
-              VALUES (@uid, @u, N'오류', @무엇, @말, @번호, @단지, @화면, @내용);`);
+              VALUES (@uid, @u, @종류, @무엇, @말, @번호, @단지, @화면, @내용);`);
     기록.push(이제); 문의셈.set(uid, 기록);
     res.json({ ok: true, 문의번호: r.recordset[0].inquiry_id });
   } catch (e) { fail(res, e, 'inquiry'); }
+});
+/* 문의·답변 목록 — **누구나** 본다(2026-10-22 사장님 "질문이랑 답변 모두가 볼 수 있게").
+   ★ 아이디는 앞 두 글자만(나머지 *). 화면 주소는 안 내보낸다(검색어가 섞일 수 있다). */
+app.get('/api/inquiries', async (req, res) => {
+  const 쪽 = 상한(req.query.page, 1, 1000);
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('o', sql.Int, (쪽 - 1) * 30).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT inquiry_id, 때, 아이디, 종류, 무엇, 말, 오류번호, 단지코드, 내용, 상태, 답변, 답변때, 답변자,
+             전체 = COUNT(*) OVER ()
+        FROM ops.inquiry ORDER BY 때 DESC, inquiry_id DESC
+       OFFSET @o ROWS FETCH NEXT 30 ROWS ONLY;`);
+    const 가림 = u => (u ? [...String(u)].map((ch, i) => (i < 2 ? ch : '*')).join('') : '익명');
+    res.json({ 쪽, 전체: r.recordset.length ? r.recordset[0].전체 : 0,
+      목록: r.recordset.map(x => ({ id: x.inquiry_id, 때: x.때, 누구: 가림(x.아이디), 종류: x.종류, 무엇: x.무엇, 말: x.말,
+        오류번호: x.오류번호, 단지코드: x.단지코드, 내용: x.내용, 상태: x.상태, 답변: x.답변, 답변때: x.답변때,
+        답변자: x.답변 ? '터무니' : null })) });
+  } catch (e) { fail(res, e, 'inquiries'); }
+});
+
+/* 답변 — root 만. 다시 쓰면 덮는다(고친 답변). 빈 글이면 답변을 거둔다. */
+app.post('/api/inquiry/:id/answer', requireAuth, async (req, res) => {
+  if (!req.user || req.user.r !== 'root') return res.status(403).json({ error: '답변은 관리자만 남길 수 있습니다' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'bad id' });
+  const 답 = String((req.body || {}).답변 || '').trim().slice(0, 4000) || null;
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).input('a', sql.NVarChar(4000), 답)
+      .input('u', sql.NVarChar(50), String(req.user.u || '').slice(0, 50)).query(`
+      UPDATE ops.inquiry SET 답변 = @a, 답변때 = CASE WHEN @a IS NULL THEN NULL ELSE SYSDATETIME() END,
+             답변자 = CASE WHEN @a IS NULL THEN NULL ELSE @u END, 상태 = CASE WHEN @a IS NULL THEN N'새로' ELSE N'답변함' END
+       WHERE inquiry_id = @id;
+      SELECT n = @@ROWCOUNT;`);
+    if (!r.recordset[0].n) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'inquiry-answer'); }
 });
 
 /* 지역 이름 -> 법정동 코드. ★ 사전이 LLM 보다 정확하다(20,561건) -

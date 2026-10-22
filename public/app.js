@@ -5093,7 +5093,7 @@ function 주소로열기() {
      가른다 - 기존 선택자와 로직이 한 줄도 안 바뀌게.
    ★ 지도는 숨어 있는 동안 제 크기를 0 으로 안다. 돌아올 때 invalidateSize 로
      다시 재고 refreshMap 을 부른다. 안 하면 회색 화면이 뜬다. */
-const 보기들 = ['home', 'map', 'usage'];
+const 보기들 = ['home', 'map', 'usage', 'qna'];
 let 지금보기 = null, 홈받음 = false, 이용받음 = 0;
 
 function 보기전환(이름, 주소도 = true) {
@@ -5103,6 +5103,7 @@ function 보기전환(이름, 주소도 = true) {
   document.querySelector('.app').dataset.view = 이름;
   $('#view-home').hidden  = 이름 !== 'home';
   $('#view-usage').hidden = 이름 !== 'usage';
+  $('#view-qna').hidden   = 이름 !== 'qna';
   document.querySelectorAll('.tab').forEach(b =>
     b.setAttribute('aria-current', String(b.dataset.view === 이름)));
   if (주소도) {
@@ -5113,6 +5114,7 @@ function 보기전환(이름, 주소도 = true) {
   if (이름 === 'map' && typeof map !== 'undefined' && map) { map.invalidateSize(); refreshMap(); }
   if (이름 === 'home')  홈그리기();
   if (이름 === 'usage') 이용그리기();
+  if (이름 === 'qna')   문의탭그리기();
   const v = document.querySelector('.view:not([hidden])');
   if (v) v.scrollTop = 0;
 }
@@ -5217,6 +5219,88 @@ async function 이용그리기() {
     액.innerHTML = `<p class="note sm">이용현황을 읽지 못했습니다 — ${esc(e.message)}</p>`;
   }
 }
+
+/* ---- 문의 탭 (2026-10-22) ----
+   질문·답변은 누구나 본다(/api/inquiries). 남기기는 로그인한 사용자만(서버도 막는다). 답변은 root 만(서버도 막는다).
+   ★ 사용자가 쓴 글은 **전부 esc** 한다 — 남이 쓴 글이 모두에게 보이는 자리다. */
+let 문의쪽 = 1, 나 = null;
+async function 나알기() {
+  const t = 토큰(); if (!t) return (나 = null);
+  try { const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + t } });
+        나 = r.ok ? await r.json() : null; if (!r.ok) 토큰저장(''); }
+  catch { 나 = null; }
+  return 나;
+}
+async function 문의탭그리기(쪽 = 1) {
+  문의쪽 = 쪽;
+  await 나알기();
+  const 새 = $('#qnew');
+  새.innerHTML = 나
+    ? `<div class="qform"><label for="qtxt" class="ec-help">문의 남기기 <span class="muted">(${esc(나.username)}로 로그인됨)</span></label>
+        <textarea id="qtxt" class="ec-txt" maxlength="2000" rows="3" placeholder="궁금한 점 · 잘못된 값 · 바라는 기능"></textarea>
+        <div class="ec-btns"><button type="button" class="ec-b ec-pri" data-q-send>남기기</button><span class="qmsg muted"></span></div></div>`
+    : `<p class="ec-help">문의를 남기려면 로그인하세요. <button type="button" class="ec-b" data-q-login>로그인하러 가기</button></p>`;
+  const L = $('#qlist');
+  L.innerHTML = '<p class="muted">불러오는 중…</p>';
+  try {
+    const d = await fetch('/api/inquiries?page=' + 쪽).then(r => r.json());
+    if (d.error) throw new Error(d.error);
+    const 날 = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '');
+    const 관리 = 나 && 나.role === 'root';
+    L.innerHTML = (d.목록 || []).length ? (d.목록 || []).map(q => `
+      <article class="qitem" data-qid="${q.id}">
+        <div class="qhead"><span class="pill${q.답변 ? ' use' : ''}">${q.답변 ? '답변함' : '답변 전'}</span>
+          <span class="muted">#${q.id} · ${esc(q.누구)} · ${esc(날(q.때))}</span>
+          ${q.종류 === '오류' ? `<span class="pill">오류</span>` : ''}</div>
+        ${q.종류 === '오류' ? `<p class="qerr">${esc(q.무엇 || '')} 실패 — ${esc(q.말 || '')}${q.오류번호 ? ` <span class="muted">· 오류번호 ${esc(q.오류번호)}</span>` : ''}${q.단지코드 ? ` <span class="muted">· 단지코드 ${esc(q.단지코드)}</span>` : ''}</p>` : ''}
+        ${q.내용 ? `<p class="qbody">${esc(q.내용).replace(/\n/g, '<br>')}</p>` : (q.종류 === '오류' ? '<p class="qbody muted">(글 없이 오류 정보만 남김)</p>' : '')}
+        ${q.답변 ? `<div class="qans"><b>터무니</b> <span class="muted">${esc(날(q.답변때))}</span><p>${esc(q.답변).replace(/\n/g, '<br>')}</p></div>` : ''}
+        ${관리 ? `<details class="qadm"${q.답변 ? '' : ' open'}><summary>${q.답변 ? '답변 고치기' : '답변 달기'}</summary>
+            <textarea class="ec-txt" rows="3" maxlength="4000">${esc(q.답변 || '')}</textarea>
+            <div class="ec-btns"><button type="button" class="ec-b ec-pri" data-q-answer="${q.id}">저장</button><span class="qmsg muted"></span></div></details>` : ''}
+      </article>`).join('')
+      + (d.전체 > 30 ? `<div class="ec-btns">${쪽 > 1 ? `<button type="button" class="ec-b" data-q-page="${쪽 - 1}">이전</button>` : ''}
+          <span class="muted">${fmt(d.전체)}건 중 ${fmt((쪽 - 1) * 30 + 1)}–${fmt(Math.min(쪽 * 30, d.전체))}</span>
+          ${쪽 * 30 < d.전체 ? `<button type="button" class="ec-b" data-q-page="${쪽 + 1}">다음</button>` : ''}</div>` : '')
+      : '<p class="muted">아직 남긴 문의가 없습니다.</p>';
+  } catch (e) {
+    L.innerHTML = `<p class="note sm">문의 목록을 읽지 못했습니다 — ${esc(e.message)}</p>`;
+  }
+}
+document.addEventListener('click', async e => {
+  const v = document.getElementById('view-qna'); if (!v || v.hidden || !v.contains(e.target)) return;
+  if (e.target.closest('[data-q-login]')) { 보기전환('map'); if (!askMode) setMode('ask'); 로그인띄우기('', '로그인하면 문의를 남길 수 있습니다.'); return; }
+  const pg = e.target.closest('[data-q-page]'); if (pg) { 문의탭그리기(Number(pg.dataset.qPage)); return; }
+  const send = e.target.closest('[data-q-send]');
+  if (send) {
+    const 글 = ($('#qtxt') || {}).value || '', msg = send.parentElement.querySelector('.qmsg');
+    if (!글.trim()) { msg.textContent = '내용을 적어 주세요'; return; }
+    send.disabled = true;
+    try {
+      const r = await fetch('/api/inquiry', { method: 'POST',
+        headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + 토큰() },
+        body: JSON.stringify({ 종류: '일반', 내용: 글 }) });
+      const d = await r.json();
+      if (r.status === 401) { 토큰저장(''); return 문의탭그리기(); }
+      if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+      문의탭그리기(1);
+    } catch (x) { send.disabled = false; msg.textContent = '남기지 못했습니다 — ' + x.message; }
+    return;
+  }
+  const ans = e.target.closest('[data-q-answer]');
+  if (ans) {
+    const box = ans.closest('.qadm'), msg = box.querySelector('.qmsg');
+    ans.disabled = true;
+    try {
+      const r = await fetch(`/api/inquiry/${ans.dataset.qAnswer}/answer`, { method: 'POST',
+        headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + 토큰() },
+        body: JSON.stringify({ 답변: box.querySelector('textarea').value }) });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+      문의탭그리기(문의쪽);
+    } catch (x) { ans.disabled = false; msg.textContent = '저장하지 못했습니다 — ' + x.message; }
+  }
+});
 
 boot();
 
