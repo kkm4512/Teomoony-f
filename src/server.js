@@ -1797,6 +1797,10 @@ app.get('/api/suggest', async (req, res) => {
       .input('raw', sql.NVarChar(60), raw)
       .input('q', sql.NVarChar(200), `%${글자}%`)
       .input('p', sql.NVarChar(200), `${글자}%`)
+      /* 322: 폐쇄 대장 주소 검색 — 숫자가 있을 때만, 끝 두 말('가락동 479' · '송파대로 345')을 앞부분 일치로 */
+      .input('짧은주소', sql.NVarChar(200), /\d/.test(raw)
+          ? (() => { const w = 도로명맞춤(raw).replace(/번지/g, '').trim().split(/\s+/); return w.length >= 2 ? 글자그대로(w.slice(-2).join(' ')) : null; })()
+          : null)
       .input('qid', sql.Int, /^\d{1,9}$/.test(raw) ? Number(raw) : null)
       .input('상가', sql.Bit, 길이 >= 2 ? 1 : 0)
       .input('주소', sql.Bit, /\d/.test(raw) && 길이 >= 3 ? 1 : 0)
@@ -1936,11 +1940,15 @@ app.get('/api/suggest', async (req, res) => {
          WHERE @상가 = 1 AND m.is_current = 1 AND m.lat IS NOT NULL AND m.bizes_nm LIKE @p
          ORDER BY CASE WHEN m.bizes_nm = @raw THEN 0 ELSE 1 END, m.bizes_nm, m.brch_nm;
         /* 12 폐쇄·말소 대장 (2026-10-22) — 지금 단지와 섞지 않고 따로 묶음. 이름이 원문에 있는 것만 */
-        SELECT TOP 4 s.site_key, s.이름, s.폐쇄구분, s.shter_day, s.주용도, s.총괄세대, s.plat_plc, s.lat, s.lng, s.now_complex_id,
-               전체 = COUNT(*) OVER ()
+        /* 2026-10-23 사장님 "지도에 보이고 검색에 보이면 붙은 것" — 이름이 없는 옛 건물도 **주소(지번 · 도로명)로** 찾는다.
+           주소 검색은 검색어에 숫자가 있을 때만(번지·건물번호) — '아파트' 같은 말로 32만 줄의 주소를 훑지 않게. */
+        SELECT TOP 4 s.site_key, s.이름, s.폐쇄구분, s.shter_day, s.주용도, s.총괄세대, s.plat_plc, s.lat, s.lng, s.now_complex_id, s.동수,
+               주소로 = CASE WHEN s.이름 LIKE @q THEN 0 ELSE 1 END, 전체 = COUNT(*) OVER ()
           FROM gold.closed_site s
          WHERE s.이름 LIKE @q
-         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 ELSE 1 END, s.총괄세대 DESC, s.이름;
+            OR (@짧은주소 IS NOT NULL AND (s.지번짧게 = @짧은주소 OR s.지번짧게 LIKE @짧은주소 + N'-%' OR s.도로짧게 = @짧은주소 OR s.도로짧게 LIKE @짧은주소 + N'-%'))
+               /* 322: 짧은 주소 칸(색인) — '479' 는 479 · 479-1 … 만(4790 은 아님) */
+         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 WHEN s.이름 LIKE @q THEN 1 ELSE 2 END, s.총괄세대 DESC, s.동수 DESC, s.이름;
         /* 13 청약 공고 — 단지에 **아직 안 이어진** 것만(이어진 것은 단지로 찾는다). 주택(관리번호)마다 한 줄, 가장 최근 공고 */
         SELECT TOP 4 x.house_manage_no, x.house_nm, x.공고종류, x.rcrit_pblanc_de, x.hssply_adres, x.lat, x.lng, 전체 = COUNT(*) OVER ()
           FROM (SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.hssply_adres,
@@ -2004,9 +2012,10 @@ app.get('/api/suggest', async (req, res) => {
           /* 13:11: 현재 단지에는 옛 대장 표를 달지 않는다(토지·허가 탭에만 기록) */
           동작: { 종류: '단지', id: x.complex_id } })) },
       { 종류: '폐쇄·말소 대장', 전체: 전체(rs[11] || []), 항목: (rs[11] || []).map(x => ({
-          이름: x.이름,
+          이름: x.이름 || x.plat_plc,
           보조: [x.폐쇄구분 && x.shter_day ? `${x.폐쇄구분} ${x.shter_day.slice(0, 4)}.${x.shter_day.slice(4, 6)}.${x.shter_day.slice(6, 8)}` : x.폐쇄구분,
-                 x.주용도, x.총괄세대 ? `${x.총괄세대}세대(총괄표제부)` : null, x.plat_plc].filter(Boolean).join(' · '),
+                 x.주용도, x.총괄세대 ? `${x.총괄세대}세대(총괄표제부)` : null, x.이름 ? x.plat_plc : null,
+                 x.lat == null ? '지도 자리 없음' : null].filter(Boolean).join(' · '),
           표: '닫힌 대장',
           동작: { 종류: '폐쇄', key: x.site_key, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng),
                   now: x.now_complex_id || null } })) },
