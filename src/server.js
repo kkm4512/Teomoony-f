@@ -4324,14 +4324,32 @@ app.get('/api/closed/site/:key', async (req, res) => {
       INSERT INTO #sv SELECT t.trade_sk, N'같은 필지 · 대장 닫힌 뒤'
         FROM gold.closed_site s JOIN silver.rtms_trade t ON t.match_pnu = s.pnu
        WHERE s.site_key = @k AND t.trade_kind LIKE 'SILV%' AND LEN(s.shter_day) = 8 AND t.deal_ymd >= s.shter_day;
-      ${분양권줄SQL}`);
+      ${분양권줄SQL}
+      /* 2026-10-23 사장님 "확실한건만" — 이 필지(지번)로 신고됐는데 **어느 단지에도 안 붙은** 실거래(분양권·입주권 아님).
+         닫히기 전 = 옛 건물 거래 · 닫힌 뒤 = 이 자리 새 건물 거래(새 대장이 아직 없거나 다른 지번에 있다). 날짜로만 가른다 · 이름은 안 본다. */
+      IF OBJECT_ID('tempdb..#ot') IS NOT NULL DROP TABLE #ot;
+      SELECT t.trade_sk, t.deal_ymd, t.trade_kind, t.is_rent, t.deal_amount, t.deposit, t.monthly_rent, t.exclu_use_ar, t.floor_no,
+             t.bld_nm, t.is_canceled, 때 = CASE WHEN t.deal_ymd <= s.shter_day THEN N'전' ELSE N'뒤' END
+        INTO #ot
+        FROM gold.closed_site s JOIN silver.rtms_trade t ON t.match_pnu = s.pnu
+       WHERE s.site_key = @k AND LEN(s.shter_day) = 8 AND t.match_complex_id IS NULL AND t.trade_kind NOT LIKE 'SILV%';
+      SELECT 때, 매매 = SUM(CASE WHEN is_rent = 0 AND ISNULL(is_canceled, 0) = 0 THEN 1 ELSE 0 END),
+             전월세 = SUM(CASE WHEN is_rent = 1 AND ISNULL(is_canceled, 0) = 0 THEN 1 ELSE 0 END),
+             해제 = SUM(CASE WHEN is_canceled = 1 THEN 1 ELSE 0 END), 처음 = MIN(deal_ymd), 끝 = MAX(deal_ymd),
+             이름 = (SELECT STRING_AGG(n, ', ') FROM (SELECT DISTINCT TOP 3 n = o2.bld_nm FROM #ot o2 WHERE o2.때 = o.때 AND o2.bld_nm IS NOT NULL) z)
+        FROM #ot o GROUP BY 때;
+      SELECT TOP 80 때, 계약일 = deal_ymd, 종류 = trade_kind, 전월세 = CAST(is_rent AS INT), 거래원 = deal_amount, 보증금 = deposit, 월세 = monthly_rent,
+             전용 = exclu_use_ar, 층 = floor_no, 취소 = CAST(ISNULL(is_canceled, 0) AS INT)
+        FROM (SELECT *, rn = ROW_NUMBER() OVER (PARTITION BY 때 ORDER BY deal_ymd DESC, trade_sk DESC) FROM #ot) x
+       WHERE rn <= 40 ORDER BY 때, deal_ymd DESC;`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
     const g = (r.recordsets[2] || [])[0];
     const 이력줄 = r.recordsets[3] || [];
     res.json({ 묶음: site, 동: r.recordsets[1], 필지: g && g.geojson ? JSON.parse(g.geojson) : null,
                이력: 이력줄.length ? { 받은시각: 이력줄[0].받음, 줄: 이력줄.filter(z => z.이동일 || z.이동사유) } : null,
-               분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {} });
+               분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {},
+               옛거래: { 셈: r.recordsets[6] || [], 줄: r.recordsets[7] || [] } });
   } catch (e) { fail(res, e, 'closed-site'); }
 });
 app.get('/api/complexes/:id/closed', async (req, res) => {
