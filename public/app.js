@@ -4344,6 +4344,9 @@ function renderDetail(payload) {
     ['dong',  `동·호 <b>${fmt(dongN)}</b>`],
     ['mgmt',  `관리`],
     ['price', `실거래 <b>${fmt(saleN + rentN)}</b>`],
+    /* 2026-10-22 사장님 "청약을 왜 실거래 탭에 놨어? 섹션을 분리해도 될 수준" — 분양·청약을 따로 탭으로.
+       ★ 이어진 공고가 있을 때만 탭을 보인다(2020년 전 단지까지 빈 탭이면 소음). 모르면 숨겨 두고 받은 뒤 연다(분양탭확인). */
+    ['sale',  `분양·청약${분양수(c.complex_id) ? ` <b>${fmt(분양수(c.complex_id))}</b>` : ''}`],
     ['land',  `토지·허가 <b>${fmt(parcels.length)}</b>`],
   ];
   const TAB_KEYS = TABS.map(t => t[0]);
@@ -4369,8 +4372,8 @@ function renderDetail(payload) {
                 aria-selected="${거래탭 === 이름}">${이름}<b>${fmt(n)}</b></button>`;
     }).join('')}</div>` : '';
 
+  const paneS = `<div class="ahbox" data-ah="c|${c.complex_id}"><p class="note muted">불러오는 중…</p></div>`;
   const paneP = `
-    <div class="ahbox" data-ah="c|${c.complex_id}"></div>
     ${stats.length ? `<p class="srcline">${SRC.rtms.t} · ${SRC.rtms.s} — 동·호 단위는 집계하지 않습니다(평형 기준)</p>` : ''}
     ${거래탭UI}
     ${areaPick}
@@ -4762,14 +4765,15 @@ function renderDetail(payload) {
     <p class="sub">${esc(c.rep_plat_plc || '')}${c.rep_road_addr ? '<br>' + esc(c.rep_road_addr) : ''}</p>
     <p class="facts">${facts}${ratios ? `<br><span class="muted">${ratios}</span>` : ''}</p>
     <div class="tabs">${TABS.map(([k, label]) =>
-      `<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}">${label}</button>`).join('')}</div>
+      `<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !분양수(c.complex_id) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
     <div class="pane">${({ info: paneI, near: paneN, dong: paneD, mgmt: paneM,
-                           price: paneP, land: paneL })[detailTab] || paneI}</div>`;
+                           price: paneP, sale: paneS, land: paneL })[detailTab] || paneI}</div>`;
 
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
   고정표시();              // 20:00 눌러 고정한 줄 표시를 다시 입힌다
   document.querySelectorAll('#detail [data-redev]').forEach(el => el.classList.toggle('on', el.dataset.redev === 구역지금));
-  분양채우기();            // 분양(청약홈) 칸 — 실거래 탭에 있을 때만 그릇이 있다
+  분양채우기();            // 분양(청약홈) 칸 — 분양·청약 탭에 있을 때만 그릇이 있다
+  분양탭확인(c.complex_id); // 이어진 공고가 있으면 분양·청약 탭을 연다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
@@ -5394,6 +5398,21 @@ async function 동네따라가기(강제) {
    이어진 공고가 없으면 **칸 자체를 안 보인다** — 2020년 전 단지까지 '없음' 을 붙이면 소음이다.
    연결은 추정(법정동 · 입주월 · 세대 · 거리)이라 그렇게 적는다. 이름으로 잇지 않았다. */
 const 분양캐시 = new Map();
+function 분양수(cid) { const r = 분양캐시.get(`c|${cid}`); return r ? (r.공고 || []).length : 0; }
+async function 분양탭확인(cid) {
+  const 키 = `c|${cid}`;
+  let r = 분양캐시.get(키);
+  if (!r) {
+    try { r = await fetch(`/api/applyhome?complex_id=${encodeURIComponent(cid)}`).then(x => x.json()); } catch { return; }
+    if (!r || r.error) return;
+    분양캐시.set(키, r);
+  }
+  const b = document.querySelector('#detail .tab[data-tab="sale"]');
+  if (!b || !lastDetail || String((lastDetail.complex || {}).complex_id) !== String(cid)) return;   // 그사이 다른 단지로 옮겼다
+  const n = (r.공고 || []).length;
+  if (n) { b.hidden = false; b.innerHTML = `분양·청약 <b>${fmt(n)}</b>`; }
+  else if (detailTab === 'sale') { detailTab = 'info'; renderDetail(lastDetail); }   // 공고가 없는 단지로 옮겼다
+}
 async function 분양채우기() {
   const box = document.querySelector('#detail .ahbox');
   if (!box) return;
