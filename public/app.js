@@ -2175,6 +2175,7 @@ function closeDetail() {
   동공고지우기();
   selectedRedev = null;
   주소맞춤('/');
+  document.title = '터무니 · 전국 아파트 단지 조회 — 건축물대장 · 실거래 · 토지';   /* index.html 제목과 같게 */
   시트(($('#q') && $('#q').value.trim()) ? 'half' : 'peek');
   try { focusLayer.clearLayers(); focusBldLayer.clearLayers(); } catch (e) {}
   document.querySelectorAll('.row').forEach(b => b.setAttribute('aria-current', 'false'));
@@ -4778,6 +4779,12 @@ function renderDetail(payload) {
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
   용도채우기(c.complex_id); // 머리 용도 표 — 대장 원문 주용도 · 기타용도 · 전유부 호별 용도
+  /* 14:05 QA: 다른 단지로 옮겨도 탭 제목이 첫 단지 그대로였다 — 서버 /c/:id 제목과 같은 규칙으로 맞춘다 */
+  try {
+    const 동네 = (c.rep_plat_plc || '').split(/\s+/).slice(1, 3).join(' ');
+    const 세대 = Number(c.hhld_cnt_sum) || null;
+    document.title = [표시이름(c) || `단지 ${c.complex_id}`, 동네, 세대 ? `${세대.toLocaleString('ko-KR')}세대` : null].filter(Boolean).join(' · ') + ' — 터무니';
+  } catch (e) {}
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
   어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
@@ -5460,7 +5467,9 @@ function 분양칸(공고) {
             <td class="n">${m.최고원 ? eok(m.최고원) : '—'}</td>
             <td class="n">${m.최고원 && m.전용m2 ? eok(Number(m.최고원) / (Number(m.전용m2) / 3.3058)) : '—'}</td>${
             형.some(z => z.경쟁 != null) ? `<td class="n" title="${esc([m.경쟁군 ? `${m.경쟁군}군 전체(이 군 공급 ${fmt(m.경쟁공급)}세대) — 군 안 여러 타입이 같은 경쟁률` : '', m.경쟁순위 ? m.경쟁순위 + '순위' : '', m.경쟁구분 || '', m.접수 != null ? '접수 ' + fmt(m.접수) + '건' : ''].filter(Boolean).join(' · '))}">${
-              m.경쟁 == null ? '—' : (m.경쟁군 ? `<span class="muted sm">${esc(m.경쟁군)}군</span> ` : '') + (m.미달 != null ? `<span class="warnx">미달 ${fmt(m.미달)}</span>` : esc(String(m.경쟁)) + ':1')}</td>` : ''}${
+              m.경쟁 == null ? '—' : (m.경쟁군 ? `<span class="muted sm">${esc(m.경쟁군)}군</span> ` : '') + (m.미달 != null ? `<span class="warnx">미달 ${fmt(m.미달)}</span>`
+                : /^\d+(\.\d+)?$/.test(String(m.경쟁).trim()) ? esc(String(m.경쟁)) + ':1'
+                : `<span class="muted" title="원문 경쟁률 칸 '${esc(String(m.경쟁))}' — 숫자가 아님(접수가 없었거나 집계 안 함)">${esc(String(m.경쟁)) === '-' ? '—' : esc(String(m.경쟁))}</span>`)}</td>` : ''}${
             형.some(z => z.가점최저 != null) ? `<td class="n">${m.가점최저 != null ? `${Number(m.가점최저)}~${Number(m.가점최고)}` : '—'}</td>` : ''}</tr>`).join('')}
           </tbody></table>
           ${형.some(m => m.경쟁 != null) ? `<p class="note sm">경쟁률은 <b>1순위 · 해당지역</b> 기준(없으면 그 다음 순위)입니다 — 칸에 올리면 순위·지역·접수 건수가 보입니다.
@@ -6222,10 +6231,12 @@ function 닫힌자리그리기(r, 표) {
   if (r.필지) L.geoJSON(r.필지, { interactive: false, pane: 'closedPane',
     style: { color: '#4b5563', weight: 2, dashArray: '5 4', fillColor: '#6b7280', fillOpacity: 0.5 } }).addTo(g);
   const c = s.lat != null ? [Number(s.lat), Number(s.lng)] : g.getBounds().getCenter();
-  L.marker(c, { interactive: false, zIndexOffset: 900, icon: L.divIcon({ className: 'clx-wrap', iconSize: [26, 26], iconAnchor: [13, 13],
-    html: '<div class="clx" aria-label="닫힌 대장">✕</div>' }) }).addTo(g);
+  /* 14:08 QA: 작은 필지(20m 남짓)는 ✕(26px)가 회색을 다 덮었다 → 최대(19)까지 당기고, ✕ 는 필지 **위쪽 바깥**에 핀처럼 */
+  const 위 = r.필지 ? L.latLng(g.getBounds().getNorth(), g.getBounds().getCenter().lng) : null;
+  L.marker(위 || c, { interactive: false, zIndexOffset: 900, icon: L.divIcon({ className: 'clx-wrap', iconSize: [22, 22], iconAnchor: 위 ? [11, 26] : [11, 11],
+    html: '<div class="clx pin" aria-label="닫힌 대장">✕</div>' }) }).addTo(g);
   구역층 = g; 구역지금 = 표;
-  지도맞추기(r.필지 ? g.getBounds() : c, 18);
+  지도맞추기(r.필지 ? g.getBounds() : c, 19);
   return true;
 }
 /* 단지 상세 토지 탭의 닫힌 대장 줄 → 지도에 ✕ (12:36 사장님 "그대론데??" — 지금 단지는 그대로 두고, 닫힌 대장 자리만 따로 표시) */
