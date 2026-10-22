@@ -3915,7 +3915,7 @@ app.get('/api/applyhome', async (req, res) => {
         SELECT t.trade_sk, CASE WHEN t.deal_ymd >= @첫 THEN N'공고 지번' ELSE N'공고 지번 · 공고 전 입주권' END FROM silver.rtms_trade t
          WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL
            AND (t.deal_ymd >= @첫   /* 입주권(조합원 권리)은 공고 전 10년까지 — 316 과 같은 규칙 */
-                OR (t.ownership_gbn = N'입' AND t.deal_ymd >= CONVERT(CHAR(8), DATEADD(YEAR, -10, CONVERT(DATE, @첫)), 112)));
+                OR (t.ownership_gbn = N'입' AND t.deal_ymd >= CONVERT(CHAR(8), DATEADD(YEAR, -10, TRY_CONVERT(DATE, @첫)), 112)));
       SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
              구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn,
              취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
@@ -5790,7 +5790,7 @@ app.get('/api/complexes/:id', async (req, res) => {
       SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세,
              면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수
         FROM r WHERE rn <= 120
-       ORDER BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END, 날짜 DESC, ISNULL(금액, 보증금) DESC`);
+       ORDER BY 전월세, 월세냐, 날짜 DESC, ISNULL(금액, 보증금) DESC`);   /* 2026-10-23: 날짜순으로 섞는다 — 준공 뒤(등기 전) 입주권도 붙어서 */
 
     /* 전세가율 (2026-10-19)
        ★ 새로 받은 데이터가 아니다 - 매매와 전월세를 **둘 다 갖고 있어서** 나온다.
