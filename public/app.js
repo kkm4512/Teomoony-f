@@ -6693,10 +6693,11 @@ function 구역상세(d) {
         <b>${esc(p.house_nm || '')}</b><span class="muted"> ${esc(공고종류말[p.공고종류] || p.공고종류 || '')} · 모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대</span></li>`).join('')}</ul>`
       : `<p class="note">${gapCell('', 'NA', '공고 지번이 이 구역 안에 있는 청약홈 공고가 없습니다 (서울·안양 공고만 받았습니다)')}</p>`}
     ${sect('구역에 걸친 단지', 'bld', ` ${fmt(단.length)}`)}
-    ${단.length ? `<ul class="lu">${단.slice(0, 60).map(x => `<li data-goto="${x.complex_id}" style="cursor:pointer">
+    ${/* 2026-10-22 사장님 "걸친 단지 10개씩, 더보기 누르면 10개씩 더" — 다 그려 두고 11번째부터 숨긴다(다시 받지 않는다) */''}
+    ${단.length ? `<ul class="lu zcx">${단.map((x, i) => `<li data-goto="${x.complex_id}" style="cursor:pointer"${i >= 10 ? ' hidden' : ''}>
         <b>${esc(이름(x))}</b><span class="muted"> ${x.세대 ? fmt(x.세대) + '세대 · ' : ''}${x.동 ? fmt(x.동) + '동 · ' : ''}${x.사용승인 ? String(x.사용승인).slice(0, 4) + '년 · ' : ''}구역 안 ${Number(x.포함률).toFixed(0)}%${
           x.최고 ? ` · 3년 최고 ${eok(x.최고)}` : ''}</span></li>`).join('')}</ul>
-      ${단.length > 60 ? `<p class="note sm">세대수 많은 순으로 60곳만 보입니다(전체 ${fmt(단.length)}곳).</p>` : ''}`
+      ${단.length > 10 ? `<button type="button" class="moreb" data-zcx-more>10개 더보기 <span class="muted">(10 / ${fmt(단.length)})</span></button>` : ''}`
       : `<p class="note">${gapCell('', 'NA', '이 구역과 겹치는 대장 단지가 없습니다')}</p>`}
     <p class="srcline">구역 경계 · 단계: ${esc(d.출처 || '')}. 걸친 단지는 단지 필지와 구역 경계의 <b>겹친 넓이</b>로 셉니다(단지 상세의 '정비사업 구역' 칸과 같은 셈).
       경계에 겨우 닿은(1% 미만) ${fmt(d.뺀단지 || 0)}곳은 뺐습니다. <br>
@@ -6711,6 +6712,15 @@ document.addEventListener('click', e => {
   const z = e.target.closest('[data-redevzone]');
   if (z && !e.target.closest('#detail [data-redev]')) { e.preventDefault(); try { map.closePopup(); } catch (x) {} selectRedevZone(z.dataset.redevzone); return; }
   if (!selectedRedev) return;
+  const mb = e.target.closest('#detail [data-zcx-more]');
+  if (mb) {
+    const 숨은 = [...document.querySelectorAll('#detail ul.zcx > li[hidden]')];
+    숨은.slice(0, 10).forEach(li => { li.hidden = false; });
+    const 전체 = document.querySelectorAll('#detail ul.zcx > li').length;
+    const 보임 = 전체 - document.querySelectorAll('#detail ul.zcx > li[hidden]').length;
+    if (보임 >= 전체) mb.remove(); else mb.innerHTML = `10개 더보기 <span class="muted">(${fmt(보임)} / ${fmt(전체)})</span>`;
+    return;
+  }
   const g = e.target.closest('#detail [data-goto]');
   if (g) { select(Number(g.dataset.goto)); return; }
   const h = e.target.closest('#detail [data-ahhouse]');
