@@ -2965,8 +2965,18 @@ app.get('/api/applyhome/:house/where', async (req, res) => {
     const x = r.recordset[0];
     if (!x) return res.status(404).json({ error: 'not found' });
     const 자리 = x.lat != null ? '필지' : (x.근처lat != null && Number(x.근처필지) > 0 ? '근처' : '없음');
-    let 이력 = null, 이력실패 = null;
-    if (x.pnu && 자리 !== '필지' && (process.env.VWORLD_KEY || '').trim()) {
+    let 이력 = null, 이력실패 = null, 이력출처 = null;
+    /* 305(13:55): 미리 받은 필지면 DB 에서 — 브이월드를 부르지 않는다 */
+    if (x.pnu && 자리 !== '필지') {
+      const d = await pool.request().input('p', sql.Char(19), x.pnu).query(`
+        SELECT 받음 = (SELECT 받은시각 FROM silver.land_move_done WHERE pnu = @p);
+        SELECT 이동일, 이동사유, 지번, 면적, 지목, 이력순번, 대장 FROM silver.land_move_hist WHERE pnu = @p ORDER BY 이동일 DESC, 이력순번 DESC;`);
+      if (d.recordsets[0][0] && d.recordsets[0][0].받음) {
+        이력 = d.recordsets[1].map(z => ({ 일자: z.이동일, 사유: z.이동사유, 지번: z.지번, 면적: z.면적, 지목: z.지목, 순번: z.이력순번, 대장: z.대장 }));
+        이력출처 = { 미리받음: d.recordsets[0][0].받음 };
+      }
+    }
+    if (!이력 && x.pnu && 자리 !== '필지' && (process.env.VWORLD_KEY || '').trim()) {
       const q = new URLSearchParams({ key: process.env.VWORLD_KEY.trim(), domain: (process.env.VWORLD_DOMAIN || 'localhost').trim(),
                                       pnu: x.pnu, format: 'json', numOfRows: '20', pageNo: '1' });
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 12000);
@@ -2984,7 +2994,7 @@ app.get('/api/applyhome/:house/where', async (req, res) => {
     res.json({ pnu: x.pnu, 주소: x.hssply_adres, 자리,
                lat: 자리 === '필지' ? x.lat : 자리 === '근처' ? x.근처lat : null,
                lng: 자리 === '필지' ? x.lng : 자리 === '근처' ? x.근처lng : null,
-               근처필지: 자리 === '근처' ? Number(x.근처필지) : null, 이력, 이력실패 });
+               근처필지: 자리 === '근처' ? Number(x.근처필지) : null, 이력, 이력실패, 이력출처 });
   } catch (e) { fail(res, e, 'applyhome-where'); }
 });
 
