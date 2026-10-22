@@ -1576,6 +1576,7 @@ app.get('/api/suggest', async (req, res) => {
       .input('상가', sql.Bit, 길이 >= 2 ? 1 : 0)
       .query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 적재 중 표와 교착하지 않게 - 읽기 전용 제안 */
+        DECLARE @최신분기 DATE = (SELECT MAX(개정일자) FROM silver.region_link_snap WHERE 완전 = 1);
         /* 1 구 */
         SELECT TOP 3 g.sgg_cd, g.sgg_nm, g.sido_nm, g.전체, b.minx, b.miny, b.maxx, b.maxy
           FROM (SELECT l.sgg_cd, l.sgg_nm, l.sido_nm, 전체 = COUNT(*) OVER (),
@@ -1611,10 +1612,13 @@ app.get('/api/suggest', async (req, res) => {
                           AND c.rep_pnu <= CAST(d.lawd_cd + '999999999' AS CHAR(19))) b
          ORDER BY d.순, d.emd_nm;
         /* 3 행정동 */
-        SELECT TOP 5 a.adm_cd_sgis, a.adm_nm, a.emd_nm, a.mois_nm, a.연결비율,
+        SELECT TOP 5 a.adm_cd_sgis, a.year, a.adm_nm, a.emd_nm, a.mois_nm, a.연결비율,
                minx = a.bbox_minx, miny = a.bbox_miny, maxx = a.bbox_maxx, maxy = a.bbox_maxy,
                전체 = COUNT(*) OVER (),
-               걸린이름 = CASE WHEN a.emd_nm LIKE @q THEN a.emd_nm ELSE a.mois_nm END
+               걸린이름 = CASE WHEN a.emd_nm LIKE @q THEN a.emd_nm ELSE a.mois_nm END,
+               /* 308: 경계(SGIS)는 해마다라 늦다 — 최신 연계정보 분기에 이 행정구역코드가 없으면 '지금은 없는 동' */
+               지금없음 = CASE WHEN @최신분기 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM silver.region_link l
+                                 WHERE l.개정일자 = @최신분기 AND l.행정구역코드 = a.adm_cd_sgis) THEN 1 ELSE 0 END
           FROM silver.adm_boundary a
          WHERE a.year = (SELECT MAX(year) FROM silver.adm_boundary)
            AND (a.emd_nm LIKE @q OR a.mois_nm LIKE @q)
@@ -1715,7 +1719,28 @@ app.get('/api/suggest', async (req, res) => {
                  WHERE p.house_nm LIKE @q
                    AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x
          WHERE x.rn = 1
-         ORDER BY CASE WHEN x.house_nm LIKE @p THEN 0 ELSE 1 END, x.rcrit_pblanc_de DESC;`);
+         ORDER BY CASE WHEN x.house_nm LIKE @p THEN 0 ELSE 1 END, x.rcrit_pblanc_de DESC;
+        /* 14 바뀐 행정동 (2026-10-22, 308) — 지금은 없는 옛 행정동 이름으로 찾으면 **지금 동**으로 안내.
+           ★ 옛→새는 공식 연계정보에서 같은 법정동을 나눠 가진 쌍(이름으로 잇지 않는다). 짝이 여럿이면 모두 적는다.
+           ★ 같은 구에 같은 이름의 지금 행정동이 있으면(강북 번1동처럼 코드만 다시 매긴 것) 빼다 — 위 '행정동' 묶음에 이미 나온다. */
+        SELECT TOP 4 g.*, 전체 = COUNT(*) OVER (),
+               adm_cd = CASE WHEN g.새수 = 1 THEN (SELECT TOP 1 a.adm_cd_sgis FROM silver.adm_boundary a
+                                                    JOIN silver.region_link l ON l.행정구역코드 = a.adm_cd_sgis AND l.행정동코드 = g.새코드 AND l.개정일자 = @최신분기) END,
+               b.minx, b.miny, b.maxx, b.maxy
+          FROM (SELECT o.행정동코드, o.시도명, o.시군구명, o.행정동명, 마지막 = o.마지막본분기, 후분기 = MAX(c.후분기),
+                       새이름 = STRING_AGG(n.행정동명, N' · ') WITHIN GROUP (ORDER BY n.행정동명),
+                       새코드 = MIN(c.새코드), 새수 = COUNT(*), 새현행아님 = SUM(CASE WHEN n.현행 = 0 THEN 1 ELSE 0 END)
+                  FROM gold.region_hdong o
+                  JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
+                  JOIN gold.region_hdong n ON n.행정동코드 = c.새코드
+                 WHERE o.현행 = 0 AND o.행정동명 LIKE @q AND (LEFT(o.행정동코드, 2) = '11' OR LEFT(o.행정동코드, 4) = '4117')
+                   AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명)
+                 GROUP BY o.행정동코드, o.시도명, o.시군구명, o.행정동명, o.마지막본분기) g
+          OUTER APPLY (SELECT minx = MIN(lb.bbox_minx), miny = MIN(lb.bbox_miny), maxx = MAX(lb.bbox_maxx), maxy = MAX(lb.bbox_maxy)
+                         FROM silver.region_link l JOIN silver.lawd_boundary lb ON lb.lawd_cd = l.법정동코드 AND lb.is_current = 1
+                        WHERE l.개정일자 = @최신분기
+                          AND l.행정동코드 IN (SELECT c2.새코드 FROM gold.region_hdong_change c2 WHERE c2.옛코드 = g.행정동코드)) b
+         ORDER BY CASE WHEN g.행정동명 = @raw THEN 0 WHEN g.행정동명 LIKE @p THEN 1 ELSE 2 END, g.행정동명;`);
     const rs = r.recordsets;
     const 상자 = x => (x.minx == null ? null : [Number(x.minx), Number(x.miny), Number(x.maxx), Number(x.maxy)]);
     const 전체 = a => (a.length ? Number(a[0].전체) : 0);
@@ -1728,7 +1753,17 @@ app.get('/api/suggest', async (req, res) => {
       { 종류: '행정동', 전체: 전체(rs[2]), 항목: rs[2].map(x => ({
           이름: x.emd_nm,
           보조: x.adm_nm.replace(/\s*\S+$/, ''),   /* 19:36: 상가 쪽 이름은 안 보인다(사장님) */
+          표: Number(x.지금없음) ? `${x.year}년 경계 · 지금은 없는 동` : undefined,
           동작: { 종류: '행정동', adm_cd: x.adm_cd_sgis, bbox: 상자(x) } })) },
+      /* 308: 옛 행정동 → 지금 동. 분기 사이에 바뀌었다는 것만 안다(시행일은 그 사이 어딘가) */
+      { 종류: '바뀐 행정동', 전체: 전체(rs[13] || []), 항목: (rs[13] || []).map(x => {
+          const 분기 = d => { const t = new Date(d); return `${t.getUTCFullYear()}.${String(t.getUTCMonth() + 1).padStart(2, '0')}`; };
+          const 상 = 상자(x);
+          return {
+            이름: x.행정동명,
+            보조: `${x.시군구명} · 옛 행정동 → 지금 ${x.새이름}${Number(x.새현행아님) ? ' (그 뒤 또 바뀜)' : ''} · ${분기(x.마지막)}~${분기(x.후분기)} 사이에 바뀜`,
+            표: Number(x.새수) > 1 ? `${x.새수}개 동으로` : '옛 이름',
+            동작: x.adm_cd ? { 종류: '행정동', adm_cd: x.adm_cd, bbox: 상 } : { 종류: '범위', bbox: 상 } }; }) },
       { 종류: '단지', 전체: 전체(rs[3]), 항목: rs[3].map(x => ({
           /* 20:19: 이름이 주소뿐이면 실거래 이름을 이름으로(화면 app.js 표시이름 과 같은 규칙) */
           이름: (x.complex_nm === x.rep_plat_plc && x.실거래이름) ? x.실거래이름 : x.complex_nm,
