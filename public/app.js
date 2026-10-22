@@ -1666,7 +1666,48 @@ async function ask() {
   }
 }
 
+/* 지역 순위 (2026-10-22) — 숫자는 서버(DB)가 센 그대로. 기준·기간·뺀 곳을 같이 적는다(작업방식 10장: 자르면 말한다). */
+function renderAskRegion(d) {
+  const h = d.해석 || {}, R = d.지역순위 || {};
+  const 만 = v => Math.round(Number(v) / 1e4).toLocaleString();
+  const 날 = v => (v ? `${v.slice(0, 4)}.${v.slice(4, 6)}` : '');
+  const 줄 = (k, v, note) => !v ? '' : `<div class="arow"><span class="ak">${esc(k)}</span><b>${esc(v)}</b>${note ? `<i>${esc(note)}</i>` : ''}</div>`;
+  $('#count').textContent = `${fmt((R.목록 || []).length)}곳`;
+  const 목 = R.목록 || [];
+  $('#list').innerHTML = `
+    <li class="askbox">
+      <div class="at">이렇게 알아들었습니다 — <b>지역 순위</b></div>
+      ${줄('범위', (h.지역 || []).join(' · '))}
+      ${줄('단위', h.단위 === '동' ? '법정동' : '시군구', h.단위 === '동' ? "'구별' 이라고 하면 구 단위로 셉니다" : "'동네·동별' 이라고 하면 동 단위로 셉니다")}
+      ${줄('기준', h.기준, '총액이 아니라 평당가로 견줍니다 — 지역마다 집 크기가 다릅니다')}
+      ${줄('기간', R.기간 ? `${날(R.기간.부터)} ~ ${날(R.기간.까지)} (계약일)` : '', '이번 달·지난달은 신고가 덜 끝나 뺐습니다')}
+      ${줄('정렬', h.방향)}
+      ${h.종목바꿈 ? `<div class="arow"><span class="ak">종목</span><b>아파트</b><i>${esc(h.종목바꿈)}</i></div>` : ''}
+      ${(h.못알아들은말 || []).length ? `<div class="arow bad"><span class="ak">못 알아들음</span><b>${h.못알아들은말.map(esc).join(' · ')}</b><i>이 말은 <b>걸러지지 않았습니다</b></i></div>` : ''}
+    </li>
+    ${(R.덜받음 || []).length ? `<li class="asknote scope"><span class="gap">SCOPE</span>순위에서 뺀 곳 — 이 기간의 아파트 실거래를 <b>다 받지 않았습니다</b>:
+       ${R.덜받음.map(x => `${esc(x.이름)}(${fmt(x.달수)}/12달)`).join(' · ')}. 없는 게 아니라 안 받은 것입니다.</li>` : ''}
+    ${R.표본적음수 ? `<li class="asknote"><span class="gap">NA</span>거래가 20건 안 되는 ${fmt(R.표본적음수)}곳은 중위값이 흔들려 뺐습니다${
+       (R.표본적음 || []).length ? ` — ${R.표본적음.slice(0, 8).map(x => `${esc(x.이름)} ${fmt(x.거래)}건`).join(' · ')}${R.표본적음수 > 8 ? ' …' : ''}` : ''}.</li>` : ''}
+    ${목.length ? 목.map(x => `
+      <li><button class="row ask" ${h.단위 === '동' ? `data-rk-lawd="${esc(x.코드)}"` : `data-rk-sgg="${esc(x.이름)}"`}
+           title="${h.단위 === '동' ? '누르면 지도에서 이 동' : '누르면 이 구의 동네 순위'}">
+        <span class="n"><span class="rk">${x.순위}</span>${esc(x.이름)}</span>
+        <span class="d"><b>${만(x.중위평당)}만/평</b><br>${fmt(x.거래)}건</span>
+      </button></li>`).join('')
+      : `<li class="muted">순위를 낼 수 있는 곳이 없습니다.</li>`}
+    ${목.length && R.전체 > 목.length ? `<li class="muted">${fmt(R.전체)}곳 중 ${fmt(목.length)}곳 — '30개' 처럼 개수를 말하면 더 보입니다.</li>` : ''}
+    <li class="muted sm">평당가 = 거래가 ÷ 전용면적 × 3.3058 · 지역마다 그 기간 거래의 <b>중위값</b>(가운데 값)입니다 — 평균은 초고가 몇 건에 끌려갑니다.</li>`;
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-rk-lawd]');
+  if (a) { selectLawd(a.dataset.rkLawd); return; }
+  const g = e.target.closest('[data-rk-sgg]');
+  if (g) { $('#q').value = `${g.dataset.rkSgg.replace(/^\S+\s/, '')} 제일 비싼 동네`; ask(); }
+});
+
 function renderAsk(d) {
+  if (d.종류 === '지역순위') return renderAskRegion(d);
   const h = d.해석 || {};
   const ai = d.ai || {};
   const 억 = v => v == null ? '—' : (Number(v) / 1e8).toFixed(1) + '억';

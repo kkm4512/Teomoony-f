@@ -2192,8 +2192,106 @@ async function lookupRegion(pool, cands) {
         (r.emd_nm && r.emd_nm === c.v) || (!r.emd_nm && r.sgg_nm && r.sgg_nm.includes(c.v)));
       if (hit) 맞은말.push(c.t);
     }
+    /* ★ 2026-10-22 ('서울에서 제일 비싼 지역' — '서울에서' 를 못 알아들음): **시도**도 찾는다.
+       구·동으로 이미 잡힌 말은 건드리지 않는다(광주 = 경기 광주시와 겹친다 — 구·동이 먼저).
+       시도 이름 앞부분이 맞으면(서울 → 서울특별시) 그 시도. 두 글자부터. */
+    if (!지역.length) {
+      const sr = await pool.request().query(`SELECT lawd_cd, sido_nm FROM meta.lawd_code
+                                               WHERE sgg_nm IS NULL AND emd_nm IS NULL AND ri_nm IS NULL AND sido_nm IS NOT NULL`);
+      for (const c of cands) {
+        if (맞은말.includes(c.t) || c.v.length < 2) continue;
+        const hit = sr.recordset.filter(x => x.sido_nm === c.v || x.sido_nm.startsWith(c.v));
+        if (hit.length === 1 && !지역.some(x => x.sido_cd === hit[0].lawd_cd.slice(0, 2))) {
+          지역.push({ 수준: 'sido', sido_cd: hit[0].lawd_cd.slice(0, 2), lawd_cd: hit[0].lawd_cd, 이름: hit[0].sido_nm });
+          맞은말.push(c.t);
+        }
+      }
+    }
   }
   return { 지역, 맞은말 };
+}
+
+/* ===================== 지역 순위 (2026-10-22 사장님 "2번 ㄱㄱ" — '서울에서 제일 비싼 지역') =====================
+   ★ 숫자는 전부 DB 가 센다. AI 는 문장을 틀로 바꿀 뿐이다.
+   ★ 기준(고정 · 화면에 그대로 적는다):
+     - 아파트 매매(APT_TRADE_DEV) · 해제 뺌 · **직거래 뺌**(가족 간 저가 거래가 섞인다) · 전용면적 있는 것
+     - 평당가 = 거래가 ÷ 전용면적 × 3.3058 — 지역끼리는 **총액이 아니라 평당가**로 견준다(단지 크기가 다르다)
+     - **중위값**(PERCENTILE_CONT 0.5) — 평균은 초고가 몇 건에 끌려간다
+     - 기간 = 지난 12개월 중 **신고가 거의 끝난 달까지**: 이번 달과 지난달은 뺀다(실거래 신고 기한 30일)
+     - 표본 20건 미만은 순위에서 빼고 그렇다고 적는다 · 그 기간을 **다 받지 않은 시군구**도 빼고 적는다(안양은 2024~2025 만 받음)
+   ★ 단위: 시도·전체면 '구', 구를 말했으면 '동'. 문장에 '동네·동별·어느 동' 이 있으면 동, '구별·어느 구' 면 구. */
+const 지역의도 = /(지역|동네|동별|구별|어느\s*(동|구)|어디가|어디|(구|동)\s*(순위|랭킹|비교)|(^|\s)(구|동)(들|은|는|이|가)?(\s|$))/;   // '제일 싼 구 10개' 의 홀로 선 '구'
+async function 지역순위(pool, { 지역, 단위, 방향, 개수 }) {
+  const 지금 = new Date(Date.now() + 9 * 3600e3);                // 한국 날짜
+  const 달 = (y, m) => { const d = new Date(Date.UTC(y, m, 1)); return d; };
+  const 끝달 = 달(지금.getUTCFullYear(), 지금.getUTCMonth() - 2); // 지난지난달
+  const 첫달 = 달(끝달.getUTCFullYear(), 끝달.getUTCMonth() - 11);
+  const ym = d => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  const 말일 = new Date(Date.UTC(끝달.getUTCFullYear(), 끝달.getUTCMonth() + 1, 0)).getUTCDate();
+  const f = ym(첫달) + '01', t = ym(끝달) + String(말일).padStart(2, '0');
+  const rq = pool.request().input('f', sql.Char(8), f).input('t', sql.Char(8), t);
+  const 범위 = [];
+  const sido = 지역.filter(x => x.수준 === 'sido'), sgg = 지역.filter(x => x.수준 === 'sgg');
+  sido.forEach((x, i) => { rq.input('sd' + i, sql.Char(2), x.sido_cd); 범위.push(`LEFT(r.sgg_cd, 2) = @sd${i}`); });
+  sgg.forEach((x, i) => { rq.input('sg' + i, sql.Char(5), x.sgg_cd); 범위.push(`r.sgg_cd = @sg${i}`); });
+  const 조건 = 범위.length ? '(' + 범위.join(' OR ') + ')' : '1 = 1';
+  /* 그 범위 안의 시군구(사전) — 안 받은 곳도 '안 받음' 으로 세려고 */
+  const 구범위 = [];
+  sido.forEach((x, i) => 구범위.push(`LEFT(l.sgg_cd, 2) = @sd${i}`));
+  sgg.forEach((x, i) => 구범위.push(`l.sgg_cd = @sg${i}`));
+  const 키 = 단위 === '동' ? "r.sgg_cd + r.umd_cd" : 'r.sgg_cd';
+  const r = await rq.query(`
+    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    IF OBJECT_ID('tempdb..#rk1') IS NOT NULL DROP TABLE #rk1;
+    SELECT k = ${키}, r.sgg_cd, p = r.deal_amount / r.exclu_use_ar * 3.3058
+      INTO #rk1
+      FROM silver.rtms_trade r
+     WHERE r.is_rent = 0 AND r.is_canceled = 0 AND r.trade_kind = 'APT_TRADE_DEV'
+       AND r.exclu_use_ar > 0 AND r.deal_amount > 0 AND ISNULL(r.dealing_gbn, N'') <> N'직거래'
+       AND r.deal_ymd BETWEEN @f AND @t AND ${조건};
+    /* 시군구마다 그 기간에 **아파트 매매가 하나라도 있는 달** 수 — 12 가 아니면 기간을 다 받지 않은 것.
+       ★ 종목을 맞춘다: 안양은 다른 종목은 2026 까지 있는데 아파트는 2025.12 까지라, 종목 없이 세면 '다 받음' 으로 속는다(실측). */
+    IF OBJECT_ID('tempdb..#rk2') IS NOT NULL DROP TABLE #rk2;
+    SELECT r.sgg_cd, 달수 = COUNT(DISTINCT LEFT(r.deal_ymd, 6))
+      INTO #rk2
+      FROM silver.rtms_trade r
+     WHERE r.is_rent = 0 AND r.trade_kind = 'APT_TRADE_DEV' AND r.deal_ymd BETWEEN @f AND @t AND ${조건}
+     GROUP BY r.sgg_cd;
+    SELECT k, n = COUNT(*), 중위 = MAX(med), sgg_cd = MAX(sgg_cd)
+      FROM (SELECT k, sgg_cd, med = PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p) OVER (PARTITION BY k) FROM #rk1) z
+     GROUP BY k;
+    SELECT sgg_cd, 달수 FROM #rk2;
+    SELECT DISTINCT l.sgg_cd, 이름 = l.sido_nm + N' ' + l.sgg_nm
+      FROM meta.lawd_code l
+     WHERE l.emd_nm IS NULL AND l.ri_nm IS NULL AND l.sgg_nm IS NOT NULL
+       AND ${구범위.length ? '(' + 구범위.join(' OR ') + ')' : 'l.sgg_cd IN (SELECT DISTINCT sigungu_cd FROM gold.complex)'};`);
+  const [행, 달들, 구들] = r.recordsets;
+  const 달수 = new Map(달들.map(x => [x.sgg_cd, Number(x.달수)]));
+  /* 이름: 구는 사전, 동은 마스터(308 지금 이름) — 코드로 찾는다 */
+  const 이름 = new Map();
+  for (const g of 구들) 이름.set(g.sgg_cd, g.이름);
+  if (단위 === '동' && 행.length) {
+    const rq2 = pool.request();
+    const 코드 = 행.map(x => String(x.k));   // sgg_cd(5) + umd_cd(5) = 법정동코드 10자리
+    const 쪽 = [];
+    코드.forEach((c, i) => { if (i < 900) { rq2.input('c' + i, sql.Char(10), c); 쪽.push('@c' + i); } });
+    const nr = 쪽.length ? await rq2.query(`SELECT 법정동코드, 이름 = 시군구명 + N' ' + 법정동명 FROM gold.region_bdong WHERE 법정동코드 IN (${쪽.join(',')})`) : { recordset: [] };
+    for (const x of nr.recordset) 이름.set(String(x.법정동코드).trim(), x.이름);
+  }
+  const 이름찾기 = k => 단위 === '동' ? (이름.get(String(k)) || `${이름.get(String(k).slice(0, 5)) || ''} (법정동 ${k})`.trim()) : (이름.get(k) || k);
+  const 다받은구 = s => (달수.get(s) || 0) >= 12;
+  const 쓸것 = 행.filter(x => Number(x.n) >= 20 && 다받은구(x.sgg_cd));
+  const 표본적음 = 행.filter(x => Number(x.n) < 20 && 다받은구(x.sgg_cd));
+  const 덜받은구 = [...new Set(행.map(x => x.sgg_cd).concat(구들.map(g => g.sgg_cd)))].filter(s => !다받은구(s));
+  쓸것.sort((a, b) => 방향 === 'asc' ? a.중위 - b.중위 : b.중위 - a.중위);
+  return {
+    기간: { 부터: f, 까지: t },
+    단위, 방향,
+    목록: 쓸것.slice(0, 개수).map((x, i) => ({ 순위: i + 1, 코드: x.k, 이름: 이름찾기(x.k), 거래: Number(x.n), 중위평당: Math.round(Number(x.중위)) })),
+    전체: 쓸것.length,
+    표본적음: 표본적음.map(x => ({ 이름: 이름찾기(x.k), 거래: Number(x.n) })).slice(0, 30), 표본적음수: 표본적음.length,
+    덜받음: 덜받은구.map(s => ({ 이름: 이름.get(s) || s, 달수: 달수.get(s) || 0 })),
+  };
 }
 
 /* ---- LLM 번역기 (2026-10-19) --------------------------------------
@@ -2327,6 +2425,22 @@ async function llmParse(q) {
   } catch (e) { return null; } finally { clearTimeout(timer); }
 }
 
+/* ★ 2026-10-22 사장님 "1. 질문저장": AI 검색 **질문 문장**을 개선용으로 남긴다(ops.ask_log, 311).
+   로그인한 사용자만 AI 검색을 쓰므로 아이디와 함께. 화면(AI 검색 안내·꼬리말)에 보관한다고 적는다. IP·브라우저는 안 담는다.
+   응답을 기다리지 않는다 — 기록이 실패해도 검색은 나간다(실패는 서버 로그에만). */
+function 질문남기기(req, q, 종류, 해석, 결과수) {
+  if (req.user && req.user.u === '_시험') return;     // 집안 시험(/api/_ask)은 남기지 않는다
+  getPool().then(pool => pool.request()
+    .input('uid', sql.Int, Number(req.user && req.user.uid) || null)
+    .input('u', sql.NVarChar(50), String((req.user && req.user.u) || '').slice(0, 50) || null)
+    .input('q', sql.NVarChar(500), String(q).slice(0, 500))
+    .input('k', sql.NVarChar(20), 종류)
+    .input('h', sql.NVarChar(sql.MAX), JSON.stringify(해석 || {}).slice(0, 4000))
+    .input('n', sql.Int, 결과수 == null ? null : Number(결과수))
+    .query(`INSERT ops.ask_log (user_id, 아이디, 질문, 종류, 해석, 결과수) VALUES (@uid, @u, @q, @k, @h, @n);`))
+    .catch(e => console.error('[ask_log]', e.message));
+}
+
 app.get('/api/ask', requireAuth, async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: '문장이 필요합니다' });
@@ -2393,6 +2507,31 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     let 개수 = 20;
     const mN = q.match(/(\d+)\s*(개|곳|군데)/);
     if (mN) { 개수 = Math.min(Math.max(Number(mN[1]), 1), 200); 쓴말.add(mN[0]); }
+
+    /* ---- 3.5) 지역 순위 (2026-10-22) — '제일 비싼 지역 · 어느 구가 · 동네' ----
+       가격 정렬(비싼/싼/평당)과 지역을 묻는 말이 같이 있을 때만. 동 하나를 말했으면 순위가 뜻이 없어 단지 검색으로 간다. */
+    const m지역 = q.match(지역의도);
+    if (m지역 && ['amount', 'amount_asc', 'unit'].includes(정렬.key) && !정렬추정 && !지역.some(x => x.수준 === 'emd')) {
+      const 단위 = /동네|동별|어느\s*동|동\s*(순위|랭킹|비교)|(^|\s)동(들|은|는|이|가)?(\s|$)/.test(q) ? '동'
+                 : /구별|어느\s*구|구\s*(순위|랭킹|비교)|(^|\s)구(들|은|는|이|가)?(\s|$)/.test(q) ? '구'
+                 : (지역.some(x => x.수준 === 'sgg') ? '동' : '구');
+      /* 방향은 문장에서 직접 — '평당가 제일 싼' 은 정렬이 '평당(높은 순)' 으로 먼저 잡혀 방향을 잃는다. '비싼' 안의 '싼' 은 빼고 본다 */
+      const 방향 = /(^|[^비])(싼|싸게)|저렴|낮은|저가/.test(q) ? 'asc' : 'desc';
+      for (const t of toks) if (지역의도.test(t)) 쓴말.add(t);
+      const 남은말 = toks.filter(t => ![...쓴말].some(u => t.includes(u) || u.includes(t)))
+        .filter(t => !(군말.has(t) || 군말.has(t.replace(조사, ''))) && t.length >= 2);
+      const 결과 = await 지역순위(pool, { 지역, 단위, 방향, 개수: mN ? 개수 : 25 });
+      const 답 = {
+        q, 종류: '지역순위',
+        해석: { 지역: 지역.length ? 지역.map(x => x.이름) : ['전체(받은 곳)'], 단위, 방향: 방향 === 'asc' ? '낮은 순' : '높은 순',
+                기준: '아파트 매매 · 평당가(전용) 중위값 · 해제·직거래 뺌', 개수: mN ? 개수 : 25,
+                못알아들은말: 남은말, 종목바꿈: 종목 && 종목.key !== 'APT' ? `지역 순위는 아파트 매매로만 셉니다 — '${종목.label}' 은 쓰지 않았습니다` : null },
+        지역순위: 결과,
+        ai: { 썼음: false, 보탠것: [], 실패: false, 키없음: false },
+      };
+      질문남기기(req, q, 답.종류, 답.해석, 결과.목록.length);
+      return res.json(답);
+    }
 
     /* ---- 4) 금액 필터 (억) ---- */
     const 필터 = [];
@@ -2489,7 +2628,10 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     if (지역.length) {
       const sgg = [...new Set(지역.filter(x => x.수준 === 'sgg').map(x => x.sgg_cd))];
       const emd = [...new Set(지역.filter(x => x.수준 === 'emd').map(x => x.lawd_cd))];
+      const sido = [...new Set(지역.filter(x => x.수준 === 'sido').map(x => x.sido_cd))];
       const parts = [];
+      if (sido.length) { sido.forEach((v, i) => rq2.input('sido' + i, sql.Char(2), v));
+        parts.push(`LEFT(c.sigungu_cd, 2) IN (${sido.map((_, i) => '@sido' + i).join(',')})`); }
       if (sgg.length) { sgg.forEach((v, i) => rq2.input('sgg' + i, sql.Char(5), v));
         parts.push(`c.sigungu_cd IN (${sgg.map((_, i) => '@sgg' + i).join(',')})`); }
       if (emd.length) { emd.forEach((v, i) => rq2.input('emd' + i, sql.Char(10), v));
@@ -2622,8 +2764,8 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         });
       }
     }
-    if (!r.recordset.length && 지역.length) {
-      const sgg = [...new Set(지역.map(x => x.sgg_cd))];
+    if (!r.recordset.length && 지역.some(x => x.sgg_cd)) {
+      const sgg = [...new Set(지역.map(x => x.sgg_cd).filter(Boolean))];
       const rq3 = pool.request();
       sgg.forEach((v, i) => rq3.input('s' + i, sql.Char(5), v));
       const chk = await rq3.query(`
@@ -2644,6 +2786,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       else 알림.push({ 종류: 'NA', 말: '조건에 맞는 단지가 없습니다' });
     }
 
+    질문남기기(req, q, '단지', { 지역: 지역.map(x => x.이름), 단지이름, 정렬: 정렬.label, 종목: 종목 ? 종목.label : null, 못알아들은말: 못알아들음, ai보탬 }, r.recordset.length);
     res.json({
       q,
       해석: {
@@ -2671,6 +2814,15 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       알림,
     });
   } catch (e) { fail(res, e, 'ask'); }
+});
+/* 집안 시험용 — /api/ask 와 **같은 처리기**를 로그인 없이(이 컴퓨터에서만). 질문은 남기지 않는다.
+   ★ 처리기를 따로 복사하지 않는다 — 복사하면 두 길이 갈라진다. 등록된 라우트에서 꺼내 쓴다. */
+app.get('/api/_ask', (req, res, next) => {
+  if (!집안에서(req)) return res.status(404).json({ error: 'not found' });
+  req.user = { uid: null, u: '_시험', r: null };
+  const layer = app._router.stack.find(l => l.route && l.route.path === '/api/ask' && l.route.methods.get);
+  if (!layer) return res.status(500).json({ error: '/api/ask 를 못 찾음' });
+  return layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
 });
 
 /* ---------- 대장이 아직 없는 신축 ----------
