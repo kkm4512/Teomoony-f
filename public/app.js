@@ -5507,6 +5507,11 @@ function 토지이용분류(x) {
   if (/고도지구|최고높이|경관|역사문화|대공방어|비행안전|표면구역/.test(n)) return '높이·경관';
   return '그 밖';
 }
+/* 2026-10-22: 서버 토지이용레이어고르기 와 **같은 표** — 바꾸면 둘 다 바꾼다 */
+function 경계됨(code) {
+  const c = String(code || '');
+  return !/^UQA0/.test(c) && ['UQA', 'UQQ', 'UQF', 'UQH', 'UQI', 'UQM', 'UQN', 'UQT', 'UOA', 'UDE'].some(p => c.startsWith(p));
+}
 function 토지이용칸(r) {
   const s = r.범위 || {}, 항목 = r.항목 || [], 해제 = r.해제 || [];
   const 필지 = Number(s.필지) || 0, 받은 = Number(s.받은) || 0;
@@ -5514,7 +5519,7 @@ function 토지이용칸(r) {
   if (!받은) return `${머리}<p class="note">${gapCell('', 'SCOPE',
     '이 단지 필지의 토지이용계획을 아직 받지 않았습니다 — 세대 있는 단지의 대표 필지부터 받고 있습니다')}</p>`;
   const 저촉말 = { '1': '포함', '2': '일부 걸침', '3': '접함' };
-  const 줄 = x => `<li><b>${esc(x.이름 || '')}</b><span class="muted"> ${esc(저촉말[x.저촉] || '')}${
+  const 줄 = x => `<li${경계됨(x.코드) ? ` data-lushape="${esc(x.코드)}|${esc(x.이름 || '')}" role="button" tabindex="0" title="누르면 지도에 이 구역 경계를 그립니다 · 다시 누르면 지웁니다"` : ''}><b>${esc(x.이름 || '')}</b><span class="muted"> ${esc(저촉말[x.저촉] || '')}${
       받은 > 1 && Number(x.필지) < 받은 ? ` · 필지 ${fmt(x.필지)}/${fmt(받은)}` : ''}${
       Number(x.지정) > Number(x.필지) ? ` · 지정 ${fmt(x.지정)}건` : ''}</span></li>`;
   const 묶음 = {};
@@ -5523,7 +5528,7 @@ function 토지이용칸(r) {
   const 접음 = k => 묶음[k] ? `<details class="lu-g"><summary>${k} ${fmt(묶음[k].length)}</summary><ul class="lu">${묶음[k].map(줄).join('')}</ul></details>` : '';
   const 최신 = 항목.map(x => x.갱신일 || '').sort().pop();
   return `${머리}
-    ${묶음['거래'] ? `<div class="lu-hot"><b>토지거래허가구역</b> 안에 있습니다
+    ${묶음['거래'] ? `<div class="lu-hot" data-lushape="${esc(묶음['거래'][0].코드 || 'UQQ600')}|${esc(묶음['거래'][0].이름 || '')}" role="button" tabindex="0" title="누르면 지도에 허가구역 경계를 그립니다"><b>토지거래허가구역</b> 안에 있습니다
       <span class="muted">— 구역 안에서 정해진 면적을 넘는 땅(아파트는 대지지분)을 사고팔려면 시·군·구청 허가가 필요합니다.
       지정 ${fmt(묶음['거래'].reduce((t, x) => t + (Number(x.지정) || 0), 0))}건</span></div>` : ''}
     ${펼침('개발·정비')}${펼침('용도지역')}${접음('높이·경관')}${접음('그 밖')}${접음('접함')}
@@ -5919,8 +5924,42 @@ let 구역층 = null, 구역지금 = null;
 function 구역지우기() {
   if (구역층) { try { map.removeLayer(구역층); } catch (e) {} }
   구역층 = null; 구역지금 = null;
-  document.querySelectorAll('#detail [data-redev].on').forEach(el => el.classList.remove('on'));
+  document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on').forEach(el => el.classList.remove('on'));
 }
+/* 토지이용계획 줄 → 구역 경계 (2026-10-22). 정비구역과 같은 층 · 같은 토글(한 번에 하나) */
+async function 토지구역보이기(el) {
+  const [code, nm] = String(el.dataset.lushape || '').split('|');
+  const cid = (el.closest('.lubox') || {}).dataset?.lu;
+  const 키 = `lu:${cid}:${code}`;
+  if (구역지금 === 키) { 구역지우기(); return; }
+  구역지우기();
+  toast('구역 경계를 받는 중…', 1500);
+  try {
+    const x = await fetch(`/api/complexes/${encodeURIComponent(cid)}/landuse-shape?code=${encodeURIComponent(code)}&nm=${encodeURIComponent(nm || '')}`);
+    const r = await x.json();
+    if (!x.ok || r.error) { toast(r.error || '구역 경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 3000); return; }
+    if (!(r.구역 || []).length) { toast(r.말 || '경계를 찾지 못했습니다', 3000); return; }
+    구역층 = L.geoJSON({ type: 'FeatureCollection', features: r.구역 }, { interactive: false,
+      style: { color: '#7c3aed', weight: 3, dashArray: '6 4', fillOpacity: 0.12 } }).addTo(map);   /* 보라 — 동 경계(파랑)·정비구역(주황)과 갈리게 */
+    구역지금 = 키; el.classList.add('on');
+    const b = 구역층.getBounds();
+    const top = (document.querySelector('.ptop') || {}).offsetHeight || 0;
+    const sh = 폰() ? ((document.querySelector('#psheet') || {}).offsetHeight || 0) : 0;
+    if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half');
+    setTimeout(() => map.fitBounds(b, { paddingTopLeft: [24, (폰() ? top : 0) + 24], paddingBottomRight: [24, sh + 24], maxZoom: 17 }), 폰() ? 280 : 0);
+    const 고시 = [...new Set(r.구역.map(f => f.properties.고시연도).filter(Boolean))].sort().join('·');
+    toast(`${nm} — 경계 ${r.구역.length}개${고시 ? ` · 고시 ${고시}년` : ''} (VWorld)`, 3000);
+  } catch (e) { toast('구역 경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 2500); }
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('#detail [data-lushape]');
+  if (el) 토지구역보이기(el);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest && e.target.closest('#detail [data-lushape]');
+  if (el) { e.preventDefault(); 토지구역보이기(el); }
+});
 async function 구역보이기(sn, el) {
   if (구역지금 === sn) { 구역지우기(); return; }
   구역지우기();

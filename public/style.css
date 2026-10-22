@@ -1715,3 +1715,8 @@ ul.lu li:last-child{border-bottom:0}
 .clsite summary::-webkit-details-marker{display:none}
 .clgb{display:inline-block;font:500 10px var(--mono);padding:1px 5px;border-radius:3px;margin-right:4px;
   background:var(--line);color:var(--ink-2)}
+
+/* (2026-10-22) 토지이용계획 줄 → 구역 경계 */
+#detail [data-lushape]{cursor:pointer}
+#detail [data-lushape]:hover{background:var(--surface-2)}
+#detail [data-lushape].on{background:var(--surface-2);box-shadow:inset 3px 0 0 #7c3aed}

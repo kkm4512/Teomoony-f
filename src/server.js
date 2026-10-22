@@ -2893,6 +2893,82 @@ app.get('/api/applyhome/pins', async (req, res) => {
   } catch (e) { fail(res, e, 'applyhome-pins'); }
 });
 
+/* ===================== 토지이용계획 줄 → 구역 경계 (2026-10-22 11:03, 사장님 "진행해봐") =====================
+   토지이용계획(getLandUseAttr)은 필지에 '걸려 있다' 는 속성뿐이라 경계가 없다 → **VWorld 2D 데이터 레이어**에서 그때그때 받는다.
+   ★ 저장하지 않는다(캐시 없음). 키는 서버에서만 쓴다.
+   ★ 고르는 법: 그 지정이 걸린 **이 단지 필지**(silver.land_use_plan, 같은 코드)의 중심점을 품은 구역 중 **이름이 원문과 같은 것**.
+     중심점이 구역 밖이면(일부 걸침) 그 필지 경계상자로 한 번 더. 이름이 같은 게 없으면 '못 찾음' — 비슷한 이름으로 넘겨짚지 않는다.
+   ★ 코드 앞자리 → 레이어 (2026-10-22 찔러서 확인): UQA 용도지역 UQ111 · UQQ 용도구역(지구단위계획·토지거래허가·개발행위허가제한·도시자연공원구역) UQ141
+     · UQF 경관 UQ121 · UQH 고도 UQ123 · UQI 방화 UQ124 · UQM 취락 UQ128 · UQN 개발진흥 UQ129 · UQT 공원·녹지·광장 UQ162
+     · UOA 교육환경보호 UO101 · UDE 공공지원민간임대 공급촉진지구 LHZONE. 나머지(과밀억제권역 같은 넓은 권역 등)는 안 그린다. */
+const 토지이용레이어 = [['UQA', 'LT_C_UQ111'], ['UQQ', 'LT_C_UQ141'], ['UQF', 'LT_C_UQ121'], ['UQH', 'LT_C_UQ123'], ['UQI', 'LT_C_UQ124'],
+  ['UQM', 'LT_C_UQ128'], ['UQN', 'LT_C_UQ129'], ['UQT', 'LT_C_UQ162'], ['UOA', 'LT_C_UO101'], ['UDE', 'LT_C_LHZONE']];
+function 토지이용레이어고르기(code) {
+  const c = String(code || '');
+  if (/^UQA0/.test(c)) return null;              // '도시지역' 같은 큰 묶음 — 시 전체라 그리지 않는다
+  const m = 토지이용레이어.find(([p]) => c.startsWith(p));
+  return m ? m[1] : null;
+}
+async function vworld구역(layer, geomFilter) {
+  const q = new URLSearchParams({ service: 'data', request: 'GetFeature', data: layer, key: (process.env.VWORLD_KEY || '').trim(),
+    domain: (process.env.VWORLD_DOMAIN || 'localhost').trim(), geomFilter, size: '100', page: '1', format: 'json',
+    geometry: 'true', attribute: 'true', crs: 'EPSG:4326' });
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 15000);
+  try {
+    const r = await fetch(`https://api.vworld.kr/req/data?${q}`, { signal: ac.signal });
+    if (!r.ok) throw new Error('VWorld HTTP ' + r.status);
+    const j = await r.json();
+    const rsp = j.response || {};
+    if (rsp.status === 'NOT_FOUND') return [];
+    if (rsp.status !== 'OK') throw new Error('VWorld ' + (rsp.status || '?') + ' ' + ((rsp.error || {}).text || ''));
+    return ((rsp.result || {}).featureCollection || {}).features || [];
+  } finally { clearTimeout(t); }
+}
+app.get('/api/complexes/:id/landuse-shape', async (req, res) => {
+  const id = Number(req.params.id);
+  const code = String(req.query.code || '').slice(0, 20), nm = String(req.query.nm || '').slice(0, 120);
+  if (!Number.isInteger(id) || !code || !nm) return res.status(400).json({ error: 'id · code · nm 이 필요합니다' });
+  if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
+  const layer = 토지이용레이어고르기(code);
+  if (!layer) return res.json({ 레이어: null, 구역: [], 말: '이 지정은 경계 자료를 잇지 않았습니다(넓은 권역이거나 레이어를 못 찾음)' });
+  if (!(process.env.VWORLD_KEY || '').trim()) return res.status(503).json({ error: 'VWORLD_KEY 가 없습니다' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).input('code', sql.VarChar(20), code).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 3 p.pnu, cp.centroid_lat, cp.centroid_lng, cp.bbox_minx, cp.bbox_miny, cp.bbox_maxx, cp.bbox_maxy
+        FROM gold.complex_pnu x
+        JOIN silver.land_use_plan p ON p.pnu = x.pnu AND p.is_current = 1 AND p.코드 = @code
+        JOIN silver.cadastral_parcel cp ON cp.pnu = x.pnu AND cp.is_current = 1
+       WHERE x.complex_id = @id
+       ORDER BY CASE WHEN p.저촉 = '1' THEN 0 ELSE 1 END, x.is_representative DESC;`);
+    const 필지 = r.recordset;
+    if (!필지.length) return res.json({ 레이어: layer, 구역: [], 말: '이 지정이 걸린 이 단지 필지를 찾지 못했습니다' });
+    const 이름칸 = f => { const p = f.properties || {}; return p.uname || p.dgm_nm || p.zonename || ''; };
+    const 같다 = s => String(s || '').replace(/\s/g, '') === nm.replace(/\s/g, '');
+    const 본 = new Map(); let 실패 = null;
+    for (const p of 필지) {
+      const 시도 = [`POINT(${Number(p.centroid_lng)} ${Number(p.centroid_lat)})`,
+                   `BOX(${Number(p.bbox_minx)},${Number(p.bbox_miny)},${Number(p.bbox_maxx)},${Number(p.bbox_maxy)})`];
+      for (const g of 시도) {
+        try {
+          const fs = (await vworld구역(layer, g)).filter(f => 같다(이름칸(f)));
+          for (const f of fs) 본.set(f.id || JSON.stringify(f.properties), f);
+          if (fs.length) break;
+        } catch (e) { 실패 = e.message || String(e); }
+      }
+      if (본.size) break;
+    }
+    if (!본.size && 실패) return res.status(502).json({ error: '구역 경계를 불러오지 못했습니다 — ' + 실패 + ' (없다는 뜻이 아닙니다)' });
+    const 구역 = [...본.values()].map(f => {
+      const p = f.properties || {};
+      return { type: 'Feature', geometry: f.geometry,
+               properties: { 이름: 이름칸(f), 고시연도: p.dyear || null, 고시번호: p.dnum || null, 시군구: p.sigg_name || null } };
+    });
+    res.json({ 레이어: layer, 구역, 말: 구역.length ? null : '같은 이름의 구역 경계를 찾지 못했습니다(레이어에 없거나 이름이 다르게 적힘)' });
+  } catch (e) { fail(res, e, 'landuse-shape'); }
+});
+
 /* ===================== 어린이집 (2026-10-22, 303) =====================
    보육정보공개 cpmsapi030. 유치원과 같은 500m · 가까운 순. 인원은 원문 기준일 값이다(유형별 셈은 줄 수를 센 것). */
 app.get('/api/complexes/:id/childcare', async (req, res) => {
