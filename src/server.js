@@ -1654,6 +1654,7 @@ app.get('/api/suggest', async (req, res) => {
       .input('p', sql.NVarChar(200), `${글자}%`)
       .input('qid', sql.Int, /^\d{1,9}$/.test(raw) ? Number(raw) : null)
       .input('상가', sql.Bit, 길이 >= 2 ? 1 : 0)
+      .input('주소', sql.Bit, /\d/.test(raw) && 길이 >= 3 ? 1 : 0)
       .query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 적재 중 표와 교착하지 않게 - 읽기 전용 제안 */
         DECLARE @최신분기 DATE = (SELECT MAX(개정일자) FROM silver.region_link_snap WHERE 완전 = 1);
@@ -1733,7 +1734,13 @@ app.get('/api/suggest', async (req, res) => {
                 UNION
                 SELECT c4.complex_id, c4.complex_nm, c4.rep_plat_plc, c4.hhld_cnt_sum, c4.dong_cnt, c4.centroid_lat, c4.centroid_lng
                   FROM gold.complex_alias al4 JOIN gold.complex c4 ON c4.complex_id = al4.complex_id
-                 WHERE al4.실거래이름 LIKE @q AND c4.merged_into IS NULL) c
+                 WHERE al4.실거래이름 LIKE @q AND c4.merged_into IS NULL
+                /* ★ 2026-10-22 사장님 "'서울 마포구 서교동 445-4' 제안할 게 없다는데 목록은 나와" — **주소(대표 지번·도로명)로도**.
+                   숫자가 든 검색어일 때만(@주소) — 이름 검색마다 53만 행 주소 LIKE 를 돌리지 않는다. 부속지번은 목록 검색에만(무겁다). */
+                UNION
+                SELECT c5.complex_id, c5.complex_nm, c5.rep_plat_plc, c5.hhld_cnt_sum, c5.dong_cnt, c5.centroid_lat, c5.centroid_lng
+                  FROM gold.complex c5
+                 WHERE @주소 = 1 AND c5.merged_into IS NULL AND (c5.rep_plat_plc LIKE @q OR c5.rep_road_addr LIKE @q)) c
          /* ★ 이름이 '딱 같은' 것을 앞에 두지 않는다 — '래미안' 을 치면 이름이 그냥 '래미안' 인
               단독주택 한 채가 1등이 됐다. 브랜드는 **세대 많은 단지**가 먼저다. */
          /* ★ 20:19: 대장 이름이 주소뿐인 단지는 **실거래 이름이 앞부분에 맞으면** 이름이 맞은 것으로 친다(드림아트빌) */
