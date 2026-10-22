@@ -731,6 +731,37 @@ app.get('/api/_apply', async (req, res) => {
   } catch (e) { fail(res, e, '_apply'); }
 });
 
+/* ---------- 내보내기: 정해 둔 목록을 파일로 (2026-10-22) ----------
+   VM(원격 작업칸)은 DB 에 못 닿고 API 에는 닿는다. 그래서 "받을 대상" 목록만 파일로 내 주고,
+   VM 이 받아 SQL 파일을 만들면 /api/_apply 로 넣는다(약국과 같은 길).
+   ★ 집안에서만 · **이름이 정해진 SELECT 만**(SQL 을 받지 않는다) · 쓰는 곳은 Teomoony/etl/_export/<이름>.txt 하나. */
+const 내보내기목록 = {
+  ned_targets: `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    SELECT DISTINCT e.pnu FROM silver.bld_expos e
+      JOIN silver.bld_expos_pubuse_area x ON x.mgm_bldrgst_pk = e.mgm_bldrgst_pk AND x.is_current = 1
+       AND x.expos_pubuse_gb_cd = '1' AND x.main_purps_cd IN ('02002', '02003')
+     WHERE e.is_current = 1 AND e.pnu IS NOT NULL AND (LEFT(e.pnu, 2) = '11' OR LEFT(e.pnu, 5) IN ('41171', '41173'))
+       AND NOT EXISTS (SELECT 1 FROM silver.ned_aphus_done d WHERE d.pnu = e.pnu)
+     ORDER BY e.pnu;`,
+};
+app.get('/api/_export', async (req, res) => {
+  if (!집안에서(req)) return res.status(404).json({ error: 'not found' });
+  const name = String(req.query.name || '');
+  if (!Object.prototype.hasOwnProperty.call(내보내기목록, name)) return res.status(400).json({ error: '정해 둔 이름만: ' + Object.keys(내보내기목록).join(', ') });
+  try {
+    const pool = await getPool();
+    const t = Date.now();
+    const r = await pool.request().query(내보내기목록[name]);
+    const rows = r.recordset || [];
+    const cols = rows.length ? Object.keys(rows[0]) : [];
+    const path = require('path'), fs = require('fs');
+    const dir = path.join(__dirname, '..', '..', 'Teomoony', 'etl', '_export');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name + '.txt'), rows.map(x => cols.map(c => x[c] == null ? '' : String(x[c])).join('\t')).join('\n') + '\n', 'utf8');
+    res.json({ 이름: name, 행: rows.length, ms: Date.now() - t });
+  } catch (e) { fail(res, e, '_export'); }
+});
+
 /* ---------- 진단: 미매칭 실거래 집계가 얼마나 되나 (2026-10-20) ----------
    ★ gold.v_newbuild_gap 이 요청마다 silver.rtms_trade(1,053만) 를 집계한다.
      off 와 newbuilds 가 둘 다 이걸 거친다. 대상 행이 적으면 **필터드 인덱스**
