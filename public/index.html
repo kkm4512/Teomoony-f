@@ -27,7 +27,7 @@
 <!-- ★ (2026-10-22) 첫 화면이 지도로 잠깐 떴다가 홈으로 바뀌던 것: .app 에 data-view 가 app.js 가
      다 받아진 뒤에야 붙어서, 그 전까지는 지도 화면 모양으로 그려졌다. 그리기 전에 여기서 붙인다.
      규칙은 app.js 탭달기·주소로열기와 같다 — /c/숫자 는 지도, #home·#map·#usage 는 그대로, 나머지는 홈. -->
-<script>(function(){var a=document.currentScript.parentNode,h=(location.hash||'').slice(1),v=/^\/c\/\d+\/?$/.test(location.pathname)?'map':(h==='map'||h==='usage'||h==='qna'||h==='home')?h:'home';a.dataset.view=v;})()</script>
+<script>(function(){var a=document.currentScript.parentNode,h=(location.hash||'').slice(1),v=/^\/c\/\d+\/?$/.test(location.pathname)?'map':(h==='map'||h==='usage'||h==='qna'||h==='policy'||h==='home')?h:'home';a.dataset.view=v;})()</script>
   <!-- ★ 헤더는 패널 밖, 화면 전체 폭(2026-10-19). 왼쪽에 이름, 오른쪽에 적재 수치.
        수치를 지우지 않고 올린 이유: 이 화면에서 "무엇을 얼마나 받았는가" 를
        알려주는 **유일한 표시**다. 서초동을 '없다' 고 답할 뻔한 날 배웠다. -->
@@ -167,6 +167,11 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.6 13.4 13.4 2.6l4 4L6.6 17.4l-4-4Z"/><path d="M5.4 10.6l1.6 1.6M7.8 8.2l2.2 2.2M10.2 5.8l1.6 1.6M12.6 3.4l2.2 2.2"/></svg>
         <span>거리</span>
       </button>
+      <!-- 2026-10-22 사장님 "부가 설명은 '정책' 에 전부 정리" — 칸마다 붙어 있던 기준·설명을 한 화면에 -->
+      <button type="button" class="mc" data-pol="공통" title="데이터 기준 · 출처 · 계산 방법">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 2.8h9l3 3v11.4H4z"/><path d="M7 8h6M7 11h6M7 14h4"/></svg>
+        <span>정책</span>
+      </button>
     </div>
 
     <!-- ★ details 로 둔다(2026-10-20). 휴대폰에서 이 범례가 지도를 거의
@@ -242,6 +247,16 @@
       <p class="fsm">접속 기록(IP · 요청 경로)을 운영 목적으로 <b>90일간</b> 보관합니다. AI 검색 질문 문장은 기능 개선을 위해 로그인 아이디와 함께 보관합니다.</p>
     </div>
   </footer>
+  </section>
+
+  <!-- ================= 정책 (2026-10-22 사장님 "단지정보 안 부가 설명들을 '정책' 에 전부 정리") ================= -->
+  <section id="view-policy" class="view" hidden>
+    <div class="vwrap">
+      <div class="polhead"><h2 class="vtitle">정책 · 데이터 기준</h2>
+        <button type="button" class="ec-b" id="polback">← 지도로</button></div>
+      <p class="note sm">화면 칸마다 붙어 있던 '어떻게 셌나 · 왜 이렇게 보이나' 를 여기 모았습니다. 칸 머리의 출처 표시(<b>?</b>)를 누르면 그 칸의 절로 옵니다.</p>
+      <div id="polbody"></div>
+    </div>
   </section>
 
   <!-- ================= 문의 (2026-10-22 사장님 "이용현황 오른쪽에 탭 — 질문이랑 답변 모두가 볼 수 있게") ================= -->

@@ -1095,7 +1095,8 @@ svg.pl.tower .pl-bg{fill:var(--surface);stroke:none}
 .view[hidden]{display:none}
 .app[data-view="home"] .panel,  .app[data-view="home"] .mapwrap,
 .app[data-view="usage"] .panel, .app[data-view="usage"] .mapwrap,
-.app[data-view="qna"] .panel,   .app[data-view="qna"] .mapwrap{display:none}
+.app[data-view="qna"] .panel,   .app[data-view="qna"] .mapwrap,
+.app[data-view="policy"] .panel, .app[data-view="policy"] .mapwrap{display:none}
 /* 머리틀의 작은 수치는 지도에서만 - 홈에는 같은 숫자가 크게 있다 */
 .app:not([data-view="map"]) .topbar .statrow{display:none}
 
@@ -1710,6 +1711,7 @@ ul.lu li:last-child{border-bottom:0}
 .app[data-view="home"] #view-home[hidden]{display:flex}
 .app[data-view="usage"] #view-usage[hidden]{display:flex}
 .app[data-view="qna"] #view-qna[hidden]{display:flex}
+.app[data-view="policy"] #view-policy[hidden]{display:flex}
 
 /* (2026-10-22) 폐쇄·말소 대장 칸 */
 .clsite{border-top:1px solid var(--line);padding:6px 0}
@@ -1826,3 +1828,18 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 /* 2026-10-22 겹쳐보기: 겹친 자리 목록 · 범례 안내 */
 .leaflet-popup-content hr.pophr{border:0;border-top:1px dashed var(--line-2);margin:6px 0}
 .maplegend .lnote{font-size:10.5px;color:var(--ink-3);margin-top:5px;line-height:1.4;max-width:170px}
+
+/* 2026-10-22 정책 화면 · 출처 배지 링크 */
+a.src{text-decoration:none;cursor:pointer}
+a.src:hover{filter:brightness(1.08);text-decoration:underline}
+a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-height:13px;border-radius:50%;text-align:center;
+  font:600 9px var(--font);background:var(--line-2);color:var(--ink-2);vertical-align:1px}
+#view-policy .polhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#view-policy .poltoc{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
+#view-policy .poltoc a{font-size:12px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2);text-decoration:none;background:var(--surface)}
+#view-policy .poltoc a:hover{color:var(--ink);border-color:var(--line-2)}
+#view-policy .polsec{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;background:var(--surface);scroll-margin-top:12px}
+#view-policy .polsec.on{border-color:var(--mark);box-shadow:0 0 0 2px var(--mark-soft)}
+#view-policy .polsec h3{margin:2px 0 6px;font-size:15px}
+#view-policy .polsec ul{margin:0;padding-left:18px}
+#view-policy .polsec li{margin:5px 0;font-size:13.5px;line-height:1.6;color:var(--ink)}
