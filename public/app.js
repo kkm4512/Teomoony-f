@@ -2323,6 +2323,9 @@ function closeDetail() {
 }
 
 async function select(id, fromList) {
+  /* 2026-10-22 사장님: 다른 건물을 누르면 앞 건물에서 보던 탭(실거래 등)을 잇지 않고 **단지정보**로 연다.
+     같은 단지를 다시 부를 때(묶인 옛 코드 이동 · 다시 불러오기)는 보던 탭을 둔다. */
+  if (selected !== id) detailTab = 'info';
   selected = id; selectedKapt = null;
   주소맞춤(`/c/${id}`, 상세쌓기());     // 2026-10-22 SEO: 단지마다 주소 — 공유·새로고침해도 같은 단지
   시트('full');             // 폰: 상세는 지도를 가리고 전체로
