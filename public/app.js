@@ -419,6 +419,7 @@ let zoneLayer, redevLayer;
 let markerOf = new Map();       // complex_id -> L.marker (선택 표시용)
 const LAWD_ZOOM = 15;           // 이 줌 미만이면 법정동, 이상이면 단지
 let selected = null, items = [], lawdItems = [], selectedLawd = null, fetchSeq = 0;
+let 바뀜정보 = null;   /* 308 (2026-10-22): 옛 행정동 → 지금 행정동 안내 — /api/complexes 의 바뀜 */
 /* 내 위치 (2026-10-20). myLayer 는 내 점과 정확도 원만 담는다 — 단지 마커와
    같은 레이어에 넣으면 지도를 움직일 때 같이 지워진다. */
 let myLayer = null, myPos = null, geoBusy = false;
@@ -1702,6 +1703,7 @@ async function search() {
     lawdItems = d.lawds || [];
     newbuildItems = d.newbuilds || [];
     redevItems = d.redevs || [];
+    바뀜정보 = d.바뀜 || null;      // 308: 옛 행정동 이름으로 찾았을 때 — 지금 동 안내
     /* ★ 상한에 걸렸으면 숫자 옆에 적는다 — '200개 단지' 가 '전부 200개' 로
        읽히면 안 된다. 진짜 페이징(OFFSET)은 아직 없다. */
     $('#count').textContent = `${fmt(d.count)}개 단지${d.잘림 ? '+' : ''}`
@@ -1755,13 +1757,19 @@ function renderList() {
       </span>
       <span class="d">${z.area_m2 ? fmt(Math.round(z.area_m2)) + '㎡' : ''}</span>
     </button></li>`).join('');
-  ul.innerHTML = rec + lawdRows + rzRows + nbRows + items.map(c => `
+  /* 308: 옛 행정동 이름으로 찾았으면 맨 위에 '지금은 ○○' 안내 — 아래 법정동·단지는 그 지금 동의 법정동(코드) 결과다 */
+  const 바뀜줄 = (myPos || !바뀜정보) ? '' : 바뀜정보.map(b => `
+    <li class="moved"><div class="movednote"><b>${esc(b.옛)}</b>은(는) 지금 없는 행정동입니다 —
+      ${esc(b.시군구)} <b>${b.지금.map(esc).join(' · ')}</b>(으)로 바뀌었습니다 <span class="muted">(${esc(b.전)}~${esc(b.후)} 사이)</span>.
+      <div class="muted sm">아래는 그 동이 걸친 법정동 <b>${b.법정동.map(x => esc(x.nm)).join(' · ')}</b> 기준 결과입니다 — 행정동 경계와 법정동 경계가 달라 경계 밖 단지가 섞일 수 있습니다.
+      출처: 국가데이터처 법정동 연계정보(분기별).${b.잘림 ? ' 목록 상한에 걸려 일부만 보입니다.' : ''}</div></div></li>`).join('');
+  ul.innerHTML = 바뀜줄 + rec + lawdRows + rzRows + nbRows + items.map(c => `
     <li><button class="row" data-id="${c.complex_id}" aria-current="${c.complex_id === selected}">
       <span class="sw" style="background:${colorOf(c.dong_cnt)}${c.has_recap ? ';outline:1.5px solid var(--mark);outline-offset:-1.5px' : ''}"></span>
       <span class="mid">
         <span class="nm">${주소이름인가(c) && c.실거래이름
             ? esc(c.실거래이름)
-            : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}}</span>
+            : esc(shortNm(c.complex_nm) || '(이름 없음)') + (c.실거래이름 ? ` <span class="muted">· ${esc(c.실거래이름)}</span>` : '')}</span>
         <span class="ad">${esc(c.rep_plat_plc || '')}</span>
       </span>
       <span class="d">${c.거리m != null

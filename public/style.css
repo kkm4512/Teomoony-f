@@ -1780,3 +1780,10 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 .ahmark.near span,.ahmark.nowhere span{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .clx.pin{width:22px;height:22px;font-size:13px}
+
+/* 308 옛 행정동 안내 */
+#list li.moved { list-style: none; }
+#list .movednote { margin: 6px 8px 8px; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--mark);
+  border-radius: 6px; background: var(--mark-soft); color: var(--ink); font-size: 13px; line-height: 1.5; }
+#list .movednote .muted { color: var(--ink-2); }
+#list .movednote .sm { font-size: 12px; margin-top: 4px; }

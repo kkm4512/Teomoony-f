@@ -1541,7 +1541,67 @@ app.get('/api/complexes', async (req, res) => {
          ORDER BY CASE WHEN zone_nm LIKE @q THEN 0 ELSE 1 END, area_m2 DESC`);
       redevs = rz.recordset;
     }
-    res.json({ count: _행.length, 상한: limit, 잘림, items: _행, lawds, newbuilds, redevs });
+    /* ★ 308 (2026-10-22 사장님 "용신동 → 용두동이니 용두동 결과가 나와야지"):
+       검색어가 **지금은 없는 옛 행정동 이름과 딱 같으면**(서울·안양) 그 뒤를 이은 지금 행정동의 **법정동(코드)** 결과를 붙인다.
+       ★ 잇기는 공식 연계정보의 코드(같은 법정동을 나눠 가진 쌍) — 이름으로 잇지 않는다. 새 동이 여럿이면 전부.
+       ★ 행정동이 법정동 일부만 덮는 곳은 그 법정동 전체가 나온다 — 화면에 '법정동 기준' 이라고 적는다.
+       ★ 같은 구에 같은 이름의 지금 행정동이 있으면(번1동 코드 재부여) 하지 않는다. */
+    let 바뀜 = null;
+    const 옛이름 = q.replace(/\s+/g, '');
+    if (옛이름 && 옛이름.length <= 20 && /동$|가$|면$|읍$/.test(옛이름)) {
+      const br = await pool.request().input('nm', sql.NVarChar(40), 옛이름).query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        DECLARE @최신분기 DATE = (SELECT MAX(개정일자) FROM silver.region_link_snap WHERE 완전 = 1);
+        SELECT o.행정동코드, o.시군구명, o.행정동명, 마지막 = o.마지막본분기, c.후분기, c.새코드, 새이름 = n.행정동명, 새현행 = n.현행
+          FROM gold.region_hdong o
+          JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
+          JOIN gold.region_hdong n ON n.행정동코드 = c.새코드
+         WHERE o.현행 = 0 AND o.행정동명 = @nm AND (LEFT(o.행정동코드, 2) = '11' OR LEFT(o.행정동코드, 4) = '4117')
+           AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명)
+         ORDER BY o.행정동코드, n.행정동명;
+        SELECT DISTINCT c.옛코드, l.법정동코드, l.법정동명
+          FROM gold.region_hdong o
+          JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
+          JOIN silver.region_link l ON l.행정동코드 = c.새코드 AND l.개정일자 = @최신분기
+         WHERE o.현행 = 0 AND o.행정동명 = @nm AND (LEFT(o.행정동코드, 2) = '11' OR LEFT(o.행정동코드, 4) = '4117')
+           AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명);`);
+      const 쌍 = br.recordsets[0], 법 = br.recordsets[1];
+      if (쌍.length && 법.length) {
+        const 분기 = d => { const t = new Date(d); return `${t.getUTCFullYear()}.${String(t.getUTCMonth() + 1).padStart(2, '0')}`; };
+        const 옛 = [...new Map(쌍.map(x => [x.행정동코드, x])).values()];
+        바뀜 = 옛.map(o => ({
+          옛: o.행정동명, 시군구: o.시군구명, 전: 분기(o.마지막), 후: 분기(o.후분기),
+          지금: [...new Set(쌍.filter(x => x.행정동코드 === o.행정동코드).map(x => x.새이름 + (x.새현행 ? '' : '(그 뒤 또 바뀜)')))],
+          법정동: [...new Map(법.filter(x => x.옛코드 === o.행정동코드).map(x => [x.법정동코드, x.법정동명])).entries()].map(([cd, nm]) => ({ cd, nm })),
+        }));
+        const 코드 = [...new Set(법.map(x => x.법정동코드))].filter(c => /^\d{10}$/.test(c)).slice(0, 20);
+        const rq = pool.request().input('recap', sql.Bit, onlyRecap ? 1 : 0).input('lim', sql.Int, limit + 1);   // 한 줄 더 — 잘렸는지 보려고
+        코드.forEach((c, j) => rq.input('l' + j, sql.Char(10), c));
+        const 범위 = 코드.map((_, j) => `(c.rep_pnu >= CAST(@l${j} + '000000000' AS CHAR(19)) AND c.rep_pnu <= CAST(@l${j} + '999999999' AS CHAR(19)))`).join(' OR ');
+        const xr = await rq.query(`
+          SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+          SELECT TOP 8 lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
+                 complex_cnt, trade_cnt, max_amount
+            FROM gold.v_lawd_map WHERE lawd_cd IN (${코드.map((_, j) => '@l' + j).join(',')})
+           ORDER BY complex_cnt DESC, emd_nm;
+          SELECT TOP (@lim) v.complex_id, v.complex_nm, v.grouping_rule, v.has_recap,
+                 v.rep_jibun, v.rep_plat_plc, v.rep_road_addr, v.lawd_nm,
+                 v.dong_cnt, v.pnu_cnt, v.parcel_hit, v.hhld_cnt_sum, v.tot_area_sum,
+                 v.oldest_use_apr, v.jiga_avg, v.centroid_lat, v.centroid_lng, 부속지번 = NULL
+            FROM gold.v_complex_map v
+           WHERE v.complex_id IN (SELECT c.complex_id FROM gold.complex c WHERE c.merged_into IS NULL AND (${범위}))
+             AND (@recap = 0 OR v.has_recap = 1)
+           ORDER BY v.dong_cnt DESC, v.pnu_cnt DESC, v.complex_id;`);
+        const 있는동 = new Set(lawds.map(x => x.lawd_cd));
+        lawds = lawds.concat(xr.recordsets[0].filter(x => !있는동.has(x.lawd_cd)).map(x => ({ ...x, 옛동으로: 옛이름 })));
+        const 있는단지 = new Set(_행.map(x => x.complex_id));
+        const 더단지 = xr.recordsets[1].filter(x => !있는단지.has(x.complex_id)).map(x => ({ ...x, 옛동으로: 옛이름 }));
+        const 남는칸 = Math.max(0, limit - _행.length);
+        _행.push(...더단지.slice(0, 남는칸));
+        if (더단지.length > 남는칸) 바뀜.forEach(b => { b.잘림 = true; });
+      }
+    }
+    res.json({ count: _행.length, 상한: limit, 잘림: 잘림 || !!(바뀜 && 바뀜.some(b => b.잘림)), items: _행, lawds, newbuilds, redevs, 바뀜 });
   } catch (e) { fail(res, e, 'complexes'); }
 });
 
