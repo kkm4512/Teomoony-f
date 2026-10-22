@@ -4246,8 +4246,11 @@ function renderDetail(payload) {
 
       /* ★ 2026-10-22 사장님 (52940 66㎡): 평형 하나를 고르고 그 평형이 **1건**이면 이 줄과 아래 '거래 내역' 이
          **같은 거래를 두 번** 보여 헷갈린다 → 줄 대신 한 줄 안내(꼬리표만 남긴다). 2건 이상이면 줄을 둔다(범위·건수가 뜻이 있다). */
-      if (tradeArea !== null && cnt === 1)
-        return `<p class="srcline">${r.area_grp == null ? AREA_미상 : esc(alabel(r))} ${label} 1건 — 아래 <b>거래 내역</b>에 있습니다${
+      /* ★ 17:56 사장님 "요약 줄 없애는 게 좋아 — 결국 중복 2개" → 평형 하나를 고르면 **건수와 관계없이** 요약 줄을 빼고
+         한 줄(건수 · 범위 · 해제 수)만 둔다. 해제 수는 남긴다 — 거래 내역은 최근 120건만이라 오래된 해제는 거기 없다.
+         '전체' 에서는 평형끼리 견주는 표라 줄을 둔다(거래 내역은 평형이 섞인 날짜순이다). */
+      if (tradeArea !== null)
+        return `<p class="srcline">${r.area_grp == null ? AREA_미상 : esc(alabel(r))} ${label} ${fmt(cnt)}건 — 거래는 아래 <b>거래 내역</b>에 있습니다${
           tags.length ? ` <span class="muted">· ${tags.join(' · ')}</span>` : ''}</p>`;
       return `<div class="prow">
         <div class="pa">${r.area_grp == null
