@@ -1745,3 +1745,8 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 .clx.sm{width:20px;height:20px;font-size:12px;border-width:1.5px;position:relative}
 .clx i{position:absolute;right:-7px;top:-7px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#fff;color:#4b5563;
   font:600 9px/14px var(--mono);font-style:normal;text-align:center;box-shadow:0 0 0 1px #4b5563}
+
+/* (12:59) 목록 줄 ↔ 지도 ✕ 짝 */
+.clx.sm.on{width:30px;height:30px;font-size:17px;background:#c2410c;border-width:2px}
+#detail .clsite.hl{background:var(--surface-2);box-shadow:inset 3px 0 0 #c2410c}
+#detail .clsite[data-clpnu] > summary{cursor:pointer}

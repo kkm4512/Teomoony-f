@@ -5860,7 +5860,7 @@ function 폐쇄묶음줄(s, 동들, 열기 = false) {
         t.ugrnd_flr_cnt != null ? `지하 ${t.ugrnd_flr_cnt}층` : null, t.hhld_cnt != null ? `${fmt(t.hhld_cnt)}세대` : null,
         t.fmly_cnt != null ? `${fmt(t.fmly_cnt)}가구` : null, t.tot_area != null ? `연면적 ${fmt(Math.round(t.tot_area * 100) / 100)}㎡` : null,
         날8(t.use_apr_day) ? `사용승인 ${날8(t.use_apr_day)}` : null, t.shter_gb_nm].filter(Boolean).join(' · '))}</span></li>`).join('');
-  return `<details class="clsite"${열기 ? ' open' : ''}><summary><span class="clgb">${esc(s.폐쇄구분 || '구분 없음')}</span>
+  return `<details class="clsite" data-clpnu="${esc(s.pnu || '')}"${열기 ? ' open' : ''}><summary><span class="clgb">${esc(s.폐쇄구분 || '구분 없음')}</span>
       <b>${esc(이름)}</b> <span class="muted">${esc(날8(s.shter_day) ? `${날8(s.shter_day)} ${s.폐쇄구분 || ''}` : '말소일 원문에 없음')}</span>
       ${꼬리 ? `<div class="muted sm">${esc(꼬리)}</div>` : ''}</summary>
       ${s.이름 && s.plat_plc ? `<p class="sm muted">${esc(s.plat_plc)}${s.new_plat_plc ? ` · ${esc(s.new_plat_plc)}` : ''}</p>` : ''}
@@ -6008,10 +6008,50 @@ async function 공고상세(house, lat, lng) {
    ★ 구역층(정비·토지이용 토글)과 따로 둔다 — 그걸 켜고 꺼도 이 표시는 남는다. 단지를 닫거나 바꾸면 지운다.
    ★ 필지마다 ✕ 하나(같은 필지에 묶음이 여럿이면 말풍선에 다). 지금 단지 모양은 건드리지 않는다. */
 let 닫힌자리층 = null, 닫힌자리단지 = null;
-function 닫힌자리지우기() { if (닫힌자리층) { try { map.removeLayer(닫힌자리층); } catch (e) {} } 닫힌자리층 = null; 닫힌자리단지 = null; }
+const 닫힌자리들 = new Map();   // pnu → { 면, 표, n }  — 12:59 목록 줄 ↔ 지도 ✕ 짝 맞추기
+function 닫힌자리지우기() { if (닫힌자리층) { try { map.removeLayer(닫힌자리층); } catch (e) {} } 닫힌자리층 = null; 닫힌자리단지 = null; 닫힌자리들.clear(); }
+const 닫힌표아이콘 = (n, 켬) => L.divIcon({ className: 'clx-wrap', iconSize: 켬 ? [30, 30] : [20, 20], iconAnchor: 켬 ? [15, 15] : [10, 10],
+  html: `<div class="clx sm${켬 ? ' on' : ''}" aria-label="닫힌 대장">✕${n > 1 ? `<i>${n}</i>` : ''}</div>` });
+const 닫힌면모양 = 켬 => 켬 ? { color: '#c2410c', weight: 3, dashArray: null, fillColor: '#6b7280', fillOpacity: 0.6 }
+                         : { color: '#4b5563', weight: 2, dashArray: '5 4', fillColor: '#6b7280', fillOpacity: 0.5 };
+/* 목록 줄에 올리거나 누르면 그 ✕ 를 키우고 주황으로, 그 필지는 진한 실선. 지도 ✕ 에 올리면 목록 줄을 밝힌다 */
+function 닫힌자리강조(pnu, 켬, 옮김 = false) {
+  for (const [k, v] of 닫힌자리들) {
+    const 이것 = 켬 && k === pnu;
+    if (v.표) { v.표.setIcon(닫힌표아이콘(v.n, 이것)); v.표.setZIndexOffset(이것 ? 1200 : 800); }
+    if (v.면) v.면.setStyle(닫힌면모양(이것));
+  }
+  document.querySelectorAll('#detail .clsite').forEach(el => el.classList.toggle('hl', !!켬 && el.dataset.clpnu === pnu));
+  const v = 닫힌자리들.get(pnu);
+  if (켬 && 옮김 && v) {
+    const ll = v.표 ? v.표.getLatLng() : v.면.getBounds().getCenter();
+    if (!map.getBounds().pad(-0.1).contains(ll)) {
+      if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half');
+      setTimeout(() => map.panTo(ll), 폰() ? 280 : 0);
+    }
+  }
+}
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest && e.target.closest('#detail .clsite[data-clpnu]');
+  if (el && 닫힌자리들.has(el.dataset.clpnu)) 닫힌자리강조(el.dataset.clpnu, true);
+});
+document.addEventListener('mouseout', e => {
+  const el = e.target.closest && e.target.closest('#detail .clsite[data-clpnu]');
+  if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+  if (닫힌자리고정 !== el.dataset.clpnu) 닫힌자리강조(닫힌자리고정, !!닫힌자리고정);
+});
+let 닫힌자리고정 = null;   // 누른 줄은 마우스를 떼도 밝힌 채로(다른 줄을 누르거나 같은 줄을 다시 누르면 바뀜)
+document.addEventListener('click', e => {
+  const el = e.target.closest && e.target.closest('#detail .clsite[data-clpnu] > summary');
+  if (!el) return;
+  const pnu = el.parentElement.dataset.clpnu;
+  if (!닫힌자리들.has(pnu)) return;
+  닫힌자리고정 = 닫힌자리고정 === pnu ? null : pnu;
+  닫힌자리강조(pnu, 닫힌자리고정 === pnu, true);
+});
 function 닫힌자리자동(cid, r) {
-  if (닫힌자리단지 === cid && 닫힌자리층) return;          // 탭만 바꿨다 — 다시 그리지 않는다
-  닫힌자리지우기();
+  if (닫힌자리단지 === cid && 닫힌자리층) { if (닫힌자리고정) setTimeout(() => 닫힌자리강조(닫힌자리고정, true), 0); return; }   // 탭만 바꿨다 — 다시 그리지 않는다
+  닫힌자리지우기(); 닫힌자리고정 = null;
   const 필 = (r.필지 || []).filter(x => x.geometry || x.lat != null);
   if (!필.length || typeof map === 'undefined' || !map) return;
   /* ★ 12:52 사장님 "회색이 안 나와" — 단지 필지·건물(주황) 밑에 깔려 가려졌다. 전용 판(pane)을 위에 둔다(그림 400 < 이것 450 < 표 600) */
@@ -6020,17 +6060,19 @@ function 닫힌자리자동(cid, r) {
   for (const f of 필) {
     const 묶 = (r.묶음 || []).filter(s => s.pnu === f.pnu);
     const 말 = 묶.map(s => `${s.폐쇄구분 || ''} ${날8(s.shter_day) || '날짜 없음'} · ${s.이름 || s.주용도 || '이름 없음'}`).join('\n');
-    if (f.geometry) L.geoJSON(f.geometry, { interactive: false, pane: 'closedPane',
-      style: { color: '#4b5563', weight: 2, dashArray: '5 4', fillColor: '#6b7280', fillOpacity: 0.5 } }).addTo(g);
+    const 짝 = { 면: null, 표: null, n: 묶.length };
+    if (f.geometry) 짝.면 = L.geoJSON(f.geometry, { interactive: false, pane: 'closedPane', style: 닫힌면모양(false) }).addTo(g);
     if (f.lat != null) {
       const m = L.marker([Number(f.lat), Number(f.lng)], { zIndexOffset: 800, keyboard: false,
-        title: `닫힌 대장 ${묶.length}묶음 — 지금 건물이 아닙니다\n${말}`,
-        icon: L.divIcon({ className: 'clx-wrap', iconSize: [20, 20], iconAnchor: [10, 10],
-          html: `<div class="clx sm" aria-label="닫힌 대장">✕${묶.length > 1 ? `<i>${묶.length}</i>` : ''}</div>` }) });
-      m.on('click', () => { detailTab = 'land'; renderDetail(lastDetail);
-        setTimeout(() => { const b = document.querySelector('#detail .clbox'); if (b) b.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 400); });
-      m.addTo(g);
+        title: `닫힌 대장 ${묶.length}묶음 — 지금 건물이 아닙니다\n${말}`, icon: 닫힌표아이콘(묶.length, false) });
+      m.on('mouseover', () => 닫힌자리강조(f.pnu, true));
+      m.on('mouseout', () => 닫힌자리강조(닫힌자리고정, !!닫힌자리고정));
+      m.on('click', () => { 닫힌자리고정 = f.pnu; detailTab = 'land'; renderDetail(lastDetail);
+        setTimeout(() => { const b = document.querySelector(`#detail .clsite[data-clpnu="${f.pnu}"]`) || document.querySelector('#detail .clbox');
+          if (b) b.scrollIntoView({ block: 'center', behavior: 'smooth' }); 닫힌자리강조(f.pnu, true); }, 500); });
+      짝.표 = m.addTo(g);
     }
+    닫힌자리들.set(f.pnu, 짝);
   }
   닫힌자리층 = g; 닫힌자리단지 = cid;
 }
