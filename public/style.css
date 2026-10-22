@@ -1765,3 +1765,9 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 .pill.use{border-color:var(--ink-3);color:var(--ink);background:var(--surface-2);font-weight:500}
 .usetxt{font-size:11.5px;color:var(--ink-2)}
 .usecomp{font-size:11.5px;margin-top:-2px}
+
+/* (13:31) 자리 모르는 공고 묶음 — 점선 테두리 · 흐린 바탕(자리가 아니라 '이 동' 표) */
+.ahmark.nowhere{background:transparent;border:1.5px dashed var(--s5);box-shadow:none}
+.ahmark.nowhere::after{display:none}
+[data-ahopen]{cursor:pointer}
+[data-ahopen]:hover{background:var(--surface-2)}

@@ -2172,6 +2172,7 @@ function closeDetail() {
   if (box) { box.hidden = true; box.innerHTML = ''; }
   구역지우기();
   닫힌자리지우기();
+  동공고지우기();
   selectedRedev = null;
   주소맞춤('/');
   시트(($('#q') && $('#q').value.trim()) ? 'half' : 'peek');
@@ -3941,7 +3942,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수) {
       if (v.잰수 < v.대장수) 덧.push(`${fmt(v.대장수)}개 중 ${fmt(v.잰수)}개 기준`);
       /* ★ 수치와 '무엇과 견줬나' 를 **위아래로** 나눈다. 한 줄로 붙이면
          376~520px 패널에서 줄이 넘쳐 읽히지 않는다(실측). */
-      return `<span class="qt"><b>상위 ${수}</b><em>${묶음} ${esc(v.종류)} ${fmt(v.바구니수)}개 중`
+      return `<span class="qt"><b>상위 ${수}</b><em>서울·안양 ${묶음} ${esc(v.종류)} ${fmt(v.바구니수)}개 중`
            + (덧.length ? ` · ${덧.join(' · ')}` : '') + `</em></span>`;
     };
     /* 단지를 먼저 — 사람이 먼저 궁금해하는 쪽이다 */
@@ -4777,6 +4778,7 @@ function renderDetail(payload) {
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
   용도채우기(c.complex_id); // 머리 용도 표 — 대장 원문 주용도 · 기타용도 · 전유부 호별 용도
+  동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
   어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
 
@@ -5432,7 +5434,7 @@ async function 분양채우기() {
 }
 function 분양칸(공고) {
   if (!공고.length) return '';
-  const 날 = v => (v ? String(v).slice(0, 10).replace(/-/g, '.') : '—');
+  const 날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v ? String(v) : '—'); };   /* 13:31 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 */
   const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
   /* 단지에 안 이어진 공고(지도 핀)는 '추정 연결' 표가 맞지 않는다 — 출처 표만 단다 */
   return `${sect('분양', 공고.some(p => p.근거) ? 'applyhome' : 'applyhome0', ` ${fmt(공고.length)}`)}
@@ -6006,6 +6008,54 @@ document.addEventListener('click', e => {
   폐쇄핀불러오기();
 });
 
+/* ---------------- 이 법정동의 단지 밖 청약 공고 (2026-10-22 13:31, 사장님 "그 법정동에 있을 때 점으로 · 누르면 단지 상세처럼") ----------------
+   ★ 단지 상세를 열면 그 단지의 법정동에서 **단지에 안 이어진** 공고를 지도에 놓는다.
+     · 지번 자리가 있는 것: 그 자리에 '공고' 표(누르면 공고 상세)
+     · 자리가 없는 것: **'자리 모르는 공고 N' 묶음 표 하나** — 그 동을 가리키는 표일 뿐 공고의 자리가 아니다(점선 테두리 · 문구로 밝힘).
+       누르면 목록 → 고르면 공고 상세. 법정동조차 모르는 공고(44)는 여기 안 나오고 검색 제안으로만. */
+const 공고날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v || '—'); };
+let 동공고층 = null, 동공고지금 = null;
+function 동공고지우기() { if (동공고층) { try { map.removeLayer(동공고층); } catch (e) {} } 동공고층 = null; 동공고지금 = null; }
+async function 동공고그리기(lawd) {
+  if (!lawd) { 동공고지우기(); return; }
+  if (동공고지금 === lawd && 동공고층) return;          // 같은 동 — 다시 안 그린다
+  동공고지우기(); 동공고지금 = lawd;
+  let r;
+  try { r = await fetch(`/api/applyhome/dong/${encodeURIComponent(lawd)}`).then(x => x.json()); } catch { return; }
+  if (!r || r.error || 동공고지금 !== lawd || typeof map === 'undefined' || !map) return;
+  const g = L.featureGroup().addTo(map);
+  for (const h of (r.자리있음 || [])) {
+    const mk = L.marker([Number(h.lat), Number(h.lng)], { zIndexOffset: 300, riseOnHover: true,
+      title: `${h.house_nm} · 청약 공고 ${h.공고수}건 · 단지에 아직 안 이어짐`,
+      icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
+        html: `<div class="ahmark"><b>${esc(공고종류짧게[h.공고종류] || '공고')}</b><span>${esc(shortNm(h.house_nm) || '')}</span></div>` }) });
+    mk.on('click', () => 공고상세(h.house_manage_no, Number(h.lat), Number(h.lng)));
+    mk.addTo(g);
+  }
+  const 모름 = r.자리모름 || [], 자리 = r.표시자리;
+  if (모름.length && 자리 && 자리.lat != null) {
+    const mk = L.marker([Number(자리.lat), Number(자리.lng)], { zIndexOffset: 250,
+      title: `${자리.동이름 || '이 동'} — 지번이 없어 자리를 모르는 청약 공고 ${모름.length}건(표시 자리는 ${자리.근거}, 공고의 자리가 아님)`,
+      icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
+        html: `<div class="ahmark nowhere"><b>공고</b><span>자리 모름 ${fmt(모름.length)}</span></div>` }) });
+    mk.on('click', () => {
+      L.popup({ maxWidth: 320, minWidth: 240, className: 'ahpop', autoPanPadding: [20, 60] }).setLatLng(mk.getLatLng())
+        .setContent(`<div class="ahpopin"><div class="lt2">${esc(자리.동이름 || '이 동')} · 자리 모르는 청약 공고 ${fmt(모름.length)}</div>
+          <p class="note sm">공고에 지번이 없거나(공공주택지구 블록 등) 그 필지가 지금 없어 <b>정확한 자리를 모릅니다</b>. 이 표는 동을 가리킬 뿐입니다.</p>
+          <ul class="lu">${모름.map(h => `<li data-ahopen="${esc(h.house_manage_no)}" role="button" tabindex="0"><b>${esc(h.house_nm || '')}</b>
+            <span class="muted"> ${esc(공고종류말[h.공고종류] || h.공고종류 || '')} · 공고 ${esc(공고날(h.rcrit_pblanc_de))}</span></li>`).join('')}</ul></div>`)
+        .openOn(map);
+    });
+    mk.addTo(g);
+  }
+  동공고층 = g;
+}
+document.addEventListener('click', e => {
+  const li = e.target.closest && e.target.closest('[data-ahopen]');
+  if (!li) return;
+  map.closePopup(); 공고상세(li.dataset.ahopen, null, null);
+});
+
 /* ---------------- 검색 제안에서 연 '단지 밖' 상세 (2026-10-22 12:32, 사장님 "버튼 빼고 검색 제안에서") ----------------
    ① 청약 공고(단지 미연결) ② 폐쇄·말소 대장. 정비구역 상세와 같은 틀(왼쪽 상세 · 폰은 시트)을 쓴다 — selectedRedev 에 'ah:'·'cl:' 로 표를 단다.
    ★ 폐쇄: 지도에 **✕ 표 + 회색 점선 필지** — "닫힌 것" 이 한눈에. 그려지는 건 **그 필지의 지금 경계**지 옛 건물 모양이 아니다(문구로 밝힘).
@@ -6029,7 +6079,9 @@ function 지도맞추기(b, z = 18) {
 async function 공고상세(house, lat, lng) {
   const 표 = 'ah:' + house;
   보기전환('map');
+  const 남길동 = 동공고지금;                 // 동 공고 점에서 열었으면 그 점들은 남긴다(옆 공고로 바로 옮겨 가게)
   const box = 보조상세열기(표);
+  if (남길동) 동공고그리기(남길동);
   let r;
   try { r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json()); if (r.error) throw new Error(r.error); }
   catch (e) { if (selectedRedev === 표) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '공고를 불러오지 못했습니다 — ' + (e.message || e))}</p>`; return; }
@@ -6292,7 +6344,7 @@ function 구역상세(d) {
   const z = d.구역 || {}, 단 = d.단지 || [], 공 = d.공고 || [];
   const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
   const 세대합 = 단.reduce((t, x) => t + (Number(x.포함률) >= 50 ? Number(x.세대) || 0 : 0), 0);
-  const 날 = v => (v ? String(v).slice(0, 10).replace(/-/g, '.') : '—');
+  const 날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v ? String(v) : '—'); };   /* 13:31 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 */
   const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
   const 이름 = x => (x.이름 && x.주소 && x.이름 === x.주소 && x.실거래이름) ? x.실거래이름 : (shortNm(x.이름) || x.이름 || '(이름 없음)');
   return `

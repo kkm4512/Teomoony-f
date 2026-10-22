@@ -1715,7 +1715,7 @@ app.get('/api/suggest', async (req, res) => {
       { 종류: '청약 공고', 전체: 전체(rs[12] || []), 항목: (rs[12] || []).map(x => ({
           이름: x.house_nm,
           보조: [{ APT: '분양', URBTY: '오피스텔·도시형', REMNDR: '무순위·재공급', PBLPVT: '공공지원민간임대', OPT: '임의공급' }[x.공고종류] || x.공고종류,
-                 x.rcrit_pblanc_de ? `공고 ${String(x.rcrit_pblanc_de).slice(0, 10).replace(/-/g, '.')}` : null, x.hssply_adres].filter(Boolean).join(' · '),
+                 x.rcrit_pblanc_de ? `공고 ${String(x.rcrit_pblanc_de).replace(/[^0-9]/g, '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3')}` : null, x.hssply_adres].filter(Boolean).join(' · '),
           표: x.lat == null ? '단지 미연결 · 자리 없음' : '단지 미연결',
           동작: { 종류: '공고', house: x.house_manage_no, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng) } })) },
       { 종류: '신축', 전체: 전체(rs[4]), 항목: rs[4].map(x => ({
@@ -2901,6 +2901,38 @@ app.get('/api/applyhome', async (req, res) => {
    ★ 단지에 **안 이어진** 공고만(이어진 것은 단지 상세의 분양 칸에 있다). 같은 주택(관리번호)의 공고 중 하나라도 이어졌으면 뺀다.
    ★ 자리 = 공고 지번 필지의 경계상자 가운데(연속지적도). 필지를 못 찾은 공고는 핀이 없다 — 동 가운데에 찍으면 **틀린 자리**가 된다.
      그래서 몇 건이 자리를 못 찾았는지 같이 준다. */
+/* 13:31 사장님 "단지를 골라 그 법정동에 있을 때, 단지에 못 이은 공고가 점으로 · 누르면 단지 상세처럼" —
+   그 법정동(공고 주소에서 푼 lawd_cd)의 **단지에 안 이어진** 공고. 지번 자리가 있는 것은 그 자리 · 없는 것은 **'자리 모름' 묶음 하나**.
+   ★ 자리 모름 묶음의 표시 자리는 그 법정동 경계 중심(없으면 그 동 필지 중심들의 평균) — 공고의 자리가 아니라 '이 동' 을 가리키는 표다(화면이 그렇게 적는다). */
+app.get('/api/applyhome/dong/:lawd', async (req, res) => {
+  const lw = String(req.params.lawd || '');
+  if (!/^\d{10}$/.test(lw)) return res.status(400).json({ error: 'lawd 10자리' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('l', sql.Char(10), lw).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('tempdb..#adg') IS NOT NULL DROP TABLE #adg;
+      SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.mvn_prearnge_ym, p.hssply_adres,
+             lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
+             rn = ROW_NUMBER() OVER (PARTITION BY p.house_manage_no ORDER BY p.rcrit_pblanc_de DESC, p.pblanc_no DESC),
+             n = COUNT(*) OVER (PARTITION BY p.house_manage_no)
+        INTO #adg
+        FROM silver.applyhome_pblanc p
+        LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
+       WHERE p.lawd_cd = @l
+         AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no);
+      SELECT house_manage_no, house_nm, 공고종류, rcrit_pblanc_de, mvn_prearnge_ym, hssply_adres, lat, lng, 공고수 = n
+        FROM #adg WHERE rn = 1 ORDER BY rcrit_pblanc_de DESC;
+      SELECT TOP 1 lat = COALESCE(b.centroid_lat, x.lat), lng = COALESCE(b.centroid_lng, x.lng),
+             근거 = CASE WHEN b.centroid_lat IS NOT NULL THEN N'법정동 경계 중심' ELSE N'그 동 필지 중심들의 평균' END,
+             동이름 = (SELECT TOP 1 full_nm FROM meta.lawd_code WHERE lawd_cd = @l)
+        FROM (SELECT lat = AVG(centroid_lat), lng = AVG(centroid_lng) FROM silver.cadastral_parcel WHERE is_current = 1 AND lawd_cd = @l) x
+        LEFT JOIN silver.lawd_boundary b ON b.lawd_cd = @l;`);
+    const 집 = r.recordsets[0];
+    res.json({ lawd: lw, 자리있음: 집.filter(x => x.lat != null), 자리모름: 집.filter(x => x.lat == null), 표시자리: r.recordsets[1][0] || null });
+  } catch (e) { fail(res, e, 'applyhome-dong'); }
+});
+
 app.get('/api/applyhome/pins', async (req, res) => {
   const b = String(req.query.bbox || '').split(',').map(Number);
   if (b.length !== 4 || b.some(v => !Number.isFinite(v))) return res.status(400).json({ error: 'bbox=서,남,동,북' });
