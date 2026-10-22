@@ -1635,6 +1635,11 @@ function setMode(m) {
 const TOK = 'tm_token';
 const 토큰 = () => { try { return localStorage.getItem(TOK) || ''; } catch { return ''; } };
 const 토큰저장 = v => { try { v ? localStorage.setItem(TOK, v) : localStorage.removeItem(TOK); } catch {} };
+/* DB 시계는 UTC 다(SYSDATETIME = SYSUTCDATETIME 실측) — 문의·알림·질문의 때를 **한국 시각으로 보여 준다**(값은 그대로).
+   전에는 글자를 잘라 보여서 18:54 에 단 답이 09:54 로 보였다. */
+const 한국때 = v => { if (!v) return ''; const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 16);
+  return d.toLocaleString('sv-SE', { timeZone: 'Asia/Seoul', hour12: false }).slice(0, 16); };
+let 관심 = new Set();   // 313: 내 관심 단지 번호(로그인했을 때만 채운다)
 
 function 로그인박스(err, 안내) {
   return `<li class="askbox login">
@@ -1669,6 +1674,7 @@ async function 로그인하기() {
     const d = await r.json();
     if (!r.ok) return 로그인띄우기(d.error || '로그인하지 못했습니다');
     토큰저장(d.token);
+    배지새로();
     ask();                         /* 원래 하려던 질문을 이어서 한다 */
   } catch (e) {
     로그인띄우기('서버에 연결하지 못했습니다 — ' + e.message);
@@ -4855,6 +4861,8 @@ function renderDetail(payload) {
     <!-- 13:21 '단독/총괄표제부'(대장 구조) 대신 **대장 원문 용도** — 용도채우기 가 채운다 -->
     <span class="usebox" data-use="${esc(String(c.complex_id))}"><span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '여러 동' : '한 동'}</span></span>
     <span class="pill cl" data-clpill="${esc(String(c.complex_id))}" role="button" tabindex="0" hidden></span>
+    <button type="button" class="favbtn" data-fav="${c.complex_id}" aria-pressed="${관심.has(c.complex_id)}"
+            title="관심 단지 — 내 정보에 모아 봅니다(로그인)">${관심.has(c.complex_id) ? '★ 관심' : '☆ 관심'}</button>
     <h2>${esc(표시이름(c) || '(이름 없음)')}</h2>
     ${주소이름인가(c) && c.실거래이름
       ? `<p class="sub muted" title="건축물대장에 건물 이름이 없어, 이 지번으로 신고된 실거래가 가장 많이 쓴 이름을 보입니다.">이름은 실거래 신고 이름입니다 — 대장에는 이름이 없습니다</p>`
@@ -5101,7 +5109,7 @@ function 주소로열기() {
      가른다 - 기존 선택자와 로직이 한 줄도 안 바뀌게.
    ★ 지도는 숨어 있는 동안 제 크기를 0 으로 안다. 돌아올 때 invalidateSize 로
      다시 재고 refreshMap 을 부른다. 안 하면 회색 화면이 뜬다. */
-const 보기들 = ['home', 'map', 'usage', 'qna', 'policy'];
+const 보기들 = ['home', 'map', 'usage', 'qna', 'policy', 'my'];
 let 지금보기 = null, 홈받음 = false, 이용받음 = 0;
 
 function 보기전환(이름, 주소도 = true) {
@@ -5113,6 +5121,7 @@ function 보기전환(이름, 주소도 = true) {
   $('#view-usage').hidden = 이름 !== 'usage';
   $('#view-qna').hidden   = 이름 !== 'qna';
   $('#view-policy').hidden = 이름 !== 'policy';
+  $('#view-my').hidden = 이름 !== 'my';
   document.querySelectorAll('.tab').forEach(b =>
     b.setAttribute('aria-current', String(b.dataset.view === 이름)));
   if (주소도) {
@@ -5125,6 +5134,7 @@ function 보기전환(이름, 주소도 = true) {
   if (이름 === 'usage') 이용그리기();
   if (이름 === 'qna')   문의탭그리기();
   if (이름 === 'policy') 정책그리기();
+  if (이름 === 'my') 내정보그리기();
   const v = document.querySelector('.view:not([hidden])');
   if (v) v.scrollTop = 0;
 }
@@ -5381,7 +5391,7 @@ async function 문의탭그리기(쪽 = 1) {
   try {
     const d = await fetch('/api/inquiries?page=' + 쪽).then(r => r.json());
     if (d.error) throw new Error(d.error);
-    const 날 = v => (v ? String(v).replace('T', ' ').slice(0, 16) : '');
+    const 날 = 한국때;
     const 관리 = 나 && 나.role === 'root';
     L.innerHTML = (d.목록 || []).length ? (d.목록 || []).map(q => `
       <article class="qitem" data-qid="${q.id}">
@@ -5405,7 +5415,7 @@ async function 문의탭그리기(쪽 = 1) {
 }
 document.addEventListener('click', async e => {
   const v = document.getElementById('view-qna'); if (!v || v.hidden || !v.contains(e.target)) return;
-  if (e.target.closest('[data-q-login]')) { 보기전환('map'); if (!askMode) setMode('ask'); 로그인띄우기('', '로그인하면 문의를 남길 수 있습니다.'); return; }
+  if (e.target.closest('[data-q-login]')) { 보기전환('my'); return; }   // 313: 로그인은 내 정보 탭에서
   const pg = e.target.closest('[data-q-page]'); if (pg) { 문의탭그리기(Number(pg.dataset.qPage)); return; }
   const send = e.target.closest('[data-q-send]');
   if (send) {
@@ -6793,3 +6803,150 @@ document.addEventListener('click', e => {
   const h = e.target.closest('#detail [data-ahhouse]');
   if (h) { 시트('half'); 분양핀열기(h.dataset.ahhouse, [Number(h.dataset.lat), Number(h.dataset.lng)]); }
 });
+
+/* ---- 내 정보 (313, 2026-10-22) — 관심 단지 · 알림함(사이트 안 수신함) · 내 문의 · 내 AI 질문 ----
+   ★ 회원가입은 보류(사장님) — 있는 계정으로 로그인만. ★ 남이 쓴 글(답변 포함)은 전부 esc.
+   (관심 Set 은 위 로그인 칸 옆에 둔다 — 상세 그리기가 먼저 읽을 수 있어서) */
+async function 배지새로() {
+  const t = 토큰(), b = $('#mybadge');
+  if (!t) { 관심 = new Set(); if (b) b.hidden = true; 별새로(); return; }
+  try {
+    const r = await fetch('/api/my/badge', { headers: { Authorization: 'Bearer ' + t } });
+    if (r.status === 401) { 토큰저장(''); 관심 = new Set(); if (b) b.hidden = true; 별새로(); return; }
+    const d = await r.json(); if (d.error) return;
+    관심 = new Set(d.관심 || []);
+    if (b) { b.hidden = !d.안읽음; b.textContent = d.안읽음 > 99 ? '99+' : String(d.안읽음); b.title = `안 읽은 알림 ${d.안읽음}`; }
+    별새로();
+  } catch { /* 배지는 편의 — 못 받아도 화면은 그대로 */ }
+}
+function 별새로() {
+  document.querySelectorAll('[data-fav]').forEach(b => {
+    const on = 관심.has(Number(b.dataset.fav));
+    b.setAttribute('aria-pressed', String(on)); b.textContent = on ? '★ 관심' : '☆ 관심';
+  });
+}
+async function 내정보그리기() {
+  const box = $('#mybox'), t = 토큰();
+  const 날 = 한국때;
+  if (!t) {
+    box.innerHTML = `<h2 class="vtitle">내 정보</h2>
+      <div class="mysec mylogin"><p class="ec-help">관심 단지 · 알림함 · 내 문의는 로그인하면 보입니다.
+        <span class="muted">지금은 회원가입을 받지 않습니다 — 있는 계정으로만 들어옵니다.</span></p>
+        <input id="mlu" class="lin" placeholder="아이디" autocomplete="username" autocapitalize="off" spellcheck="false">
+        <input id="mlp" class="lin" type="password" placeholder="비밀번호" autocomplete="current-password">
+        <div class="ec-btns"><button type="button" class="ec-b ec-pri" id="mlgo">로그인</button><span class="lerr" id="mlerr"></span></div></div>`;
+    return;
+  }
+  box.innerHTML = '<h2 class="vtitle">내 정보</h2><p class="muted">불러오는 중…</p>';
+  let d;
+  try {
+    const r = await fetch('/api/my', { headers: { Authorization: 'Bearer ' + t } });
+    if (r.status === 401) { 토큰저장(''); return 내정보그리기(); }
+    d = await r.json();
+    if (d.error) throw Object.assign(new Error(d.error), { 응답: d });
+  } catch (e) {
+    box.innerHTML = '<h2 class="vtitle">내 정보</h2><p class="muted">내 정보를 불러오지 못했습니다.</p>';
+    오류카드(e.응답 ? { 무엇: '내 정보', 응답: e.응답, 다시: () => 내정보그리기() } : { 무엇: '내 정보', 예외: e, 다시: () => 내정보그리기() });
+    return;
+  }
+  관심 = new Set((d.관심 || []).map(x => x.complex_id));
+  const 나 = d.나 || {};
+  const 억 = v => v == null ? '' : (Number(v) / 1e8).toFixed(1).replace(/\.0$/, '') + '억';
+  box.innerHTML = `<h2 class="vtitle">내 정보</h2>
+    <div class="mysec"><div class="myrow"><span><b>${esc(나.username || '')}</b> <span class="pill">${esc(나.role || '')}</span>
+        <span class="s">마지막 로그인 ${esc(날(나.last_login))} · 남긴 문의 ${fmt(d.수.문의)} · AI 질문 ${fmt(d.수.질문)}</span></span>
+      <span class="r"><button type="button" class="ec-b" data-my-out>로그아웃</button></span></div></div>
+
+    <section class="mysec"><h3>알림함 ${d.안읽음 ? `<span class="pill use">안 읽음 ${fmt(d.안읽음)}</span>` : ''}
+        <span class="muted">문의에 답이 달리면 여기로 옵니다</span>
+        ${d.안읽음 ? '<button type="button" class="ec-b" data-my-readall>모두 읽음</button>' : ''}</h3>
+      ${(d.알림 || []).length ? d.알림.map(n => `
+        <button type="button" class="myrow${n.읽은때 ? '' : ' new'}" data-my-notice="${n.notice_id}" data-my-inq="${n.inquiry_id || ''}">
+          <span><b>${esc(n.제목)}</b>${n.내용 ? `<span class="s">${esc(n.내용).slice(0, 300)}</span>` : ''}</span>
+          <span class="r">${esc(날(n.때))}${n.읽은때 ? '' : '<br><b>새 알림</b>'}</span></button>`).join('')
+        : '<p class="muted">알림이 없습니다.</p>'}</section>
+
+    <section class="mysec"><h3>관심 단지 <span class="muted">${fmt((d.관심 || []).length)}곳 · 단지 상세의 ☆ 관심 으로 넣고 뺍니다</span></h3>
+      ${(d.관심 || []).length ? d.관심.map(c => `
+        <div class="myrow"><button type="button" class="myrow" style="border:0;margin:0;padding:0" data-my-open="${c.merged_into || c.complex_id}">
+            <span><b>${esc(c.complex_nm || '(이름 없음)')}</b>
+            <span class="s">${esc(c.rep_plat_plc || '')}${c.hhld_cnt_sum ? ` · ${fmt(c.hhld_cnt_sum)}세대` : ''}${c.oldest_use_apr ? ` · 사용승인 ${esc(String(c.oldest_use_apr).slice(0, 4))}` : ''}
+              ${c.trade_last_amt ? ` · 최근 매매 ${억(c.trade_last_amt)} (${esc(String(c.trade_last_ymd || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3'))})` : ''}
+              ${c.merged_into ? ` · <b>다른 단지로 묶였습니다</b>` : (c.is_active === false ? ' · <b>지금은 없는 단지</b>' : '')}</span></span></button>
+          <span class="r">${esc(날(c.넣은때).slice(0, 10))}<br><button type="button" class="unfav" data-fav="${c.complex_id}" aria-pressed="true">★ 관심</button></span></div>`).join('')
+        : '<p class="muted">아직 없습니다. 단지 상세 위의 <b>☆ 관심</b> 을 누르면 여기에 모입니다.</p>'}</section>
+
+    <section class="mysec"><h3>내 문의 <span class="muted">${fmt((d.문의 || []).length)}건 — 모두가 보는 문의 탭에도 있습니다</span></h3>
+      ${(d.문의 || []).length ? d.문의.map(q => `
+        <div class="myrow"><span><span class="pill${q.답변 ? ' use' : ''}">${q.답변 ? '답변함' : '답변 전'}</span> #${q.inquiry_id}
+            ${q.종류 === '오류' ? `<span class="pill">오류</span> ${esc(q.무엇 || '')}` : ''}
+            ${q.내용 ? `<span class="s">${esc(q.내용).replace(/\n/g, '<br>')}</span>` : ''}
+            ${q.답변 ? `<div class="myans"><b>터무니</b> <span class="muted">${esc(날(q.답변때))}</span><br>${esc(q.답변).replace(/\n/g, '<br>')}</div>` : ''}</span>
+          <span class="r">${esc(날(q.때))}</span></div>`).join('')
+        : '<p class="muted">남긴 문의가 없습니다.</p>'}</section>
+
+    <section class="mysec"><h3>내 AI 질문 <span class="muted">최근 ${fmt((d.질문 || []).length)}개 · 누르면 다시 찾습니다</span></h3>
+      ${(d.질문 || []).length ? d.질문.map(a => `
+        <button type="button" class="myrow" data-my-ask="${esc(a.질문)}"><span>${esc(a.질문)}
+            <span class="s">${esc(a.종류 || '')}${a.결과수 != null ? ` · ${fmt(a.결과수)}곳` : ''}</span></span>
+          <span class="r">${esc(날(a.때))}</span></button>`).join('')
+        : '<p class="muted">아직 없습니다.</p>'}</section>`;
+  배지새로();
+}
+document.addEventListener('click', async e => {
+  /* 별(관심) — 상세 · 내 정보 어디서나 */
+  const f = e.target.closest('[data-fav]');
+  if (f) {
+    e.preventDefault();
+    const id = Number(f.dataset.fav), t = 토큰();
+    if (!t) { toast('관심 단지는 로그인하면 쓸 수 있습니다 — 내 정보 탭에서 로그인하세요', 3500); 보기전환('my'); return; }
+    const on = 관심.has(id);
+    f.disabled = true;
+    try {
+      const r = await fetch('/api/my/fav/' + id, { method: on ? 'DELETE' : 'PUT', headers: { Authorization: 'Bearer ' + t } });
+      if (r.status === 401) { 토큰저장(''); toast('로그인이 만료됐습니다 — 다시 들어와 주세요', 3500); 보기전환('my'); return; }
+      const d = await r.json();
+      if (!r.ok || d.error) { toast(esc(d.error || '바꾸지 못했습니다'), 3000); return; }
+      on ? 관심.delete(id) : 관심.add(id);
+      별새로();
+      if (지금보기 === 'my') 내정보그리기();
+    } catch (x) { toast('바꾸지 못했습니다 — ' + esc(x.message), 3000); }
+    finally { f.disabled = false; }
+    return;
+  }
+  const v = document.getElementById('view-my'); if (!v || v.hidden || !v.contains(e.target)) return;
+  if (e.target.closest('#mlgo')) {
+    const u = ($('#mlu') || {}).value || '', pw = ($('#mlp') || {}).value || '', er = $('#mlerr');
+    if (!u || !pw) { er.textContent = '아이디와 비밀번호를 모두 넣어 주세요'; return; }
+    try {
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: u, password: pw }) });
+      const d = await r.json();
+      if (!r.ok) { er.textContent = d.error || '로그인하지 못했습니다'; return; }
+      토큰저장(d.token); 내정보그리기();
+    } catch (x) { er.textContent = '서버에 연결하지 못했습니다 — ' + x.message; }
+    return;
+  }
+  if (e.target.closest('[data-my-out]')) { 토큰저장(''); 관심 = new Set(); 배지새로(); 내정보그리기(); return; }
+  if (e.target.closest('[data-my-readall]')) {
+    await fetch('/api/my/notice/read', { method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + 토큰() }, body: '{}' }).catch(() => {});
+    내정보그리기(); return;
+  }
+  const n = e.target.closest('[data-my-notice]');
+  if (n) {
+    await fetch('/api/my/notice/read', { method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + 토큰() },
+      body: JSON.stringify({ id: Number(n.dataset.myNotice) }) }).catch(() => {});
+    배지새로();
+    보기전환('qna');   // 답변은 문의 탭에서 그 글과 같이 본다
+    const qid = n.dataset.myInq;
+    if (qid) setTimeout(() => { const a = document.querySelector(`#view-qna [data-qid="${qid}"]`); if (a) { a.scrollIntoView({ block: 'center' }); a.style.outline = '2px solid var(--mark)'; } }, 900);
+    return;
+  }
+  const o = e.target.closest('[data-my-open]');
+  if (o) { 보기전환('map'); select(Number(o.dataset.myOpen)); return; }
+  const a = e.target.closest('[data-my-ask]');
+  if (a) { 보기전환('map'); if (!askMode) setMode('ask'); $('#q').value = a.dataset.myAsk; ask(); return; }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && (e.target.id === 'mlp' || e.target.id === 'mlu')) { const b = $('#mlgo'); if (b) b.click(); } });
+/* 처음 열 때 · 창으로 돌아올 때 배지를 새로(답변이 달렸는지) — 주기적으로 두드리지 않는다 */
+배지새로();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) 배지새로(); });

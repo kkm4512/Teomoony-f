@@ -27,7 +27,7 @@
 <!-- ★ (2026-10-22) 첫 화면이 지도로 잠깐 떴다가 홈으로 바뀌던 것: .app 에 data-view 가 app.js 가
      다 받아진 뒤에야 붙어서, 그 전까지는 지도 화면 모양으로 그려졌다. 그리기 전에 여기서 붙인다.
      규칙은 app.js 탭달기·주소로열기와 같다 — /c/숫자 는 지도, #home·#map·#usage 는 그대로, 나머지는 홈. -->
-<script>(function(){var a=document.currentScript.parentNode,h=(location.hash||'').slice(1),v=/^\/c\/\d+\/?$/.test(location.pathname)?'map':(h==='map'||h==='usage'||h==='qna'||h==='policy'||h==='home')?h:'home';a.dataset.view=v;})()</script>
+<script>(function(){var a=document.currentScript.parentNode,h=(location.hash||'').slice(1),v=/^\/c\/\d+\/?$/.test(location.pathname)?'map':(h==='map'||h==='usage'||h==='qna'||h==='policy'||h==='my'||h==='home')?h:'home';a.dataset.view=v;})()</script>
   <!-- ★ 헤더는 패널 밖, 화면 전체 폭(2026-10-19). 왼쪽에 이름, 오른쪽에 적재 수치.
        수치를 지우지 않고 올린 이유: 이 화면에서 "무엇을 얼마나 받았는가" 를
        알려주는 **유일한 표시**다. 서초동을 '없다' 고 답할 뻔한 날 배웠다. -->
@@ -45,6 +45,8 @@
       <button type="button" class="tab" data-view="map"   aria-current="false">지도</button>
       <button type="button" class="tab" data-view="usage" aria-current="false">이용현황</button>
       <button type="button" class="tab" data-view="qna"   aria-current="false">문의</button>
+      <!-- 2026-10-22 (313) 내 정보 — 관심 단지 · 알림함 · 내 문의 · 내 AI 질문. 안 읽은 알림 수를 배지로 -->
+      <button type="button" class="tab" data-view="my"    aria-current="false">내 정보<b class="nbadge" id="mybadge" hidden></b></button>
     </nav>
     <div class="statrow" id="stats"></div>
     <button type="button" class="thbtn" id="theme" title="밝게 / 어둡게" aria-label="밝게 / 어둡게">
@@ -260,6 +262,11 @@
       <p class="note sm">화면 칸마다 붙어 있던 '어떻게 셌나 · 왜 이렇게 보이나' 를 여기 모았습니다. 칸 머리의 출처 표시(<b>?</b>)를 누르면 그 칸의 절로 옵니다.</p>
       <div id="polbody"></div>
     </div>
+  </section>
+
+  <!-- ================= 내 정보 (313 — 회원가입은 보류, 있는 계정만) ================= -->
+  <section id="view-my" class="view" hidden>
+    <div class="vwrap" id="mybox" aria-live="polite"></div>
   </section>
 
   <!-- ================= 문의 (2026-10-22 사장님 "이용현황 오른쪽에 탭 — 질문이랑 답변 모두가 볼 수 있게") ================= -->

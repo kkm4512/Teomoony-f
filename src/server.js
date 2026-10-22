@@ -2172,10 +2172,94 @@ app.post('/api/inquiry/:id/answer', requireAuth, async (req, res) => {
       UPDATE ops.inquiry SET 답변 = @a, 답변때 = CASE WHEN @a IS NULL THEN NULL ELSE SYSDATETIME() END,
              답변자 = CASE WHEN @a IS NULL THEN NULL ELSE @u END, 상태 = CASE WHEN @a IS NULL THEN N'새로' ELSE N'답변함' END
        WHERE inquiry_id = @id;
-      SELECT n = @@ROWCOUNT;`);
+      DECLARE @n INT = @@ROWCOUNT;
+      /* 313: 남긴 사람의 알림함에 한 줄(사이트 안 수신함 — 외부 메일 없음). 답변을 고치면 새 줄이 하나 더 생긴다(고친 것도 알린다) */
+      IF @n > 0 AND @a IS NOT NULL
+        INSERT INTO ops.notice (user_id, 종류, 제목, 내용, inquiry_id)
+        SELECT user_id, N'문의답변', N'문의 #' + CAST(inquiry_id AS NVARCHAR(12)) + N' 에 답변이 달렸습니다', LEFT(@a, 300), inquiry_id
+          FROM ops.inquiry WHERE inquiry_id = @id AND user_id IS NOT NULL;
+      SELECT n = @n;`);
     if (!r.recordset[0].n) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });
   } catch (e) { fail(res, e, 'inquiry-answer'); }
+});
+
+/* ===================== 내 정보 (313, 2026-10-22 사장님 "관심 단지 · 내정보 · 문의 답변 오면 사이트 안 수신함" · 회원가입은 보류) =====================
+   ★ 전부 requireAuth — **토큰의 uid 로만** 읽고 쓴다(주소나 몸통으로 남의 uid 를 받지 않는다).
+   ★ 기록은 지우지 않는다: 관심 빼기 = 뺀때 · 알림 읽기 = 읽은때. */
+const 내uid = req => Number(req.user && req.user.uid);
+app.get('/api/my', requireAuth, async (req, res) => {
+  const uid = 내uid(req);
+  if (!Number.isInteger(uid)) return res.status(401).json({ error: '로그인이 필요합니다' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('u', sql.Int, uid).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT username, role, last_login FROM meta.app_user WHERE user_id = @u;
+      SELECT TOP 50 notice_id, 때, 종류, 제목, 내용, inquiry_id, 읽은때 FROM ops.notice WHERE user_id = @u ORDER BY 때 DESC, notice_id DESC;
+      SELECT f.complex_id, f.넣은때, c.complex_nm, c.rep_plat_plc, c.hhld_cnt_sum, c.oldest_use_apr,
+             c.trade_last_ymd, c.trade_last_amt, c.is_active, c.merged_into
+        FROM ops.fav_complex f LEFT JOIN gold.complex c ON c.complex_id = f.complex_id
+       WHERE f.user_id = @u AND f.뺀때 IS NULL ORDER BY f.넣은때 DESC;
+      SELECT TOP 50 inquiry_id, 때, 종류, 무엇, 내용, 상태, 답변, 답변때 FROM ops.inquiry WHERE user_id = @u ORDER BY 때 DESC;
+      SELECT TOP 30 때, 질문, 종류, 결과수 FROM ops.ask_log WHERE user_id = @u ORDER BY 때 DESC;
+      SELECT 안읽음 = COUNT(*) FROM ops.notice WHERE user_id = @u AND 읽은때 IS NULL;
+      SELECT 문의 = (SELECT COUNT(*) FROM ops.inquiry WHERE user_id = @u),
+             질문 = (SELECT COUNT(*) FROM ops.ask_log WHERE user_id = @u);`);
+    const [나, 알림, 관심, 문의, 질문, 안, 수] = r.recordsets;
+    res.json({ 나: 나[0] || null, 알림, 관심, 문의, 질문, 안읽음: 안[0].안읽음, 수: 수[0] });
+  } catch (e) { fail(res, e, 'my'); }
+});
+/* 머리 배지 · 별 상태 — 가볍게(안 읽은 수 · 관심 단지 번호) */
+app.get('/api/my/badge', requireAuth, async (req, res) => {
+  const uid = 내uid(req);
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('u', sql.Int, uid).query(`
+      SELECT 안읽음 = COUNT(*) FROM ops.notice WHERE user_id = @u AND 읽은때 IS NULL;
+      SELECT complex_id FROM ops.fav_complex WHERE user_id = @u AND 뺀때 IS NULL;`);
+    res.json({ 안읽음: r.recordsets[0][0].안읽음, 관심: r.recordsets[1].map(x => x.complex_id) });
+  } catch (e) { fail(res, e, 'my-badge'); }
+});
+app.put('/api/my/fav/:id', requireAuth, async (req, res) => {
+  const uid = 내uid(req), id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('u', sql.Int, uid).input('c', sql.Int, id).query(`
+      IF NOT EXISTS (SELECT 1 FROM gold.complex WHERE complex_id = @c) BEGIN SELECT 결과 = 'none'; RETURN; END
+      IF (SELECT COUNT(*) FROM ops.fav_complex WHERE user_id = @u AND 뺀때 IS NULL) >= 500 BEGIN SELECT 결과 = 'full'; RETURN; END
+      MERGE ops.fav_complex AS t USING (SELECT u = @u, c = @c) s ON t.user_id = s.u AND t.complex_id = s.c
+      WHEN MATCHED THEN UPDATE SET 뺀때 = NULL, 넣은때 = CASE WHEN t.뺀때 IS NULL THEN t.넣은때 ELSE SYSDATETIME() END
+      WHEN NOT MATCHED THEN INSERT (user_id, complex_id) VALUES (s.u, s.c);
+      SELECT 결과 = 'ok';`);
+    const k = r.recordset[0].결과;
+    if (k === 'none') return res.status(404).json({ error: '없는 단지입니다' });
+    if (k === 'full') return res.status(400).json({ error: '관심 단지는 500곳까지입니다' });
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'my-fav'); }
+});
+app.delete('/api/my/fav/:id', requireAuth, async (req, res) => {
+  const uid = 내uid(req), id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    await pool.request().input('u', sql.Int, uid).input('c', sql.Int, id).query(`
+      UPDATE ops.fav_complex SET 뺀때 = SYSDATETIME() WHERE user_id = @u AND complex_id = @c AND 뺀때 IS NULL;`);
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'my-unfav'); }
+});
+/* 알림 읽음 — id 를 주면 그 하나, 안 주면 전부 */
+app.post('/api/my/notice/read', requireAuth, async (req, res) => {
+  const uid = 내uid(req);
+  const id = (req.body || {}).id == null ? null : Number(req.body.id);
+  if (id !== null && (!Number.isInteger(id) || id < 1)) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    await pool.request().input('u', sql.Int, uid).input('i', sql.Int, id).query(`
+      UPDATE ops.notice SET 읽은때 = SYSDATETIME() WHERE user_id = @u AND 읽은때 IS NULL AND (@i IS NULL OR notice_id = @i);`);
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'my-read'); }
 });
 
 /* 지역 이름 -> 법정동 코드. ★ 사전이 LLM 보다 정확하다(20,561건) -
@@ -3234,6 +3318,16 @@ app.get('/api/_ask', (req, res, next) => {
   req.user = { uid: null, u: '_시험', r: null };
   const layer = app._router.stack.find(l => l.route && l.route.path === '/api/ask' && l.route.methods.get);
   if (!layer) return res.status(500).json({ error: '/api/ask 를 못 찾음' });
+  return layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
+});
+
+/* 집안 시험용 — /api/my · /api/my/badge 를 그 계정으로 **읽기만**(이 컴퓨터에서만). 쓰는 길(별 · 읽음)은 열지 않는다 — 기록에 시험 행을 남기지 않게 */
+app.get('/api/_my', (req, res, next) => {
+  if (!집안에서(req)) return res.status(404).json({ error: 'not found' });
+  req.user = { uid: Number(req.query.uid), u: '_시험', r: null };
+  const 길 = req.query.badge ? '/api/my/badge' : '/api/my';
+  const layer = app._router.stack.find(l => l.route && l.route.path === 길 && l.route.methods.get);
+  if (!layer) return res.status(500).json({ error: 길 + ' 를 못 찾음' });
   return layer.route.stack[layer.route.stack.length - 1].handle(req, res, next);
 });
 
