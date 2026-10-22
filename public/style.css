@@ -1772,3 +1772,7 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 .ahmark.nowhere::after{display:none}
 [data-ahopen]{cursor:pointer}
 [data-ahopen]:hover{background:var(--surface-2)}
+
+/* (13:49) '근처' 공고 — 같은 본번 필지 가운데(정확한 자리 아님) */
+.ahmark.near{border:2px dashed var(--s5);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.ahmark.near b{color:var(--warn, #b4690e)}

@@ -6032,6 +6032,27 @@ async function 동공고그리기(lawd) {
     mk.on('click', () => 공고상세(h.house_manage_no, Number(h.lat), Number(h.lng)));
     mk.addTo(g);
   }
+  /* 13:49 '근처' — 공고 지번 필지가 지금 없어 같은 본번 필지들의 가운데에(점선 · '근처' 글씨) */
+  /* 같은 본번이면 같은 자리 — 겹쳐 쌓이지 않게 **자리마다 하나**로 묶는다(여럿이면 '근처 N' → 목록) */
+  const 근처묶음 = new Map();
+  for (const h of (r.근처 || [])) {
+    const k = `${Number(h.근처lat).toFixed(6)},${Number(h.근처lng).toFixed(6)}`;
+    (근처묶음.get(k) || 근처묶음.set(k, []).get(k)).push(h);
+  }
+  for (const hs of 근처묶음.values()) {
+    const h = hs[0], ll = [Number(h.근처lat), Number(h.근처lng)];
+    const mk = L.marker(ll, { zIndexOffset: 280, riseOnHover: true,
+      title: `${hs.length > 1 ? `청약 공고 ${hs.length}건` : h.house_nm} — 공고 지번 필지가 지금 지적도에 없어 같은 본번 필지 ${h.근처필지}개 가운데에 놓았습니다(정확한 자리 아님)`,
+      icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
+        html: `<div class="ahmark near"><b>근처${hs.length > 1 ? ' ' + hs.length : ''}</b><span>${esc(shortNm(h.house_nm) || '')}${hs.length > 1 ? ' 외' : ''}</span></div>` }) });
+    if (hs.length === 1) mk.on('click', () => 공고상세(h.house_manage_no, ll[0], ll[1]));
+    else mk.on('click', () => L.popup({ maxWidth: 320, minWidth: 240, className: 'ahpop', autoPanPadding: [20, 60] }).setLatLng(ll)
+      .setContent(`<div class="ahpopin"><div class="lt2">근처 청약 공고 ${fmt(hs.length)}</div>
+        <p class="note sm">공고 지번 필지가 지금 지적도에 없어 <b>같은 본번 필지 ${fmt(h.근처필지)}개의 가운데</b>에 놓았습니다 — 정확한 자리가 아닙니다.</p>
+        <ul class="lu">${hs.map(x => `<li data-ahopen="${esc(x.house_manage_no)}" role="button" tabindex="0"><b>${esc(x.house_nm || '')}</b>
+          <span class="muted"> ${esc(공고종류말[x.공고종류] || x.공고종류 || '')} · 공고 ${esc(공고날(x.rcrit_pblanc_de))}</span></li>`).join('')}</ul></div>`).openOn(map));
+    mk.addTo(g);
+  }
   const 모름 = r.자리모름 || [], 자리 = r.표시자리;
   if (모름.length && 자리 && 자리.lat != null) {
     const mk = L.marker([Number(자리.lat), Number(자리.lng)], { zIndexOffset: 250,
@@ -6082,20 +6103,36 @@ async function 공고상세(house, lat, lng) {
   const 남길동 = 동공고지금;                 // 동 공고 점에서 열었으면 그 점들은 남긴다(옆 공고로 바로 옮겨 가게)
   const box = 보조상세열기(표);
   if (남길동) 동공고그리기(남길동);
-  let r;
-  try { r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json()); if (r.error) throw new Error(r.error); }
+  let r, w = null;
+  try {
+    [r, w] = await Promise.all([
+      fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json()),
+      fetch(`/api/applyhome/${encodeURIComponent(house)}/where`).then(x => x.json()).catch(() => null)]);
+    if (r.error) throw new Error(r.error);
+  }
   catch (e) { if (selectedRedev === 표) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '공고를 불러오지 못했습니다 — ' + (e.message || e))}</p>`; return; }
   if (selectedRedev !== 표) return;
+  if (w && !w.error && w.lat != null) { lat = Number(w.lat); lng = Number(w.lng); }
+  const 근처 = w && w.자리 === '근처';
   구역지우기();
   if (lat != null) {
     구역층 = L.featureGroup([L.marker([lat, lng], { interactive: false, icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
-      html: `<div class="ahmark"><b>공고</b><span>${esc(shortNm(((r.공고 || [])[0] || {}).house_nm) || '')}</span></div>` }) })]).addTo(map);
+      html: `<div class="ahmark${근처 ? ' near' : ''}"><b>${근처 ? '근처' : '공고'}</b><span>${esc(shortNm(((r.공고 || [])[0] || {}).house_nm) || '')}</span></div>` }) })]).addTo(map);
     구역지금 = 표; 지도맞추기([lat, lng], 17);
   }
+  const 지번말 = w && w.pnu ? `${w.pnu.slice(10, 11) === '2' ? '산 ' : ''}${Number(w.pnu.slice(11, 15))}${Number(w.pnu.slice(15, 19)) ? '-' + Number(w.pnu.slice(15, 19)) : ''}` : null;
+  const 이력칸 = w && (w.이력 || w.이력실패) ? `<div class="lt2">공고 지번 ${esc(지번말 || '')}의 토지 이동 이력 <span class="muted">(VWorld 토지이동이력 원문)</span></div>${
+      w.이력실패 ? `<p class="note sm">${gapCell('', 'UNSURE', '이력을 불러오지 못했습니다 — ' + w.이력실패)}</p>`
+      : (w.이력 || []).length ? `<ul class="lu">${w.이력.slice(0, 4).map(z => `<li><b>${esc(z.일자 ? z.일자.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.사유 || '')}</span>
+          <span class="muted">${esc([z.지목, z.면적 ? z.면적 + '㎡' : null].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
+      : '<p class="note sm">이 지번으로 된 토지 이동 이력이 없습니다(블록 번호이거나 지번이 아닌 표기일 수 있음).</p>'}` : '';
   box.innerHTML = `<span class="pill">청약 공고</span> <span class="pill cl">단지 미연결</span>
     <h2>${esc(((r.공고 || [])[0] || {}).house_nm || '청약 공고')}</h2>
     <p class="note sm">이 공고는 아직 <b>단지에 이어지지 않았습니다</b>(이름으로 잇지 않는다 — 지번·입주월·세대·거리로만).
-      ${lat != null ? '지도의 표는 <b>공고 지번</b> 자리입니다.' : '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'}</p>
+      ${lat == null ? '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'
+        : 근처 ? `공고 지번 필지가 <b>지금 지적도에 없어</b>(사업으로 합필·분필 중이거나 끝남) 같은 본번 필지 ${fmt(w.근처필지)}개의 가운데에 <b>'근처'</b> 로 놓았습니다 — 정확한 자리가 아닙니다.`
+        : '지도의 표는 <b>공고 지번</b> 자리입니다.'}</p>
+    ${이력칸}
     <div class="ahbox">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`;
 }
 /* 12:44 사장님 "따로 버튼 안 눌러도 X 누른 것처럼" — 단지 상세를 열면 그 단지 필지 중 닫힌 대장이 있는 필지에 **저절로** ✕ + 회색 점선.

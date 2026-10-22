@@ -2912,7 +2912,7 @@ app.get('/api/applyhome/dong/:lawd', async (req, res) => {
     const r = await pool.request().input('l', sql.Char(10), lw).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       IF OBJECT_ID('tempdb..#adg') IS NOT NULL DROP TABLE #adg;
-      SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.mvn_prearnge_ym, p.hssply_adres,
+      SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.mvn_prearnge_ym, p.hssply_adres, p.pnu,
              lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
              rn = ROW_NUMBER() OVER (PARTITION BY p.house_manage_no ORDER BY p.rcrit_pblanc_de DESC, p.pblanc_no DESC),
              n = COUNT(*) OVER (PARTITION BY p.house_manage_no)
@@ -2921,16 +2921,71 @@ app.get('/api/applyhome/dong/:lawd', async (req, res) => {
         LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
        WHERE p.lawd_cd = @l
          AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no);
-      SELECT house_manage_no, house_nm, 공고종류, rcrit_pblanc_de, mvn_prearnge_ym, hssply_adres, lat, lng, 공고수 = n
-        FROM #adg WHERE rn = 1 ORDER BY rcrit_pblanc_de DESC;
+      /* 13:49 사장님 "1,3 ㄱㄱ": 공고 지번 필지가 지금 없으면 **같은 본번(법정동+산+본번) 필지들의 가운데** — '근처' 로만 표시(정확한 자리 아님) */
+      SELECT a.house_manage_no, a.house_nm, a.공고종류, a.rcrit_pblanc_de, a.mvn_prearnge_ym, a.hssply_adres, a.pnu, a.lat, a.lng, 공고수 = a.n,
+             근처lat = nb.lat, 근처lng = nb.lng, 근처필지 = nb.n
+        FROM #adg a
+        OUTER APPLY (SELECT lat = AVG(c2.centroid_lat), lng = AVG(c2.centroid_lng), n = COUNT(*)
+                       FROM silver.cadastral_parcel c2
+                      WHERE a.lat IS NULL AND a.pnu IS NOT NULL AND c2.is_current = 1
+                        AND c2.pnu LIKE LEFT(a.pnu, 15) + '%') nb
+       WHERE a.rn = 1 ORDER BY a.rcrit_pblanc_de DESC;
       SELECT TOP 1 lat = COALESCE(b.centroid_lat, x.lat), lng = COALESCE(b.centroid_lng, x.lng),
              근거 = CASE WHEN b.centroid_lat IS NOT NULL THEN N'법정동 경계 중심' ELSE N'그 동 필지 중심들의 평균' END,
              동이름 = (SELECT TOP 1 full_nm FROM meta.lawd_code WHERE lawd_cd = @l)
         FROM (SELECT lat = AVG(centroid_lat), lng = AVG(centroid_lng) FROM silver.cadastral_parcel WHERE is_current = 1 AND lawd_cd = @l) x
         LEFT JOIN silver.lawd_boundary b ON b.lawd_cd = @l;`);
     const 집 = r.recordsets[0];
-    res.json({ lawd: lw, 자리있음: 집.filter(x => x.lat != null), 자리모름: 집.filter(x => x.lat == null), 표시자리: r.recordsets[1][0] || null });
+    res.json({ lawd: lw, 자리있음: 집.filter(x => x.lat != null),
+               근처: 집.filter(x => x.lat == null && x.근처lat != null && Number(x.근처필지) > 0),
+               자리모름: 집.filter(x => x.lat == null && !(x.근처lat != null && Number(x.근처필지) > 0)), 표시자리: r.recordsets[1][0] || null });
   } catch (e) { fail(res, e, 'applyhome-dong'); }
+});
+
+/* 공고 하나의 자리와 그 지번의 토지 이동 이력 (13:49 사장님 "1,3 ㄱㄱ")
+   자리: 공고 지번 필지가 지금 있으면 그 자리 · 없으면 같은 본번 필지들의 가운데('근처') · 그것도 없으면 없음.
+   이력: VWorld NED getLandMoveAttr(토지이동이력) — **원문 사유·일자**(왜 지금 지적도에 없는지). 그때그때 받고 저장하지 않는다. */
+app.get('/api/applyhome/:house/where', async (req, res) => {
+  const h = String(req.params.house || '');
+  if (!/^\d{6,20}$/.test(h)) return res.status(400).json({ error: 'bad house' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('h', sql.VarChar(20), h).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 p.pnu, p.hssply_adres, p.lawd_cd,
+             lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
+             근처lat = nb.lat, 근처lng = nb.lng, 근처필지 = nb.n
+        FROM silver.applyhome_pblanc p
+        LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
+        OUTER APPLY (SELECT lat = AVG(c2.centroid_lat), lng = AVG(c2.centroid_lng), n = COUNT(*)
+                       FROM silver.cadastral_parcel c2
+                      WHERE cp.pnu IS NULL AND p.pnu IS NOT NULL AND c2.is_current = 1 AND c2.pnu LIKE LEFT(p.pnu, 15) + '%') nb
+       WHERE p.house_manage_no = @h
+       ORDER BY CASE WHEN p.pnu IS NULL THEN 1 ELSE 0 END, p.rcrit_pblanc_de DESC;`);
+    const x = r.recordset[0];
+    if (!x) return res.status(404).json({ error: 'not found' });
+    const 자리 = x.lat != null ? '필지' : (x.근처lat != null && Number(x.근처필지) > 0 ? '근처' : '없음');
+    let 이력 = null, 이력실패 = null;
+    if (x.pnu && 자리 !== '필지' && (process.env.VWORLD_KEY || '').trim()) {
+      const q = new URLSearchParams({ key: process.env.VWORLD_KEY.trim(), domain: (process.env.VWORLD_DOMAIN || 'localhost').trim(),
+                                      pnu: x.pnu, format: 'json', numOfRows: '20', pageNo: '1' });
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 12000);
+      try {
+        const raw = await fetch(`https://api.vworld.kr/ned/data/getLandMoveAttr?${q}`, { signal: ac.signal }).then(z => z.text());
+        let j;
+        try { j = JSON.parse(raw); } catch { throw new Error('VWorld 응답이 JSON 이 아님: ' + raw.replace(/\s+/g, ' ').slice(0, 90)); }
+        const f = ((j.landMoves || {}).field) || [];
+        이력 = f.map(z => ({ 일자: z.ladMvmnDe || null, 사유: z.ladMvmnPrvonshCodeNm || null, 지번: z.mnnmSlno || null,
+                            면적: z.lndpclAr || null, 지목: z.lndcgrCodeNm || null, 순번: z.ladHistSn || null, 대장: z.regstrSeCodeNm || null }))
+                .sort((a, b) => String(b.일자 || '').localeCompare(String(a.일자 || '')));
+      } catch (e) { 이력실패 = e.name === 'AbortError' ? 'VWorld 응답 없음' : (String(e.message || e) + (e.cause ? ' · ' + String(e.cause.code || e.cause.message || e.cause) : '')).slice(0, 120); }
+      finally { clearTimeout(t); }
+    }
+    res.json({ pnu: x.pnu, 주소: x.hssply_adres, 자리,
+               lat: 자리 === '필지' ? x.lat : 자리 === '근처' ? x.근처lat : null,
+               lng: 자리 === '필지' ? x.lng : 자리 === '근처' ? x.근처lng : null,
+               근처필지: 자리 === '근처' ? Number(x.근처필지) : null, 이력, 이력실패 });
+  } catch (e) { fail(res, e, 'applyhome-where'); }
 });
 
 app.get('/api/applyhome/pins', async (req, res) => {
