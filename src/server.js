@@ -2808,12 +2808,22 @@ app.get('/api/applyhome', async (req, res) => {
              공급 = ISNULL(m.suply_hshldco, 0) + ISNULL(m.spsply_hshldco, 0), m.suply_hshldco, m.spsply_hshldco,
              최고원 = m.top_amount_man * 10000,
              경쟁 = c.경쟁률원문, 경쟁순위 = c.순위, 경쟁구분 = c.구분이름, 접수 = c.접수, 미달 = c.미달,
+             경쟁군 = CASE WHEN c.공고종류 = 'URBTY' AND c.주택형 NOT LIKE '%[^0-9]%' THEN c.주택형 END, 경쟁공급 = c.공급,
              가점최저 = g.최저, 가점최고 = g.최고, 가점평균 = g.평균
         FROM silver.applyhome_mdl m
         JOIN #ahkey a ON a.house_manage_no = m.house_manage_no AND a.pblanc_no = m.pblanc_no
         OUTER APPLY (SELECT TOP 1 c.* FROM silver.applyhome_cmpet c
                       WHERE c.house_manage_no = m.house_manage_no AND c.pblanc_no = m.pblanc_no
-                        AND (c.model_no = m.model_no OR (c.model_no IS NULL AND LTRIM(RTRIM(c.주택형)) = LTRIM(RTRIM(m.house_ty))))
+                        /* ★ 2026-10-22: 오피스텔·도시형(URBTY) 경쟁률은 **군(GP) 단위**다 — 원문 HOUSE_TY 가 '1','2' 같은 군 번호이고
+                             MODEL_NO 01·02 는 군 차례일 뿐 주택형 번호가 아니다. model_no 로 이으면 24D(1군)에 2군 경쟁률이 붙었다.
+                             → 군 번호(숫자뿐)인 줄은 mdl 원문 GP 와 같을 때만 잇는다. */
+                        AND 1 = CASE WHEN c.공고종류 = 'URBTY' AND c.주택형 NOT LIKE '%[^0-9]%'
+                                     THEN CASE WHEN JSON_VALUE(m.raw_json, '$.GP') = c.주택형 THEN 1 ELSE 0 END
+                                     /* URBTY 의 타입 이름 줄은 번호가 같아도 이름이 다른 것이 33줄 — 이름까지 같을 때만 */
+                                     WHEN c.공고종류 = 'URBTY'
+                                     THEN CASE WHEN LTRIM(RTRIM(c.주택형)) = LTRIM(RTRIM(m.house_ty)) THEN 1 ELSE 0 END
+                                     WHEN c.model_no = m.model_no OR (c.model_no IS NULL AND LTRIM(RTRIM(c.주택형)) = LTRIM(RTRIM(m.house_ty))) THEN 1
+                                     ELSE 0 END
                       ORDER BY CASE WHEN c.순위 = 1 AND c.구분키 = '01' THEN 0 ELSE 1 END, c.순위, c.구분키) c
         OUTER APPLY (SELECT TOP 1 g.* FROM silver.applyhome_score g
                       WHERE g.house_manage_no = m.house_manage_no AND g.pblanc_no = m.pblanc_no
