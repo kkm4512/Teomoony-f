@@ -4723,6 +4723,9 @@ function renderDetail(payload) {
       <div class="rdv-h"><b>${esc(r.구역 || '')}</b>${
         r.단계 ? `<span class="rdv-st">${esc(r.단계)}</span>`
                : gapCell('', 'EMPTY', `추진단계 코드 ${esc(r.단계코드 || '')} 가 코드표에 없습니다`)}</div>
+      ${r.계획용적률 != null || r.계획세대 != null ? `<div class="rdv-m"><b>정비계획</b> ${esc([r.계획용적률 != null ? '용적률 ' + Number(r.계획용적률) + '%' : null,
+          r.계획건폐율 != null ? '건폐율 ' + Number(r.계획건폐율) + '%' : null, r.계획세대 != null ? fmt(r.계획세대) + '세대' : null,
+          r.계획층수 && /\/\d+$/.test(r.계획층수) ? '지상 ' + String(r.계획층수).split('/')[1] + '층' : null].filter(Boolean).join(' · '))}</div>` : ''}
       <div class="rdv-m">${esc(r.사업 || r.대분류 || '')}${
         r.구역면적 ? ` · ${fmt(Math.round(r.구역면적))}㎡` : ''}${
         (Number(r.포함률) || 0) < 99 ? ` · 단지의 ${(Number(r.포함률) || 0).toFixed(0)}%가 이 구역 안` : ''}</div>
@@ -5859,6 +5862,17 @@ function 구역상세(d) {
                                 : gapCell('', 'EMPTY', `추진단계 코드 ${esc(z.cd || '')} 가 코드표에 없습니다`))}
       ${row('구역 면적', z.area ? fmt(Math.round(z.area)) + ' ㎡' : '—')}
       ${/* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물·노후도도 뺐다. 원본에 있는 값만 보인다 */''}
+      ${(() => { const p = d.계획; if (!p) return '';
+          const 층 = String(p.층수 || '');
+          const 층말 = /^\d+\/\d+$/.test(층) ? `지하 ${층.split('/')[0]} · 지상 ${층.split('/')[1]}층` : esc(층);
+          return row('<b>정비계획</b>', `<span class="muted">${esc([p.소분류, p.추진단계].filter(Boolean).join(' · '))}</span>`)
+            + (p.용적률 != null ? row('계획 용적률', `${Number(p.용적률)}%`) : '')
+            + (p.건폐율 != null ? row('계획 건폐율', `${Number(p.건폐율)}%`) : '')
+            + (층 ? row('층수', 층말 + (p.높이m != null ? ` <span class="muted">· 높이 ${Number(p.높이m)}m</span>` : '')) : '')
+            + (p.공급세대 != null ? row('공급 세대', `${fmt(p.공급세대)}세대${p.분양세대 != null || p.임대세대 != null
+                ? ` <span class="muted">· 분양 ${p.분양세대 != null ? fmt(p.분양세대) : '—'} · 임대 ${p.임대세대 != null ? fmt(p.임대세대) : '—'}${p.임대비율 != null ? ` (${Number(p.임대비율)}%)` : ''}</span>` : ''}`) : '')
+            + (p.용도지역_후 ? row('용도지역', `${esc(p.용도지역_전 || '—')} → ${esc(p.용도지역_후)}`) : '')
+            + (p.연면적 != null ? row('계획 연면적', `${fmt(Math.round(p.연면적))} ㎡`) : ''); })()}
       ${row('걸친 단지', `${fmt(단.length)}곳`)}
     </dl>
     ${sect('구역 안 청약 공고', 'applyhome0', 공.length ? ` ${fmt(공.length)}` : '')}
@@ -5873,7 +5887,9 @@ function 구역상세(d) {
       : `<p class="note">${gapCell('', 'NA', '이 구역과 겹치는 대장 단지가 없습니다')}</p>`}
     <p class="srcline">구역 경계 · 단계: ${esc(d.출처 || '')}. 걸친 단지는 단지 필지와 구역 경계의 <b>겹친 넓이</b>로 셉니다(단지 상세의 '정비사업 구역' 칸과 같은 셈).
       경계에 겨우 닿은(1% 미만) ${fmt(d.뺀단지 || 0)}곳은 뺐습니다. <br>
-      정비계획의 용적률·건폐율·계획 세대수는 받은 자료에 없습니다.</p>`;
+      ${d.계획 ? `정비계획(계획 용적률·건폐율·층수·공급 세대)은 서울시 '도시계획사업(서울플랜+)' 자료입니다 — 번호가 달라 <b>사업 위치 지번이 이 구역 안에 있고
+        사업 면적이 구역 면적과 5% 안</b>(${Number(d.계획.면적차pct)}% 차이)일 때만 이었습니다. 원문에 0 으로 적힌 칸은 '안 적음' 이라 비웠습니다.`
+        : '이 구역에 이어진 정비계획(서울플랜+)이 없습니다 — 계획 용적률·세대수는 모릅니다.'}</p>`;
 }
 document.addEventListener('click', e => {
   const z = e.target.closest('[data-redevzone]');

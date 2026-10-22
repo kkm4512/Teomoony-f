@@ -2710,7 +2710,13 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
         LEFT JOIN gold.applyhome_link l ON l.house_manage_no = p.house_manage_no AND l.pblanc_no = p.pblanc_no
        WHERE z.is_current = 1 AND z.present_sn = @sn
        ORDER BY p.rcrit_pblanc_de DESC;
-      /* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물 기준 용적률·건폐율·노후도 셈을 뺐다 */`);
+      /* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물 기준 용적률·건폐율·노후도 셈을 뺐다 */
+      /* 301: 서울플랜+ 정비계획(계획 용적률·건폐율·층수·높이·공급세대) — 위치 지번 + 면적 5% 로 이은 것만 */
+      SELECT p.basic_info_seq, p.자료, p.사업명, p.소분류, p.위치, p.사업면적, p.용도지역_전, p.용도지역_후, p.추진단계, p.추진일, p.지정일,
+             p.연면적, p.용적률, p.건폐율, p.층수, p.높이m, p.용도, p.공급세대, p.분양세대, p.임대세대, p.임대비율, p.홈페이지,
+             l.근거, l.면적차pct
+        FROM gold.redev_plan_link l JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
+       WHERE l.present_sn = @sn;`);
     const z = r.recordsets[0][0];
     if (!z) return res.status(404).json({ error: 'not found' });
     res.json({ 출처: '서울 열린데이터광장 정비사업 구역(OA-22712)',
@@ -2719,7 +2725,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       geometry: z.geojson ? JSON.parse(z.geojson) : null,
       /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
       단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
-      공고: r.recordsets[2] });
+      공고: r.recordsets[2], 계획: (r.recordsets[3] || [])[0] || null });
   } catch (e) { fail(res, e, 'redev-detail'); }
 });
 
@@ -3797,8 +3803,12 @@ app.get('/api/complexes/:id', async (req, res) => {
     const _q_redev = () => pool.request().input('id', sql.Int, id).query(`
       SELECT 구역 = v.zone_nm, 대분류 = v.biz_lclas_nm, 사업 = v.biz_nm,
              단계 = v.propel_nm, 단계코드 = v.propel_cd, 구역면적 = v.area_m2, sn = v.present_sn,
-             포함률 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(v.parea), 0) AS DECIMAL(5,1))
+             포함률 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(v.parea), 0) AS DECIMAL(5,1)),
+             /* 301 정비계획 — 이어진 것만 */
+             계획용적률 = MAX(pl.용적률), 계획건폐율 = MAX(pl.건폐율), 계획세대 = MAX(pl.공급세대), 계획층수 = MAX(pl.층수)
       FROM gold.v_complex_redev v
+      LEFT JOIN gold.redev_plan_link lk ON lk.present_sn = v.present_sn
+      LEFT JOIN silver.seoul_redev_plan pl ON pl.basic_info_seq = lk.basic_info_seq
       WHERE v.complex_id = @id
       GROUP BY v.zone_nm, v.biz_lclas_nm, v.biz_nm, v.propel_nm, v.propel_cd, v.area_m2, v.present_sn
       ORDER BY v.area_m2`);
