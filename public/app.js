@@ -5761,7 +5761,9 @@ async function 동네따라가기(강제) {
    이어진 공고가 없으면 **칸 자체를 안 보인다** — 2020년 전 단지까지 '없음' 을 붙이면 소음이다.
    연결은 추정(법정동 · 입주월 · 세대 · 거리)이라 그렇게 적는다. 이름으로 잇지 않았다. */
 const 분양캐시 = new Map();
-function 분양수(cid) { const r = 분양캐시.get(`c|${cid}`); return r ? (r.공고 || []).length : 0; }
+/* 2026-10-22: 공고가 없어도 같은 필지·거래 뒤 준공으로 이은 분양권·입주권 거래가 있으면 탭을 연다 — 수는 공고 수, 공고가 없으면 거래 수 */
+function 분양수(cid) { const r = 분양캐시.get(`c|${cid}`); if (!r) return 0; const n = (r.공고 || []).length;
+  return n || ((Number((r.분양권수 || {}).건수) || 0) + (Number((r.분양권수 || {}).취소) || 0)); }
 async function 분양탭확인(cid) {
   const 키 = `c|${cid}`;
   let r = 분양캐시.get(키);
@@ -5772,7 +5774,7 @@ async function 분양탭확인(cid) {
   }
   const b = document.querySelector('#detail .tab[data-tab="sale"]');
   if (!b || !lastDetail || String((lastDetail.complex || {}).complex_id) !== String(cid)) return;   // 그사이 다른 단지로 옮겼다
-  const n = (r.공고 || []).length;
+  const n = 분양수(cid);
   if (n) { b.hidden = false; b.innerHTML = `분양·청약 <b>${fmt(n)}</b>`; }
   else if (detailTab === 'sale') { detailTab = 'info'; renderDetail(lastDetail); }   // 공고가 없는 단지로 옮겼다
 }
@@ -5790,7 +5792,7 @@ async function 분양채우기() {
     }
     const 지금 = document.querySelector('#detail .ahbox');
     if (!지금 || 지금.dataset.ah !== 키) return;  // 그사이 다른 단지로 옮겼다
-    지금.innerHTML = 분양칸(r.공고 || []) + (r.공고 && r.공고.length ? 분양권칸(r) : '');
+    지금.innerHTML = 분양칸(r.공고 || []) + 분양권칸(r);
   } catch { /* 덤 */ }
 }
 function 분양칸(공고) {
@@ -5991,6 +5993,7 @@ function 분양권칸(r) {
   const 날 = d => d ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : '—';
   /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
   return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 해제 ${fmt(n.취소)}건)</span>` : ''}</div>
+    ${Number(n.필지로) ? `<p class="note sm">${fmt(n.필지로)}건은 공고 자료 없이 <b>이 단지 필지에서 이 단지 준공 전에 맺은 계약</b>으로 이었습니다(같은 필지에 거래 뒤 준공된 다른 단지가 없을 때만).</p>` : ''}
     <table class="mini"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
     ${t.slice(0, 15).map(x => {
       const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);

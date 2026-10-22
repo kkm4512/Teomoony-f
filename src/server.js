@@ -3883,18 +3883,32 @@ app.get('/api/applyhome', async (req, res) => {
           JOIN gold.complex_pnu cp ON cp.complex_id = l.complex_id) x;
       DECLARE @첫 CHAR(8) = (SELECT REPLACE(MIN(p.rcrit_pblanc_de), '-', '') FROM #ahkey a
           JOIN silver.applyhome_pblanc p ON p.house_manage_no = a.house_manage_no AND p.pblanc_no = a.pblanc_no);
+      /* ★ 2026-10-22 23:16 사장님 "매칭 1번" — 공고가 없거나 단지에 안 이어진 공고라도, **이 단지 필지에서 이 단지가 준공되기 전에** 맺은
+           분양권·입주권은 이 단지 것이다(거래 때 아직 없던 새 건물 = 이 단지). 같은 필지에 거래 뒤 준공된 다른 단지가 있으면 누구 것인지
+           모르므로 안 붙인다. 철거된 옛 단지는 '거래 뒤 준공' 이 아니라서 끼어들 수 없다(10/21 의 걱정 — 291). 이름은 보지 않는다. */
+      /* 세대가 있는 단지만 — 같은 필지의 상가 단지(예: 원베일리 스퀘어)에 아파트 분양권이 붙던 것(시험에서 잡음) */
+      DECLARE @준공 CHAR(8) = (SELECT CASE WHEN LEN(oldest_use_apr) = 8 AND hhld_cnt_sum > 0 THEN oldest_use_apr END FROM gold.complex WHERE complex_id = @cid);
+      IF OBJECT_ID('tempdb..#sv') IS NOT NULL DROP TABLE #sv;
+      SELECT trade_sk = CAST(t.trade_sk AS BIGINT), 근거 = CAST(N'공고 지번' AS NVARCHAR(30)) INTO #sv FROM silver.rtms_trade t   -- CAST: 원표의 IDENTITY·글자 길이를 물려받지 않게
+       WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL AND t.deal_ymd >= @첫;
+      INSERT INTO #sv (trade_sk, 근거)
+      SELECT t.trade_sk, N'같은 필지 · 거래 뒤 준공' FROM silver.rtms_trade t
+       WHERE @cid IS NOT NULL AND @준공 IS NOT NULL AND t.trade_kind LIKE 'SILV%' AND t.deal_ymd <= @준공
+         AND t.match_pnu IN (SELECT cp.pnu FROM gold.complex_pnu cp WHERE cp.complex_id = @cid)
+         AND NOT EXISTS (SELECT 1 FROM #sv v WHERE v.trade_sk = t.trade_sk)
+         AND NOT EXISTS (SELECT 1 FROM gold.complex_pnu cp2 JOIN gold.complex c2 ON c2.complex_id = cp2.complex_id AND c2.is_active = 1
+                          WHERE cp2.pnu = t.match_pnu AND c2.complex_id <> @cid AND c2.hhld_cnt_sum > 0
+                            AND LEN(c2.oldest_use_apr) = 8 AND c2.oldest_use_apr >= t.deal_ymd);
       SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
              구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn,
-             취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), '')
-        FROM silver.rtms_trade t
-       WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn)
-         AND @첫 IS NOT NULL AND t.deal_ymd >= @첫
+             취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
+        FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk
        ORDER BY t.deal_ymd DESC, t.trade_sk DESC;
       SELECT 건수 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 THEN 1 ELSE 0 END),
              취소 = SUM(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END),
-             입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END)
-        FROM silver.rtms_trade t
-       WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL AND t.deal_ymd >= @첫;`);
+             입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END),
+             필지로 = SUM(CASE WHEN v.근거 <> N'공고 지번' THEN 1 ELSE 0 END)
+        FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`);
     const [공고, 주택형, 분양권, 분양권수] = r.recordsets;
     res.json({ 출처: '청약홈 분양정보(한국부동산원)', 공고: 공고.map(p => ({ ...p,
       주택형: 주택형.filter(m => m.house_manage_no === p.house_manage_no && m.pblanc_no === p.pblanc_no) })),
