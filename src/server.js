@@ -3751,12 +3751,28 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
        WHERE z.is_current = 1 AND z.present_sn = @sn
        ORDER BY p.rcrit_pblanc_de DESC;
       /* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물 기준 용적률·건폐율·노후도 셈을 뺐다 */
+      /* 2026-10-22 사장님 "4번 그렇게해" — 구역 안 필지(지금 필지와 구역 경계가 겹침)에서 맺은 분양권·입주권. 지번으로만 · 이름 안 봄 */
+      IF OBJECT_ID('tempdb..#sv') IS NOT NULL DROP TABLE #sv;
+      CREATE TABLE #sv (trade_sk BIGINT NOT NULL, 근거 NVARCHAR(30) NOT NULL);
+      INSERT INTO #sv SELECT t.trade_sk, N'구역 안 필지'
+        FROM silver.rtms_trade t
+       WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (
+             SELECT cp.pnu FROM silver.redev_zone z
+               JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
+                AND cp.bbox_minx <= z.bbox_maxx AND cp.bbox_maxx >= z.bbox_minx AND cp.bbox_miny <= z.bbox_maxy AND cp.bbox_maxy >= z.bbox_miny
+                AND cp.geom.STIntersects(z.geom) = 1
+              WHERE z.is_current = 1 AND z.present_sn = @sn
+                /* 한 사업 = 한 구역인 것만 — 도시재생·모아타운·촉진지구·역세권처럼 넓고 여러 사업이 들어 있는 구역은 남의 사업 권리가 섞인다 */
+                AND z.biz_nm IN (N'재건축(공동)', N'재건축(단독)', N'재개발(주택정비형)', N'재개발(도시정비형)', N'신속통합기획',
+                                 N'주거환경개선(정비형)', N'가로주택정비사업', N'소규모재건축사업', N'소규모재개발사업', N'자율주택정비사업',
+                                 N'재정비촉진구역', N'존치정비구역', N'도심 공공주택 복합사업'));
       /* 301: 서울플랜+ 정비계획(계획 용적률·건폐율·층수·높이·공급세대) — 위치 지번 + 면적 5% 로 이은 것만 */
       SELECT p.basic_info_seq, p.자료, p.사업명, p.소분류, p.위치, p.사업면적, p.용도지역_전, p.용도지역_후, p.추진단계, p.추진일, p.지정일,
              p.연면적, p.용적률, p.건폐율, p.층수, p.높이m, p.용도, p.공급세대, p.분양세대, p.임대세대, p.임대비율, p.홈페이지,
              l.근거, l.면적차pct
         FROM gold.redev_plan_link l JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
-       WHERE l.present_sn = @sn;`);
+       WHERE l.present_sn = @sn;
+      ${분양권줄SQL}`);
     const z = r.recordsets[0][0];
     if (!z) return res.status(404).json({ error: 'not found' });
     res.json({ 출처: '서울 열린데이터광장 정비사업 구역(OA-22712)',
@@ -3765,7 +3781,8 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       geometry: z.geojson ? JSON.parse(z.geojson) : null,
       /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
       단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
-      공고: r.recordsets[2], 계획: (r.recordsets[3] || [])[0] || null });
+      공고: r.recordsets[2], 계획: (r.recordsets[3] || [])[0] || null,
+      분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {} });
   } catch (e) { fail(res, e, 'redev-detail'); }
 });
 
@@ -3895,8 +3912,10 @@ app.get('/api/applyhome', async (req, res) => {
         INSERT INTO #sv (trade_sk, 근거) SELECT trade_sk, 근거 FROM gold.fn_complex_silv(@cid);
       ELSE
         INSERT INTO #sv (trade_sk, 근거)
-        SELECT t.trade_sk, N'공고 지번' FROM silver.rtms_trade t
-         WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL AND t.deal_ymd >= @첫;
+        SELECT t.trade_sk, CASE WHEN t.deal_ymd >= @첫 THEN N'공고 지번' ELSE N'공고 지번 · 공고 전 입주권' END FROM silver.rtms_trade t
+         WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL
+           AND (t.deal_ymd >= @첫   /* 입주권(조합원 권리)은 공고 전 10년까지 — 316 과 같은 규칙 */
+                OR (t.ownership_gbn = N'입' AND t.deal_ymd >= CONVERT(CHAR(8), DATEADD(YEAR, -10, CONVERT(DATE, @첫)), 112)));
       SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
              구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn,
              취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
@@ -3905,7 +3924,8 @@ app.get('/api/applyhome', async (req, res) => {
       SELECT 건수 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 THEN 1 ELSE 0 END),
              취소 = SUM(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END),
              입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END),
-             필지로 = SUM(CASE WHEN v.근거 <> N'공고 지번' THEN 1 ELSE 0 END)
+             필지로 = SUM(CASE WHEN v.근거 LIKE N'같은 필지%' THEN 1 ELSE 0 END),
+             공고전 = SUM(CASE WHEN v.근거 LIKE N'%공고 전%' THEN 1 ELSE 0 END)
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`);
     const [공고, 주택형, 분양권, 분양권수] = r.recordsets;
     res.json({ 출처: '청약홈 분양정보(한국부동산원)', 공고: 공고.map(p => ({ ...p,
@@ -4247,6 +4267,18 @@ app.get('/api/complexes/:id/pharmacy', async (req, res) => {
    출처: 공공데이터포털 15137093 건축HUB 폐쇄말소대장(ShtRgstHubService). deploy/sql/302.
    ★ 현재 단지와 섞지 않는다(gold.closed_site 따로). '폐쇄' ≠ '철거' — 구분은 원문(말소·폐쇄·일부말소·일부폐쇄) 그대로 보인다.
    ★ 지금 단지와는 **같은 필지(PNU)** 로만 — 이름으로 잇지 않는다. 같은 필지라고 '이어 지은 것' 이라는 뜻은 아니다. */
+/* 분양권·입주권 줄 + 셈 — #sv(trade_sk, 근거) 를 채운 뒤 붙인다. 화면의 분양권칸() 이 읽는 모양(/api/applyhome 과 같은 칸) */
+const 분양권줄SQL = `
+      SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
+             구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn, 이름 = t.bld_nm,
+             취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
+        FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk
+       ORDER BY t.deal_ymd DESC, t.trade_sk DESC;
+      SELECT 건수 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 THEN 1 ELSE 0 END),
+             취소 = SUM(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END),
+             입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END),
+             처음 = MIN(t.deal_ymd), 끝 = MAX(t.deal_ymd)
+        FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`;
 const 폐쇄칸 = `s.site_key, s.pnu, s.shter_day, s.이름, s.이름출처, s.주용도, s.동수, s.총괄세대, s.사용승인일, s.폐쇄구분,
                 s.plat_plc, s.new_plat_plc, s.lat, s.lng, s.now_complex_id, now_nm = c.complex_nm`;
 const 폐쇄동칸 = `t.mgm_shtreg_pk, t.pnu, t.shter_day, t.shter_gb_nm, t.regstr_kind_nm, t.bld_nm, t.dong_nm, t.main_atch_gb_nm,
@@ -4284,13 +4316,22 @@ app.get('/api/closed/site/:key', async (req, res) => {
         FROM gold.closed_site s
         JOIN silver.land_move_done d ON d.pnu = s.pnu
         LEFT JOIN silver.land_move_hist h ON h.pnu = s.pnu
-       WHERE s.site_key = @k ORDER BY h.이동일 DESC, h.이력순번 DESC;`);
+       WHERE s.site_key = @k ORDER BY h.이동일 DESC, h.이력순번 DESC;
+      /* 2026-10-22 사장님 "4번 그렇게해" — 헐린 뒤 새 대장이 아직 없는 자리의 분양권·입주권.
+         ★ 같은 필지(PNU) · 이 대장이 닫힌 날 **이후** 계약만 — 옛 건물은 이미 없으니 이 자리에 짓는 새 사업의 권리다. 이름은 안 본다. */
+      IF OBJECT_ID('tempdb..#sv') IS NOT NULL DROP TABLE #sv;
+      CREATE TABLE #sv (trade_sk BIGINT NOT NULL, 근거 NVARCHAR(30) NOT NULL);
+      INSERT INTO #sv SELECT t.trade_sk, N'같은 필지 · 대장 닫힌 뒤'
+        FROM gold.closed_site s JOIN silver.rtms_trade t ON t.match_pnu = s.pnu
+       WHERE s.site_key = @k AND t.trade_kind LIKE 'SILV%' AND LEN(s.shter_day) = 8 AND t.deal_ymd >= s.shter_day;
+      ${분양권줄SQL}`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
     const g = (r.recordsets[2] || [])[0];
     const 이력줄 = r.recordsets[3] || [];
     res.json({ 묶음: site, 동: r.recordsets[1], 필지: g && g.geojson ? JSON.parse(g.geojson) : null,
-               이력: 이력줄.length ? { 받은시각: 이력줄[0].받음, 줄: 이력줄.filter(z => z.이동일 || z.이동사유) } : null });
+               이력: 이력줄.length ? { 받은시각: 이력줄[0].받음, 줄: 이력줄.filter(z => z.이동일 || z.이동사유) } : null,
+               분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {} });
   } catch (e) { fail(res, e, 'closed-site'); }
 });
 app.get('/api/complexes/:id/closed', async (req, res) => {

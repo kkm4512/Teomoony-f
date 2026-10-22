@@ -6002,6 +6002,8 @@ function 분양권칸(r) {
   const 날 = d => d ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : '—';
   /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
   return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 해제 ${fmt(n.취소)}건)</span>` : ''}</div>
+    ${Number(n.공고전) ? `<p class="note sm">${fmt(n.공고전)}건은 첫 모집공고 <b>전</b>에 맺은 <b>입주권</b>(조합원 권리) 계약입니다 — 공고 지번에서, 공고 전 10년 안의 것만 이었습니다.</p>` : ''}
+    ${r.분양권말 ? `<p class="note sm">${r.분양권말}</p>` : ''}
     ${Number(n.필지로) ? `<p class="note sm">${fmt(n.필지로)}건은 공고 자료 없이 <b>이 단지 필지에서 이 단지 준공 전에 맺은 계약</b>으로 이었습니다(같은 필지에 거래 뒤 준공된 다른 단지가 없을 때만).</p>` : ''}
     <table class="mini"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
     ${t.slice(0, 15).map(x => {
@@ -6668,6 +6670,8 @@ async function 폐쇄상세(key) {
       ${r.이력.줄.length ? `<ul class="lu">${r.이력.줄.slice(0, 6).map(z => `<li><b>${esc(z.이동일 ? z.이동일.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.이동사유 || '')}</span>
         <span class="muted">${esc([z.지번, z.지목, z.면적 != null ? Number(z.면적) + '㎡' : null].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
         : '<p class="note sm">이 필지로 된 토지 이동 이력이 없습니다.</p>'}` : ''}
+    ${(r.분양권 || []).length ? sect('이 자리 사업의 분양권·입주권', 'rtms', ` ${fmt((Number(r.분양권수.건수) || 0) + (Number(r.분양권수.취소) || 0))}`)
+      + 분양권칸({ ...r, 공고: [], 분양권말: `이 필지(지번)에서 <b>이 대장이 닫힌 ${esc(String(s.shter_day || '').replace(/^(\d{4})(\d\d)(\d\d)$/, '$1.$2.$3'))} 이후</b>에 맺은 계약입니다 — 옛 건물은 이미 없으니 이 자리에 새로 짓는 사업의 권리입니다. 아직 새 건축물대장이 없어 단지로는 잇지 못했습니다. 실거래 신고의 단지명: ${esc([...new Set(r.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} (참고로만 보입니다 — 이름으로 잇지 않습니다)` }) : ''}
     ${r.필지 ? '' : `<p class="note sm">${s.lat != null ? '필지 경계를 받지 못해 자리만 찍었습니다.' : '그 필지가 지금은 없어서(합필·분필) 지도에 아무것도 그리지 않았습니다.'}</p>`}`;
 }
 
@@ -6819,6 +6823,8 @@ function 구역상세(d) {
     ${공.length ? `<ul class="lu">${공.map(p => `<li${p.이은단지 ? ` data-goto="${p.이은단지}"` : ` data-ahhouse="${esc(p.house_manage_no)}" data-lat="${p.lat}" data-lng="${p.lng}"`} style="cursor:pointer">
         <b>${esc(p.house_nm || '')}</b><span class="muted"> ${esc(공고종류말[p.공고종류] || p.공고종류 || '')} · 모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대</span></li>`).join('')}</ul>`
       : `<p class="note">${gapCell('', 'NA', '공고 지번이 이 구역 안에 있는 청약홈 공고가 없습니다 (서울·안양 공고만 받았습니다)')}</p>`}
+    ${(d.분양권 || []).length ? sect('구역 안 분양권·입주권', 'rtms', ` ${fmt((Number(d.분양권수.건수) || 0) + (Number(d.분양권수.취소) || 0))}`)
+      + 분양권칸({ ...d, 공고: [], 분양권말: `이 구역 경계와 겹치는 <b>지금 필지</b>의 지번으로 신고된 계약입니다(${날(d.분양권수.처음)} ~ ${날(d.분양권수.끝)}). 실거래 신고의 단지명: ${esc([...new Set(d.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} (참고로만 보입니다 — 이름으로 잇지 않습니다)` }) : ''}
     ${sect('구역에 걸친 단지', 'bld', ` ${fmt(단.length)}`)}
     ${/* 2026-10-22 사장님 "걸친 단지 10개씩, 더보기 누르면 10개씩 더" — 다 그려 두고 11번째부터 숨긴다(다시 받지 않는다) */''}
     ${단.length ? `<ul class="lu zcx">${단.map((x, i) => `<li data-goto="${x.complex_id}" style="cursor:pointer"${i >= 10 ? ' hidden' : ''}>
