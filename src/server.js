@@ -3029,6 +3029,38 @@ app.get('/api/complexes/:id/landuse-shape', async (req, res) => {
   } catch (e) { fail(res, e, 'landuse-shape'); }
 });
 
+/* ===================== 용도 표 (2026-10-22 13:21, 사장님 "대한민국 대장법상 기준으로" ㄱㄱ) =====================
+   ★ 법(건축법 시행령 별표1 · 건축물대장 작성방법): 용도는 **동마다** 대장에 적고, 한 동에 여럿이면 '주된 용도' 만 주용도란에.
+     총괄표제부엔 '주된 건축물의 주용도'. 단지 전체의 종류를 정하는 법 기준은 없다 → **우리가 고르지 않고 대장 원문을 그대로** 보인다.
+   ① 주용도: 총괄표제부가 있으면 그 주용도(원문), 없으면 주건축물 표제부의 주용도(동이 여럿이고 다르면 동마다 그대로).
+   ② 기타용도 원문(표제부·총괄) — '다세대주택(9세대)' · '도시형생활주택(단지형다세대)' 같은 허가권자 기재 그대로.
+   ③ 전유부 호별 세부 용도 — 고르지 않고 **센 그대로**(아파트 120호 · 제1종근린생활시설 8호). 주상복합 여부는 사람이 본다. */
+app.get('/api/complexes/:id/usage', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
+  if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 주용도 = NULLIF(LTRIM(rt.main_purps_nm), ''), 기타용도 = NULLIF(LTRIM(rt.etc_purps), '')
+        FROM gold.complex_bld cb JOIN silver.bld_recap_title rt ON rt.mgm_bldrgst_pk = cb.mgm_bldrgst_pk AND rt.is_current = 1
+       WHERE cb.complex_id = @id ORDER BY cb.mgm_bldrgst_pk;
+      SELECT 주용도 = NULLIF(LTRIM(t.main_purps_nm), ''), 기타용도 = NULLIF(LTRIM(t.etc_purps), ''), 동 = COUNT(*)
+        FROM gold.complex_bld cb JOIN silver.bld_title t ON t.mgm_bldrgst_pk = cb.mgm_bldrgst_pk AND t.is_current = 1
+       WHERE cb.complex_id = @id AND ISNULL(t.main_atch_gb_cd, '0') = '0'
+       GROUP BY NULLIF(LTRIM(t.main_purps_nm), ''), NULLIF(LTRIM(t.etc_purps), '')
+       ORDER BY COUNT(*) DESC;
+      SELECT 세부용도 = NULLIF(LTRIM(a.main_purps_nm), ''), 호 = COUNT(DISTINCT h.호PK)
+        FROM gold.v_complex_ho h
+        JOIN silver.bld_expos_pubuse_area a ON a.mgm_bldrgst_pk = h.호PK AND a.is_current = 1 AND a.expos_pubuse_gb_cd = '1'
+       WHERE h.complex_id = @id
+       GROUP BY NULLIF(LTRIM(a.main_purps_nm), '')
+       ORDER BY COUNT(DISTINCT h.호PK) DESC;`);
+    res.json({ 총괄: r.recordsets[0][0] || null, 표제부: r.recordsets[1], 전유: r.recordsets[2] });
+  } catch (e) { fail(res, e, 'complex-usage'); }
+});
+
 /* ===================== 어린이집 (2026-10-22, 303) =====================
    보육정보공개 cpmsapi030. 유치원과 같은 500m · 가까운 순. 인원은 원문 기준일 값이다(유형별 셈은 줄 수를 센 것). */
 app.get('/api/complexes/:id/childcare', async (req, res) => {

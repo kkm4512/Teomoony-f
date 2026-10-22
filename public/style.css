@@ -1760,3 +1760,8 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 
 /* (13:13) .pill 의 display 가 hidden 속성을 이겨서 빈 테두리가 보였다 */
 .pill[hidden]{display:none}
+
+/* (13:21) 대장 원문 용도 표 */
+.pill.use{border-color:var(--ink-3);color:var(--ink);background:var(--surface-2);font-weight:500}
+.usetxt{font-size:11.5px;color:var(--ink-2)}
+.usecomp{font-size:11.5px;margin-top:-2px}

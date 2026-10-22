@@ -4753,7 +4753,8 @@ function renderDetail(payload) {
 
   $('#detail').innerHTML = `
     ${shotsMarkup(c)}
-    <span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '총괄표제부' : '단독'}</span>
+    <!-- 13:21 '단독/총괄표제부'(대장 구조) 대신 **대장 원문 용도** — 용도채우기 가 채운다 -->
+    <span class="usebox" data-use="${esc(String(c.complex_id))}"><span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '여러 동' : '한 동'}</span></span>
     <span class="pill cl" data-clpill="${esc(String(c.complex_id))}" role="button" tabindex="0" hidden></span>
     <h2>${esc(표시이름(c) || '(이름 없음)')}</h2>
     ${주소이름인가(c) && c.실거래이름
@@ -4761,6 +4762,7 @@ function renderDetail(payload) {
       : c.실거래이름 ? `<p class="sub muted" title="이 단지에 지번(PNU)으로 붙은 실거래가 가장 많이 쓴 이름입니다. 대장 이름이 같은 단지를 가를 때 씁니다.">실거래 이름 '${esc(c.실거래이름)}'</p>` : ''}
     <p class="sub">${esc(c.rep_plat_plc || '')}${c.rep_road_addr ? '<br>' + esc(c.rep_road_addr) : ''}</p>
     <p class="facts">${facts}${ratios ? `<br><span class="muted">${ratios}</span>` : ''}</p>
+    <p class="sub muted usecomp" data-usecomp="${esc(String(c.complex_id))}" hidden></p>
     <div class="tabs">${TABS.map(([k, label]) =>
       `<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !분양수(c.complex_id) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
     <div class="pane">${({ info: paneI, near: paneN, dong: paneD, mgmt: paneM,
@@ -4774,6 +4776,7 @@ function renderDetail(payload) {
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
+  용도채우기(c.complex_id); // 머리 용도 표 — 대장 원문 주용도 · 기타용도 · 전유부 호별 용도
   어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
 
@@ -5798,6 +5801,43 @@ document.addEventListener('click', e => {
   b.setAttribute('aria-pressed', String(분양핀켜짐));
   분양핀불러오기();
 });
+
+/* ---------------- 용도 표 (2026-10-22 13:21, 사장님 "대장법상 기준으로" ㄱㄱ) ----------------
+   ★ 고르지 않는다. 법(별표1 · 대장 작성방법)은 용도를 **동마다** 적고 단지 전체 종류는 정하지 않는다.
+     → 총괄표제부 주용도(있으면) / 주건축물 표제부 주용도(동마다 다르면 다 적음) · 기타용도 원문 · 전유부 호별 세부 용도(센 그대로). */
+const 용도캐시 = new Map();
+async function 용도채우기(cid) {
+  const 키 = String(cid);
+  let r = 용도캐시.get(키);
+  if (!r) {
+    try { r = await fetch(`/api/complexes/${encodeURIComponent(키)}/usage`).then(x => x.json()); } catch { return; }
+    if (!r || r.error) return;
+    용도캐시.set(키, r);
+  }
+  const box = document.querySelector(`#detail .usebox[data-use="${키}"]`);
+  if (!box) return;
+  const 표 = r.표제부 || [], 총 = r.총괄, 전 = r.전유 || [];
+  const 주들 = [...new Set(표.map(x => x.주용도).filter(Boolean))];
+  const 주 = (총 && 총.주용도) || 주들[0] || null;
+  const 주출처 = 총 && 총.주용도 ? '총괄표제부 주용도(주된 건축물의 주용도)' : '표제부 주용도';
+  const 기타 = (총 && 총.기타용도) || (표[0] && 표[0].기타용도) || null;
+  const 동합 = 표.reduce((t, x) => t + (Number(x.동) || 0), 0);
+  const 다른동 = !(총 && 총.주용도) && 주들.length > 1 ? 주들.slice(1) : [];
+  const 풀이 = `건축물대장 원문입니다 — ${주출처}${기타 ? ` · 기타용도 '${기타}'` : ''}.
+용도는 법(건축법 시행령 별표1)대로 동마다 적힌 것이고, 우리가 고르거나 바꾼 말이 없습니다.${
+    표.length > 1 ? `\n주건축물 ${동합}동: ` + 표.map(x => `${x.주용도 || '빈칸'}${x.기타용도 ? `(${x.기타용도})` : ''} ${x.동}동`).join(' · ') : ''}`;
+  box.innerHTML = (주 ? `<span class="pill use" title="${esc(풀이)}">${esc(주)}</span>` : '<span class="pill">용도 원문 없음</span>')
+    + (기타 && 기타 !== 주 ? ` <span class="usetxt" title="${esc(풀이)}">${esc(기타.length > 40 ? 기타.slice(0, 40) + '…' : 기타)}</span>` : '')
+    + (다른동.length ? ` <span class="usetxt muted">· 다른 동 ${esc(다른동.join(', '))}</span>` : '')
+    + (총 ? ` <span class="pill" title="총괄표제부(여러 동을 묶은 대장)가 있는 단지">여러 동 · 총괄표제부</span>` : '');
+  const comp = document.querySelector(`#detail [data-usecomp="${키}"]`);
+  if (comp && 전.length) {
+    const 합 = 전.reduce((t, x) => t + (Number(x.호) || 0), 0);
+    comp.innerHTML = `전유부 호별 용도(원문, 센 것): ${전.slice(0, 5).map(x => `${esc(x.세부용도 || '빈칸')} ${fmt(x.호)}`).join(' · ')}${
+      전.length > 5 ? ` · 그 밖 ${fmt(전.slice(5).reduce((t, x) => t + (Number(x.호) || 0), 0))}` : ''} <span class="muted">/ ${fmt(합)}호</span>`;
+    comp.hidden = false;
+  }
+}
 
 /* ---------------- 어린이집 (2026-10-22, 사장님 "어린이집 운영 승인 됐엉") ----------------
    주변 탭 유치원 밑에 그릇(.ccbox). 유치원과 같은 500m · 가까운 순 10곳. 인원은 원문 '기준일' 값. */
