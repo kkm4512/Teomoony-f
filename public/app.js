@@ -2515,20 +2515,26 @@ function shotsMarkup(c) {
 function miniMap(elId, bounds, center, zoomOut) {
   const el = document.getElementById(elId);
   if (!el) return null;
+  /* ★ 2026-10-22: 단지를 열 때마다 콘솔에 '_leaflet_pos' 오류가 미니 지도 수만큼(2건) 떴다.
+     fitBounds 뒤 setZoom 이 **움직이는 그림(줌 애니메이션)** 을 걸어 두는데, 상세는 자료가 올 때마다 다시 그려져
+     (renderDetail → renderShots → clearShots 가 앞 지도를 remove) 애니메이션이 끝나는 순간 지도가 이미 없었다.
+     미니 지도는 사진일 뿐이라 움직일 이유가 없다 — 애니메이션을 끄고 줌은 한 번에 정한다. */
   const mm = L.map(el, {
     zoomControl: false, attributionControl: false, dragging: false,
     scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
-    keyboard: false, touchZoom: false, preferCanvas: true
+    keyboard: false, touchZoom: false, preferCanvas: true,
+    zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false, inertia: false
   });
   vworldLayer('Satellite', 'jpeg').addTo(mm);
   vworldLayer('Hybrid', 'png').addTo(mm);
-  if (bounds) mm.fitBounds(bounds, { padding: [8, 8], maxZoom: 19 - zoomOut });
-  else mm.setView(center, 18 - zoomOut);
-  if (zoomOut) mm.setZoom(Math.max(mm.getZoom() - zoomOut, 12));
+  if (bounds) {
+    const z = mm.getBoundsZoom(bounds, false, L.point(16, 16));
+    mm.setView(bounds.getCenter(), Math.max(Math.min(z, 19 - zoomOut) - zoomOut, 12), { animate: false });
+  } else mm.setView(center, Math.max(18 - zoomOut - zoomOut, 12), { animate: false });
   if (lastBgeo && lastBgeo.features && lastBgeo.features.length)
     L.geoJSON(lastBgeo, { style: { color: '#ffd84d', weight: 1.5, opacity: .95,
                                    fillColor: '#ffd84d', fillOpacity: .12 } }).addTo(mm);
-  setTimeout(() => mm.invalidateSize(), 0);
+  setTimeout(() => { if (el.isConnected && mm._loaded) mm.invalidateSize({ animate: false }); }, 0);   // 그새 다시 그려져 지워졌으면 손대지 않는다
   el.addEventListener('click', () => {
     if (!$('#sat').checked) { $('#sat').checked = true; setBase('sat'); }
     if (bounds) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 19 - zoomOut });
