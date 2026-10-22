@@ -6269,6 +6269,10 @@ async function 폐쇄상세(key) {
     ${폐쇄묶음줄(s, r.동, true)}
     ${s.now_complex_id ? `<p class="sm">같은 필지의 지금 단지: <a href="/c/${s.now_complex_id}" data-goc="${s.now_complex_id}">${esc(s.now_nm || '단지')}</a>
       <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}
+    ${r.이력 ? `<div class="lt2">이 필지의 토지 이동 이력 <span class="muted">(VWorld 토지이동이력 원문 · ${esc(String(r.이력.받은시각 || '').slice(0, 10))} 받음)</span></div>
+      ${r.이력.줄.length ? `<ul class="lu">${r.이력.줄.slice(0, 6).map(z => `<li><b>${esc(z.이동일 ? z.이동일.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.이동사유 || '')}</span>
+        <span class="muted">${esc([z.지번, z.지목, z.면적 != null ? Number(z.면적) + '㎡' : null].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
+        : '<p class="note sm">이 필지로 된 토지 이동 이력이 없습니다.</p>'}` : ''}
     <p class="note sm">지도의 <b>✕ 와 회색 점선</b>은 이 대장이 있던 <b>필지의 지금 경계</b>입니다 — 옛 건물 모양이 아닙니다.
       ${r.필지 ? '' : s.lat != null ? '필지 경계를 받지 못해 자리만 찍었습니다.' : '그 필지가 지금은 없어서(합필·분필) 지도에 아무것도 그리지 않았습니다.'}
       '폐쇄' 는 철거와 다를 수 있습니다(대장을 새로 만들며 닫은 경우).</p>`;

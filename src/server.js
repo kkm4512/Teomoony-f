@@ -3222,11 +3222,19 @@ app.get('/api/closed/site/:key', async (req, res) => {
       SELECT ${폐쇄동칸} FROM silver.bld_closed_title t JOIN gold.closed_site s ON s.site_key = @k
        WHERE t.pnu = s.pnu AND ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') ORDER BY t.dong_nm, t.mgm_shtreg_pk;
       /* 그 필지의 **지금** 경계(필지가 남아 있을 때만) — 옛 건물 모양이 아니다 */
-      SELECT TOP 1 cp.geojson FROM gold.closed_site s JOIN silver.cadastral_parcel cp ON cp.pnu = s.pnu AND cp.is_current = 1 WHERE s.site_key = @k;`);
+      SELECT TOP 1 cp.geojson FROM gold.closed_site s JOIN silver.cadastral_parcel cp ON cp.pnu = s.pnu AND cp.is_current = 1 WHERE s.site_key = @k;
+      /* 14:20: 그 필지의 토지 이동 이력(305 에서 미리 받은 것) — 필지가 사라졌으면 '어떻게 됐는지' 원문 */
+      SELECT 받음 = d.받은시각, h.이동일, h.이동사유, h.지번, h.지목, h.면적, h.이력순번
+        FROM gold.closed_site s
+        JOIN silver.land_move_done d ON d.pnu = s.pnu
+        LEFT JOIN silver.land_move_hist h ON h.pnu = s.pnu
+       WHERE s.site_key = @k ORDER BY h.이동일 DESC, h.이력순번 DESC;`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
     const g = (r.recordsets[2] || [])[0];
-    res.json({ 묶음: site, 동: r.recordsets[1], 필지: g && g.geojson ? JSON.parse(g.geojson) : null });
+    const 이력줄 = r.recordsets[3] || [];
+    res.json({ 묶음: site, 동: r.recordsets[1], 필지: g && g.geojson ? JSON.parse(g.geojson) : null,
+               이력: 이력줄.length ? { 받은시각: 이력줄[0].받음, 줄: 이력줄.filter(z => z.이동일 || z.이동사유) } : null });
   } catch (e) { fail(res, e, 'closed-site'); }
 });
 app.get('/api/complexes/:id/closed', async (req, res) => {
