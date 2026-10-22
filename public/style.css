@@ -1726,7 +1726,9 @@ ul.lu li:last-child{border-bottom:0}
 .sg-tag{display:inline-block;font:500 9.5px var(--mono);padding:0 5px;border-radius:3px;border:1px solid #7a6a58;color:#7a6a58;vertical-align:1px}
 
 /* (2026-10-22) 분양권 취소 거래 — 지우지 않고 흐리게 */
-table.mini tr.cxl td{color:var(--ink-3)}
+table.mini tr.canc td{color:var(--ink-3);opacity:.78}
+table.mini tr.canc s{text-decoration-thickness:1px}
+table.mini tr.canc .tcx{color:var(--warn, #b4690e)}
 
 
 /* (2026-10-22) 청약 공고 정보 — 세로로 한 줄씩 */

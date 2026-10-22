@@ -5632,19 +5632,21 @@ function 분양권칸(r) {
     return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
   const 날 = d => d ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : '—';
   /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
-  return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 취소 ${fmt(n.취소)}건)</span>` : ''}</div>
+  return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 해제 ${fmt(n.취소)}건)</span>` : ''}</div>
     <table class="mini"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
     ${t.slice(0, 15).map(x => {
       const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);
       const 차 = 기준 != null && x.거래원 ? Number(x.거래원) - 기준 : null;
-      return `<tr${Number(x.취소) ? ' class="cxl"' : ''}><td>${날(x.계약일)}${Number(x.취소) ? ` <span class="warnx" title="${esc(x.해제일 ? '해제(취소)일 ' + x.해제일 + ' — 원문' : '해제(취소) 신고된 거래')}">취소</span>` : ''}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
-        <td class="n">${x.거래원 ? 억(Number(x.거래원)) : '—'}</td><td>${x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '<span class="muted">빈칸</span>'}</td>
+      /* 2026-10-22 사장님 "실거래 취소처럼 동일하게" — 실거래 탭(.trow.canc)과 같은 세 가지: 취소선 금액 · 연한 색 · '해제' 꼬리표(용어 풀이) */
+      const 취 = Number(x.취소);
+      return `<tr${취 ? ' class="canc"' : ''}><td>${날(x.계약일)}${취 ? ` <span class="tcx"${x.해제일 ? ` title="해제일 ${esc(x.해제일)} (원문)"` : ''}>${용어('해제')}</span>` : ''}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
+        <td class="n">${x.거래원 ? (취 ? `<s>${억(Number(x.거래원))}</s>` : 억(Number(x.거래원))) : '—'}</td><td>${x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '<span class="muted">빈칸</span>'}</td>
         <td class="n">${차 == null ? '—' : (차 >= 0 ? '+' : '−') + 억(Math.abs(차))}</td></tr>`; }).join('')}
     </tbody></table>
     <p class="note sm">국토교통부 분양권전매 실거래가를 <b>지번</b>으로 이었습니다(공고 지번 · 준공 후 지번). 첫 모집공고일 이후 계약만 셉니다.
       '분양가와 차이' 는 같은 전용면적의 <b>최고</b> 분양가를 뺀 값이라 옵션·발코니 확장·층 차이는 들어 있지 않습니다.
       <b>입주권</b>은 조합원 권리라 분양가와 견주지 않았고, 원본 구분 칸이 빈 거래는 빈칸으로 둡니다.
-      <b>취소</b>는 신고 후 해제(취소)된 거래입니다 — 지우지 않고 그대로 보이며, 분양가와 견주지 않습니다.${t.length > 15 ? ` 최근 15건만 보입니다.` : ''}</p>`;
+      <b>해제</b>는 신고 뒤 취소된 거래입니다 — 실거래 탭과 같이 지우지 않고 날짜순 제자리에 두며(취소선), 분양가와 견주지 않습니다.${t.length > 15 ? ` 최근 15건만 보입니다.` : ''}</p>`;
 }
 
 /* ================= 폰 바텀시트 (2026-10-22, 사장님 "너 생각대로 ㄱㄱ") =================
