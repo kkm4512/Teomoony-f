@@ -881,7 +881,7 @@ let newbuildItems = [];
 let redevItems = [], selectedRedev = null;
 let selectedKapt = null;
 let newbuildLayer = null;
-let 분양핀층 = null, 분양핀켜짐 = true, 분양핀차례 = 0;
+let 분양핀층 = null, 분양핀켜짐 = false, 분양핀차례 = 0;   /* 12:32 버튼을 뺐다 — 검색 제안 '청약 공고' 로 찾는다 */
 let 폐쇄핀층 = null, 폐쇄핀켜짐 = false, 폐쇄핀차례 = 0;   /* 2026-10-22 폐쇄·말소 대장 — 점이 많아 기본은 끔 */
 
 function newbuildMarkerHtml(n, sel) {
@@ -1126,11 +1126,8 @@ async function 제안고르기(it) {
     } catch (e) { 상자로(d.bbox); 오류토스트('행정동 경계', null, e); }
     return;
   }
-  if (d.종류 === '폐쇄') {   /* 2026-10-22 닫힌 대장 — 필지가 지금도 있으면 그 자리 말풍선, 없으면 같은 필지 지금 단지, 둘 다 없으면 말로만 */
-    if (d.lat != null) { 보기전환('map'); map.setView([d.lat, d.lng], 18); setTimeout(() => 폐쇄핀열기(d.key, [d.lat, d.lng]), 350); return; }
-    if (d.now) { detailTab = 'land'; return select(d.now, false); }
-    return toast(`${esc(it.이름)} — 닫힌 대장입니다. 그 필지가 지금은 없어서(합필·분필) 지도 자리를 찍지 않았습니다 · ${esc(it.보조 || '')}`, 7000);
-  }
+  if (d.종류 === '폐쇄') return 폐쇄상세(d.key);     // 12:32 왼쪽 상세 + 지도에 X 표 · 회색 필지
+  if (d.종류 === '공고') return 공고상세(d.house, d.lat, d.lng);   // 12:32 단지에 안 이어진 청약 공고
   if (d.종류 === '정비' && d.sn) return selectRedevZone(d.sn);   // 2026-10-22 사장님: 누르면 바로 구역 상세로
   if (d.종류 === '정비') {
     if ($('#overlay').value !== 'redev') {            /* 정비사업 겹쳐보기를 켠다 — 구역이 보여야 고른 의미가 있다 */
@@ -5962,6 +5959,78 @@ document.addEventListener('click', e => {
   b.setAttribute('aria-pressed', String(폐쇄핀켜짐));
   폐쇄핀불러오기();
 });
+
+/* ---------------- 검색 제안에서 연 '단지 밖' 상세 (2026-10-22 12:32, 사장님 "버튼 빼고 검색 제안에서") ----------------
+   ① 청약 공고(단지 미연결) ② 폐쇄·말소 대장. 정비구역 상세와 같은 틀(왼쪽 상세 · 폰은 시트)을 쓴다 — selectedRedev 에 'ah:'·'cl:' 로 표를 단다.
+   ★ 폐쇄: 지도에 **✕ 표 + 회색 점선 필지** — "닫힌 것" 이 한눈에. 그려지는 건 **그 필지의 지금 경계**지 옛 건물 모양이 아니다(문구로 밝힘).
+     필지가 사라졌으면(합필·분필) 아무것도 안 그린다 — 자리를 지어내지 않는다. */
+function 보조상세열기(표) {
+  if (selected !== null || selectedKapt !== null || selectedRedev !== null) closeDetail();
+  selectedRedev = 표;
+  목록자동(true);
+  const box = $('#detail'); box.hidden = false; box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  시트('half');
+  return box;
+}
+function 지도맞추기(b, z = 18) {
+  setTimeout(() => {
+    const top = 폰() ? ((document.querySelector('.ptop') || {}).offsetHeight || 0) : 0;
+    const sh = 폰() ? ((document.querySelector('#psheet') || {}).offsetHeight || 0) : 0;
+    if (b.getNorthEast) map.fitBounds(b, { paddingTopLeft: [24, top + 24], paddingBottomRight: [24, sh + 24], maxZoom: z });
+    else map.setView(b, z);
+  }, 280);
+}
+async function 공고상세(house, lat, lng) {
+  const 표 = 'ah:' + house;
+  보기전환('map');
+  const box = 보조상세열기(표);
+  let r;
+  try { r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json()); if (r.error) throw new Error(r.error); }
+  catch (e) { if (selectedRedev === 표) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '공고를 불러오지 못했습니다 — ' + (e.message || e))}</p>`; return; }
+  if (selectedRedev !== 표) return;
+  구역지우기();
+  if (lat != null) {
+    구역층 = L.featureGroup([L.marker([lat, lng], { interactive: false, icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
+      html: `<div class="ahmark"><b>공고</b><span>${esc(shortNm(((r.공고 || [])[0] || {}).house_nm) || '')}</span></div>` }) })]).addTo(map);
+    구역지금 = 표; 지도맞추기([lat, lng], 17);
+  }
+  box.innerHTML = `<span class="pill">청약 공고</span> <span class="pill cl">단지 미연결</span>
+    <h2>${esc(((r.공고 || [])[0] || {}).house_nm || '청약 공고')}</h2>
+    <p class="note sm">이 공고는 아직 <b>단지에 이어지지 않았습니다</b>(이름으로 잇지 않는다 — 지번·입주월·세대·거리로만).
+      ${lat != null ? '지도의 표는 <b>공고 지번</b> 자리입니다.' : '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'}</p>
+    <div class="ahbox">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`;
+}
+async function 폐쇄상세(key) {
+  const 표 = 'cl:' + key;
+  보기전환('map');
+  const box = 보조상세열기(표);
+  let r;
+  try { r = await fetch(`/api/closed/site/${encodeURIComponent(key)}`).then(x => x.json()); if (r.error) throw new Error(r.error); }
+  catch (e) { if (selectedRedev === 표) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '닫힌 대장을 불러오지 못했습니다 — ' + (e.message || e))}</p>`; return; }
+  if (selectedRedev !== 표) return;
+  const s = r.묶음;
+  구역지우기();
+  if (r.필지 || s.lat != null) {
+    const g = L.featureGroup().addTo(map);
+    if (r.필지) L.geoJSON(r.필지, { interactive: false, className: 'closedpoly',
+      style: { color: '#6b7280', weight: 2, dashArray: '4 4', fillColor: '#9ca3af', fillOpacity: 0.28 } }).addTo(g);
+    const c = s.lat != null ? [Number(s.lat), Number(s.lng)] : g.getBounds().getCenter();
+    L.marker(c, { interactive: false, icon: L.divIcon({ className: 'clx-wrap', iconSize: [26, 26], iconAnchor: [13, 13],
+      html: '<div class="clx" aria-label="닫힌 대장">✕</div>' }) }).addTo(g);
+    구역층 = g; 구역지금 = 표;
+    지도맞추기(r.필지 ? g.getBounds() : c, 18);
+  }
+  box.innerHTML = `<span class="pill cl">폐쇄·말소 대장</span>
+    <h2>${esc(s.이름 || s.plat_plc || s.pnu)}</h2>
+    <p class="sub">${esc(s.plat_plc || '')}${s.new_plat_plc ? '<br>' + esc(s.new_plat_plc) : ''}</p>
+    ${sect('폐쇄·말소 대장', 'closed')}
+    ${폐쇄묶음줄(s, r.동, true)}
+    ${s.now_complex_id ? `<p class="sm">같은 필지의 지금 단지: <a href="/c/${s.now_complex_id}" data-goc="${s.now_complex_id}">${esc(s.now_nm || '단지')}</a>
+      <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}
+    <p class="note sm">지도의 <b>✕ 와 회색 점선</b>은 이 대장이 있던 <b>필지의 지금 경계</b>입니다 — 옛 건물 모양이 아닙니다.
+      ${r.필지 ? '' : s.lat != null ? '필지 경계를 받지 못해 자리만 찍었습니다.' : '그 필지가 지금은 없어서(합필·분필) 지도에 아무것도 그리지 않았습니다.'}
+      '폐쇄' 는 철거와 다를 수 있습니다(대장을 새로 만들며 닫은 경우).</p>`;
+}
 
 /* ---------------- 정비사업 구역 경계 (2026-10-22, 사장님 "재개발 부분을 누르면 그 폴리곤") ----------------
    토지 탭 '정비사업 구역' 줄을 누르면 그 구역 경계를 지도에 그리고 맞춘다. 다시 누르면 지운다. 단지를 바꾸거나 닫으면 지운다.

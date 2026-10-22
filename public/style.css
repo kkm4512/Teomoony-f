@@ -1736,3 +1736,8 @@ dl.ahkv{margin:6px 0 8px;display:block}
 dl.ahkv>div{display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px;font-size:12.5px;line-height:1.6}
 dl.ahkv dt{color:var(--ink-3)}
 dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans, inherit)}
+
+/* (2026-10-22 12:32) 닫힌 대장 자리 — ✕ 표 */
+.clx-wrap{background:none;border:0}
+.clx{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:#4b5563;color:#fff;font:700 15px/1 system-ui,sans-serif;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}

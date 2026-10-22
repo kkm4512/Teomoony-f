@@ -1673,7 +1673,18 @@ app.get('/api/suggest', async (req, res) => {
                전체 = COUNT(*) OVER ()
           FROM gold.closed_site s
          WHERE s.이름 LIKE @q
-         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 ELSE 1 END, s.총괄세대 DESC, s.이름;`);
+         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 ELSE 1 END, s.총괄세대 DESC, s.이름;
+        /* 13 청약 공고 — 단지에 **아직 안 이어진** 것만(이어진 것은 단지로 찾는다). 주택(관리번호)마다 한 줄, 가장 최근 공고 */
+        SELECT TOP 4 x.house_manage_no, x.house_nm, x.공고종류, x.rcrit_pblanc_de, x.hssply_adres, x.lat, x.lng, 전체 = COUNT(*) OVER ()
+          FROM (SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.hssply_adres,
+                       lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
+                       rn = ROW_NUMBER() OVER (PARTITION BY p.house_manage_no ORDER BY p.rcrit_pblanc_de DESC, p.pblanc_no DESC)
+                  FROM silver.applyhome_pblanc p
+                  LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
+                 WHERE p.house_nm LIKE @q
+                   AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x
+         WHERE x.rn = 1
+         ORDER BY CASE WHEN x.house_nm LIKE @p THEN 0 ELSE 1 END, x.rcrit_pblanc_de DESC;`);
     const rs = r.recordsets;
     const 상자 = x => (x.minx == null ? null : [Number(x.minx), Number(x.miny), Number(x.maxx), Number(x.maxy)]);
     const 전체 = a => (a.length ? Number(a[0].전체) : 0);
@@ -1701,6 +1712,12 @@ app.get('/api/suggest', async (req, res) => {
           표: '닫힌 대장',
           동작: { 종류: '폐쇄', key: x.site_key, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng),
                   now: x.now_complex_id || null } })) },
+      { 종류: '청약 공고', 전체: 전체(rs[12] || []), 항목: (rs[12] || []).map(x => ({
+          이름: x.house_nm,
+          보조: [{ APT: '분양', URBTY: '오피스텔·도시형', REMNDR: '무순위·재공급', PBLPVT: '공공지원민간임대', OPT: '임의공급' }[x.공고종류] || x.공고종류,
+                 x.rcrit_pblanc_de ? `공고 ${String(x.rcrit_pblanc_de).slice(0, 10).replace(/-/g, '.')}` : null, x.hssply_adres].filter(Boolean).join(' · '),
+          표: x.lat == null ? '단지 미연결 · 자리 없음' : '단지 미연결',
+          동작: { 종류: '공고', house: x.house_manage_no, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng) } })) },
       { 종류: '신축', 전체: 전체(rs[4]), 항목: rs[4].map(x => ({
           이름: x.kapt_name, 보조: [x.lawd_nm, x.세대 ? `${x.세대}세대` : null].filter(Boolean).join(' · '),
           동작: { 종류: '신축', code: x.kapt_code } })) },
@@ -3074,10 +3091,13 @@ app.get('/api/closed/site/:key', async (req, res) => {
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT ${폐쇄칸} FROM gold.closed_site s LEFT JOIN gold.complex c ON c.complex_id = s.now_complex_id WHERE s.site_key = @k;
       SELECT ${폐쇄동칸} FROM silver.bld_closed_title t JOIN gold.closed_site s ON s.site_key = @k
-       WHERE t.pnu = s.pnu AND ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') ORDER BY t.dong_nm, t.mgm_shtreg_pk;`);
+       WHERE t.pnu = s.pnu AND ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') ORDER BY t.dong_nm, t.mgm_shtreg_pk;
+      /* 그 필지의 **지금** 경계(필지가 남아 있을 때만) — 옛 건물 모양이 아니다 */
+      SELECT TOP 1 cp.geojson FROM gold.closed_site s JOIN silver.cadastral_parcel cp ON cp.pnu = s.pnu AND cp.is_current = 1 WHERE s.site_key = @k;`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
-    res.json({ 묶음: site, 동: r.recordsets[1] });
+    const g = (r.recordsets[2] || [])[0];
+    res.json({ 묶음: site, 동: r.recordsets[1], 필지: g && g.geojson ? JSON.parse(g.geojson) : null });
   } catch (e) { fail(res, e, 'closed-site'); }
 });
 app.get('/api/complexes/:id/closed', async (req, res) => {
