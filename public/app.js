@@ -4216,7 +4216,7 @@ function renderDetail(payload) {
         ? eok(r.last_deposit) + (월세 > 0
             ? ` <span class="mo">/ ${fmt(Math.round(월세 / 10000))}만</span>` : '')
         : eok(lastAmt);
-      const when = [lastYmd ? ymd(lastYmd) : null,
+      const when = [lastYmd ? `최근 ${ymd(lastYmd)}` : null,   // 이 줄의 금액은 그 평형의 '최근 거래' 다(2026-10-22)
                     r.min_floor ? (r.min_floor === r.max_floor
                       ? `${r.min_floor}층` : `${r.min_floor}~${r.max_floor}층`) : null]
                    .filter(Boolean).join(' · ');
@@ -4244,6 +4244,11 @@ function renderDetail(payload) {
         `<span class="${r.pre_rate >= 0 ? 'up' : 'down'}">종전 대비 ${
           r.pre_rate >= 0 ? '+' : ''}${(r.pre_rate * 100).toFixed(1)}%</span>`);
 
+      /* ★ 2026-10-22 사장님 (52940 66㎡): 평형 하나를 고르고 그 평형이 **1건**이면 이 줄과 아래 '거래 내역' 이
+         **같은 거래를 두 번** 보여 헷갈린다 → 줄 대신 한 줄 안내(꼬리표만 남긴다). 2건 이상이면 줄을 둔다(범위·건수가 뜻이 있다). */
+      if (tradeArea !== null && cnt === 1)
+        return `<p class="srcline">${r.area_grp == null ? AREA_미상 : esc(alabel(r))} ${label} 1건 — 아래 <b>거래 내역</b>에 있습니다${
+          tags.length ? ` <span class="muted">· ${tags.join(' · ')}</span>` : ''}</p>`;
       return `<div class="prow">
         <div class="pa">${r.area_grp == null
           ? `<b>${AREA_미상}</b><span class="muted">API 미제공</span>`
