@@ -4185,7 +4185,7 @@ app.get('/api/complexes/:id', async (req, res) => {
              '느리다' 로만 보인다. 대신 **잘리면 화면이 말하게** 한다 —
              아래 호총수와 비교한다. 지금은 여유가 4배다. */
       SELECT TOP 20000 h.호PK, h.동PK, h.동, h.호_동명, h.층, h.호, h.라인, h.호번호,
-             p.공시가격, p.기준일, p.단지분위, p.라인분위,
+             p.공시가격, p.기준일, p.단지분위, p.라인분위, 공시출처 = p.출처,
              ea.전용면적, ea.평형
         FROM gold.v_complex_ho h
         /* ★ complex_id 를 **조인 조건에도** 준다 (2026-10-18). 없어도 결과는
@@ -4771,11 +4771,11 @@ app.get('/api/complexes/:id', async (req, res) => {
                 ⚠ 이 주석은 템플릿 리터럴 안이다 - **백틱을 쓰면 문자열이 끊긴다.**
                   처음에 h.동 을 백틱으로 감쌌다가 'missing ) after argument list' 로 터졌다. */
              h.동PK, h.동, h.호, h.층, h.라인,
-             t.std_day, t.crtn_day, t.hsprc
+             t.std_day, t.crtn_day, t.hsprc, t.출처
         FROM 상위 s
         JOIN gold.v_complex_ho h ON h.호PK = s.호PK AND h.complex_id = @id
-        JOIN silver.bld_hsprc t ON t.mgm_bldrgst_pk = s.호PK
-                               AND t.is_current = 1 AND t.hsprc > 0
+        /* 309: HUB(27) 없으면 이어진 NED(306) — 거르기(hsprc > 0, 현재행)는 뷰 안에 같은 글자로 있다 */
+        JOIN gold.v_ho_hsprc t ON t.호PK = s.호PK
        ORDER BY s.rn, t.std_day DESC, t.crtn_day DESC`);
 
     /* ---------- 건물 외곽선: **여기서 세지 않는다** (2026-10-21) ----------
@@ -5214,17 +5214,17 @@ app.get('/api/ho/:pk', async (req, res) => {
     const pr = await pool.request()
       .input('pk', sql.VarChar(50), pk)
       .input('cid', sql.Int, m.complex_id).query(`
-      SELECT TOP 1 공시가격, 기준일, 단지분위, 라인분위
+      SELECT TOP 1 공시가격, 기준일, 단지분위, 라인분위, 공시출처 = 출처
         FROM gold.v_complex_ho_price
        WHERE complex_id = @cid AND 호PK = @pk`);
     Object.assign(m, pr.recordset[0] || {
-      공시가격: null, 기준일: null, 단지분위: null, 라인분위: null });
+      공시가격: null, 기준일: null, 단지분위: null, 라인분위: null, 공시출처: null });
 
     /* 공시가격 전 회차. 같은 기준일에 둘(결정->조정)이 올 수 있어 crtn_day 까지 본다. */
     const hist = await pool.request().input('pk', sql.VarChar(50), pk).query(`
-      SELECT std_day, hsprc, crtn_day
-        FROM silver.bld_hsprc
-       WHERE mgm_bldrgst_pk = @pk AND is_current = 1 AND hsprc > 0
+      SELECT std_day, hsprc, crtn_day, 출처
+        FROM gold.v_ho_hsprc
+       WHERE 호PK = @pk
        ORDER BY std_day DESC, crtn_day DESC`);
 
     /* 그 동 그 층의 층별개요 — **층 전체** 면적이다. 호 면적이 아니다. */

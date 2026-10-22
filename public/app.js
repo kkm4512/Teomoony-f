@@ -2687,7 +2687,8 @@ function gridBlock(dongs, floors, hos, scope, sel, areaSel) {
            <span class="fg-k p4"></span><span class="fg-k p5"></span>높음
            <span class="fg-k p0"></span>가격 없음 — <b>그 단지 안에서의 5분위</b>입니다.
            공시가격은 실거래가가 아니고(과세표준용) <b>단지 간 비교에 쓰면 안 됩니다</b>.
-           한 라인 안을 세로로 읽는 것이 순수한 층 차이입니다 — 라인이 다르면 평형이 섞입니다.`
+           한 라인 안을 세로로 읽는 것이 순수한 층 차이입니다 — 라인이 다르면 평형이 섞입니다.${
+           H.some(h => h.공시출처 === 'NED') ? ` 연립·다세대 ${fmt(H.filter(h => h.공시출처 === 'NED').length)}호는 <b>VWorld 공동주택가격</b>(국토교통부 공시)으로 채웠습니다(같은 필지·동명·호명).` : ''}`
         : `<span class="fg-k f-home"></span>주거 <span class="fg-k f-shop"></span>근린·업무
            <span class="fg-k f-park"></span>주차 <span class="fg-k f-etc"></span>기타.`}
       동은 이름이 아니라 <b>관리건축물대장PK로 연결</b>했습니다.</p></div>`;
@@ -3182,14 +3183,22 @@ async function openHo(pk) {
     const w = ps[0] && ps[0].hsprc ? Math.max(2, Math.round(p.hsprc / ps[0].hsprc * 100)) : 0;
     const y = yr(p.std_day);
     const cd = String(p.crtn_day || '');
+    /* 309: NED(연립·다세대)는 공시일을 안 준다 — 대신 기준월이 1월이 아니면(6월 기준 등) 적는다 */
+    const 기준월 = String(p.std_day || '').slice(4, 6);
     return `<tr><td>${esc(y)}${cd.length === 8
-      ? `<span class="muted"> ${esc(cd.slice(4,6))}.${esc(cd.slice(6,8))}</span>` : ''}</td>
+      ? `<span class="muted"> ${esc(cd.slice(4,6))}.${esc(cd.slice(6,8))}</span>`
+      : (p.출처 === 'NED' && 기준월 && 기준월 !== '01' ? `<span class="muted"> ${esc(기준월)}월 기준</span>` : '')}</td>
       <td class="n">${eok(p.hsprc)}</td>
       <td class="n">${diff == null ? '' :
         `<span class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : ''}${(diff * 100).toFixed(1)}%</span>`}</td>
       <td class="hm-bar"><i style="width:${w}%"></i></td></tr>`;
   }).join('');
-  const dupNote = `<p class="srcline">연도는 <b>공시기준일</b>(매년 1월 1일),
+  const NED이력 = ps.some(p => p.출처 === 'NED');
+  const dupNote = NED이력
+    ? `<p class="srcline">이 호의 공시가격은 <b>VWorld 공동주택가격</b>(국토교통부 공시, 연립·다세대)에서 왔습니다 —
+       건축HUB 주택가격에 이 호가 없어서, <b>같은 필지(PNU) 안에서 동명·호명이 하나로 맞는 호</b>에만 이었습니다.
+       공시일은 이 자료에 없어 연도(기준월이 1월이 아니면 그 달)만 적습니다.</p>`
+    : `<p class="srcline">연도는 <b>공시기준일</b>(매년 1월 1일),
      옆 숫자는 <b>공시일</b>입니다.${dupYear.size
        ? ' 같은 해가 두 줄인 것은 <b>결정공시 뒤 조정공시</b>가 따로 왔기 때문입니다.' : ''}</p>`;
 
@@ -3888,6 +3897,9 @@ function prcBlock(rows, scope, 적재, dongs) {
          연도끼리 뭉쳐서 비교하면 거짓이 됩니다. 막대 높이는 <b>이 목록 안에서 같은 기준</b>이고,
          같은 해에 회차가 둘인 경우 <b>나중 공시(조정)</b>를 그렸습니다 — 전 회차는 줄을 누르면 보입니다.
          공시가격은 과세표준용이라 <b>실거래가가 아닙니다.</b></p>`
+    + (R.some(r => r.출처 === 'NED')
+        ? `<p class="srcline">연립·다세대 호 중 건축HUB 주택가격에 없는 호는 <b>VWorld 공동주택가격</b>(국토교통부 공시)으로 채웠습니다 —
+             같은 필지 안에서 동명·호명이 하나로 맞는 호만 이었고, 두 출처를 한 호에 섞지 않습니다.</p>` : '')
     + (전체공시호 > 받은
         ? `<p class="srcline">공시가격이 있는 ${fmt(전체공시호)}호 중
              <b>최신 공시가격이 높은 ${fmt(받은)}호</b>를 받았습니다.</p>` : '')
