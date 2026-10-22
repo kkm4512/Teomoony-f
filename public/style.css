@@ -1822,3 +1822,7 @@ dl.ahkv dd{margin:0;color:var(--ink);text-align:left;font:400 12.5px var(--sans,
 #view-qna .qadm{margin-top:8px;font-size:12.5px}
 #view-qna .qadm summary{cursor:pointer;color:var(--ink-3)}
 #view-qna .qmsg{font-size:12px;margin-left:6px}
+
+/* 2026-10-22 겹쳐보기: 겹친 자리 목록 · 범례 안내 */
+.leaflet-popup-content hr.pophr{border:0;border-top:1px dashed var(--line-2);margin:6px 0}
+.maplegend .lnote{font-size:10.5px;color:var(--ink-3);margin-top:5px;line-height:1.4;max-width:170px}

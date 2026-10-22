@@ -793,22 +793,19 @@ function initMap() {
     style: { color: css('--s6'), weight: 2.4, opacity: .9, dashArray: '6 4',
              fillColor: css('--s3'), fillOpacity: .08 },
   }).addTo(map);
-  /* 겹쳐보기 두 장. 마커보다 **먼저** 만들어 아래에 깔리게 한다. */
-  zoneLayer = L.geoJSON(null, { style: styleZone, onEachFeature: (f, lyr) => {
-    const p = f.properties;
-    lyr.bindPopup(`<div class="t">${esc(p.uname || '(이름 없음)')}</div>`
-      + `<div class="m">${esc(p.sigg_name || '')}${p.dyear ? ' · ' + esc(p.dyear) + '년 결정' : ''}</div>`
-      + (p.grp ? '' : '<div class="m">대분류로 분류하지 못한 용도지역입니다</div>'));
-  } });
-  redevLayer = L.geoJSON(null, { style: styleRedev, onEachFeature: (f, lyr) => {
-    const p = f.properties;
-    lyr.bindPopup(`<div class="t">${esc(p.zone_nm || '')}</div>`
-      + `<div class="m">${esc(p.biz || p.lclas || '')}</div>`
-      + `<div class="m">${p.stage ? esc(p.stage) : '추진단계 코드 ' + esc(p.cd || '') + ' 가 코드표에 없습니다'}`
-      + `${p.pct == null ? '' : ` · 진행 ${p.pct}%`}</div>`
-      + (p.area ? `<div class="m">${fmt(Math.round(p.area))} ㎡</div>` : '')
-      + (p.present_sn ? `<button type="button" class="popbtn" data-redevzone="${esc(p.present_sn)}">구역 상세 보기</button>` : ''));
-  } });
+  /* 겹쳐보기 두 장. 마커보다 **먼저** 만들어 아래에 깔리게 한다.
+     ★ 2026-10-22 사장님 "색이 겹치면서 범례 색과 다른 경우" + "원본을 훼손하면 안 돼":
+       영역마다 반투명으로 칠하면 겹친 곳이 섞이거나(정비 2,776 중 1,615쌍 겹침) 진해진다(용도 같은 색 겹침 ~300쌍).
+       → **원본은 한 개도 빼지 않고 다 그리되**, 영역은 불투명하게 칠하고 **판(pane) 전체에 투명도를 한 번만** 준다.
+         같은 색이 겹쳐도 진해지지 않고, 다른 색이 겹쳐도 섞인 새 색이 생기지 않는다(위에 그린 것의 색 — 큰 것 아래·작은 것 위, 서버 순서 그대로).
+       → 위에 가려진 것도 숨지 않게 **누른 자리의 영역을 전부** 보여 준다(겹침목록팝업). */
+  for (const [이름, 투명, z] of [['ovZone', OV_투명.zone, 410], ['ovRedev', OV_투명.redev, 411]]) {
+    const pn = map.createPane(이름); pn.style.zIndex = z; pn.style.opacity = 투명;
+  }
+  zoneLayer = L.geoJSON(null, { style: styleZone, pane: 'ovZone', renderer: L.svg({ pane: 'ovZone' }) });
+  redevLayer = L.geoJSON(null, { style: styleRedev, pane: 'ovRedev', renderer: L.svg({ pane: 'ovRedev' }) });
+  zoneLayer.on('click', e => 겹침목록팝업(e, zoneLayer, 용도팝업));
+  redevLayer.on('click', e => 겹침목록팝업(e, redevLayer, 정비팝업));
 
   markerLayer = L.layerGroup().addTo(map);
   newbuildLayer = L.layerGroup().addTo(map);
@@ -1345,14 +1342,52 @@ function refreshMap() {
    ★ 두 팔레트 모두 검증기를 돌려서 통과한 값이다(명도대역·채도·색각·대비).
      눈으로 고르지 않았다. */
 const Z_GRP = { 주거: '--z-res', 상업: '--z-com', 공업: '--z-ind', 녹지: '--z-grn' };
+/* 판 전체 투명도 — 범례 견본도 같은 값으로 칠한다(지도와 범례가 같은 색으로 보이게) */
+const OV_투명 = { zone: 0.4, redev: 0.45 };
+function 용도팝업(p) {
+  return `<div class="t">${esc(p.uname || '(이름 없음)')}</div>`
+    + `<div class="m">${esc(p.sigg_name || '')}${p.dyear ? ' · ' + esc(p.dyear) + '년 결정' : ''}</div>`
+    + (p.grp ? '' : '<div class="m">대분류로 분류하지 못한 용도지역입니다</div>');
+}
+function 정비팝업(p) {
+  return `<div class="t">${esc(p.zone_nm || '')}</div>`
+    + `<div class="m">${esc(p.biz || p.lclas || '')}</div>`
+    + `<div class="m">${p.stage ? esc(p.stage) : '추진단계 코드 ' + esc(p.cd || '') + ' 가 코드표에 없습니다'}`
+    + `${p.pct == null ? '' : ` · 진행 ${p.pct}%`}</div>`
+    + (p.area ? `<div class="m">${fmt(Math.round(p.area))} ㎡</div>` : '')
+    + (p.present_sn ? `<button type="button" class="popbtn" data-redevzone="${esc(p.present_sn)}">구역 상세 보기</button>` : '');
+}
+/* 점이 GeoJSON 다각형 안에 있나(구멍 고려, 반직선 교차). 좌표는 [lng, lat] */
+function 점안(lng, lat, g) {
+  const 고리안 = r => { let 안 = false;
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) 안 = !안;
+    } return 안; };
+  const 면안 = rs => 고리안(rs[0]) && !rs.slice(1).some(고리안);
+  if (!g) return false;
+  if (g.type === 'Polygon') return 면안(g.coordinates);
+  if (g.type === 'MultiPolygon') return g.coordinates.some(면안);
+  return false;
+}
+/* 누른 자리에 겹친 영역 **전부**를 위(작은 것)부터 보여 준다 — 위에 그린 색에 가려진 것도 숨지 않는다 */
+function 겹침목록팝업(e, 층, 글) {
+  const { lat, lng } = e.latlng, 맞은 = [];
+  층.eachLayer(l => { if (l.feature && 점안(lng, lat, l.feature.geometry)) 맞은.push(l.feature.properties); });
+  if (!맞은.length && e.layer && e.layer.feature) 맞은.push(e.layer.feature.properties);
+  맞은.reverse();                                        // 나중에 그린 것(위)이 먼저
+  L.popup({ maxWidth: 300 }).setLatLng(e.latlng).setContent(
+    (맞은.length > 1 ? `<div class="m"><b>이 자리에 ${맞은.length}개가 겹쳐 있습니다</b> — 지도 색은 맨 위(첫 번째)의 것입니다</div>` : '')
+    + 맞은.map(글).join('<hr class="pophr">')).openOn(map);
+}
 
 function styleZone(f) {
   const g = f.properties.grp;
   /* ★ 분류 못 한 것은 **칠하지 않는다.** 아무 색이나 주면 그 색이 뜻을 가진 것처럼
      읽힌다. 테두리만 남겨서 '여기 뭔가 있는데 분류를 못 했다' 로 보이게 한다. */
   if (!g) return { color: css('--ink-4'), weight: 1, dashArray: '3 3', fillOpacity: 0 };
-  return { color: css(Z_GRP[g]), weight: 0.8, opacity: .7,
-           fillColor: css(Z_GRP[g]), fillOpacity: .32 };
+  return { color: css(Z_GRP[g]), weight: 0.8, opacity: 1,
+           fillColor: css(Z_GRP[g]), fillOpacity: 1 };        // 투명도는 판(ovZone)이 한 번만 준다
 }
 
 /* 정비사업 색 (2026-10-20 다시 씀)
@@ -1372,10 +1407,12 @@ const RK = {
 /* 추진 정도 3단: 초기(점선) / 인가 이후(실선) / 착공~준공(굵은 실선).
    ★ pct 를 모르면 **굵기를 꾸며내지 않는다** - 점선에 아주 옅게 둔다. */
 function 진행모양(pct) {
-  if (pct == null) return { weight: 1.2, dashArray: '3 3', opacity: .65, fillOpacity: .10 };
-  if (pct < 40)    return { weight: 1.4, dashArray: '5 3', opacity: .95, fillOpacity: .22 };
-  if (pct < 80)    return { weight: 1.8, dashArray: null,  opacity: .95, fillOpacity: .32 };
-  return             { weight: 3.2, dashArray: null,  opacity: 1,   fillOpacity: .42 };
+  /* ★ 2026-10-22: 진하기(fillOpacity)로도 단계를 싣던 것을 뺐다 — 범례는 '추진 정도 = 테두리' 라고만 말한다(한 채널에 한 뜻).
+     칠은 불투명, 투명도는 판(ovRedev)이 한 번만 준다. 단계는 테두리(점선 / 실선 / 굵은 실선)로만. */
+  if (pct == null) return { weight: 1.2, dashArray: '3 3', opacity: 1, fillOpacity: 1 };
+  if (pct < 40)    return { weight: 1.4, dashArray: '5 3', opacity: 1, fillOpacity: 1 };
+  if (pct < 80)    return { weight: 1.8, dashArray: null,  opacity: 1, fillOpacity: 1 };
+  return             { weight: 3.2, dashArray: null,  opacity: 1, fillOpacity: 1 };
 }
 function styleRedev(f) {
   const p = f.properties;
@@ -1384,7 +1421,7 @@ function styleRedev(f) {
   const v = RK[p.lclas];
   const 모양 = 진행모양(p.pct);
   if (!v) return { color: css('--rd-na'), weight: 1.2, dashArray: '3 3',
-                   opacity: .7, fillColor: css('--rd-na'), fillOpacity: .06 };
+                   opacity: 1, fillOpacity: 0 };                // 분류 못 함 — 칠하지 않는다(불투명 칠이 밑의 것을 가린다)
   const c = css(v);
   return { color: c, fillColor: c, ...모양 };
 }
@@ -1483,17 +1520,19 @@ function overlayLegend() {
   if (overlay === 'zone') {
     el.innerHTML = `<div class="lt">용도지역</div>`
       + Object.entries(Z_GRP).map(([k, v]) =>
-          `<div class="lrow"><span class="sw" style="background:var(${v})"></span>${k}지역</div>`).join('')
-      + `<div class="lrow"><span class="sw dash"></span>분류 못 함</div>`;
+          `<div class="lrow"><span class="sw" style="background:var(${v});opacity:${OV_투명.zone}"></span>${k}지역</div>`).join('')
+      + `<div class="lrow"><span class="sw dash"></span>분류 못 함</div>`
+      + `<div class="lnote">겹친 곳은 위(작은 것)의 색만 보입니다 — 누르면 그 자리의 것이 전부 나옵니다</div>`;
   } else {
     el.innerHTML = `<div class="lt">사업 종류</div>`
       + Object.entries(RK).map(([k, v]) =>
-          `<div class="lrow"><span class="sw rk" style="background:var(${v})"></span>${k}</div>`).join('')
+          `<div class="lrow"><span class="sw rk" style="background:var(${v});opacity:${OV_투명.redev}"></span>${k}</div>`).join('')
       + `<div class="lrow"><span class="sw dash na"></span>분류 못 함</div>`
       + `<div class="lt" style="margin-top:6px">추진 정도 (테두리)</div>`
       + `<div class="lrow"><span class="sw rk st1"></span>초기 (구역지정·추진위)</div>`
       + `<div class="lrow"><span class="sw rk st2"></span>인가 이후</div>`
-      + `<div class="lrow"><span class="sw rk st3"></span>착공 · 준공</div>`;
+      + `<div class="lrow"><span class="sw rk st3"></span>착공 · 준공</div>`
+      + `<div class="lnote">겹친 곳(지구 안의 구역 등)은 위(작은 것)의 색만 보입니다 — 누르면 그 자리의 것이 전부 나옵니다</div>`;
   }
 }
 
@@ -4301,7 +4340,9 @@ function renderDetail(payload) {
     const share = list.reduce((s, r) => s + (r.share_cnt || 0), 0);
     const preN = list.reduce((s, r) => s + (r.pre_cnt || 0), 0);
 
-    const cards = list.map(r => {
+    /* ★ 2026-10-22 19:10 사장님 "('전체' 의 평형 요약 줄도) ㅇㅇ 빼" — 평형별 건수는 위 칩에, 거래는 아래 '거래 내역' 에 있다.
+       '전체' 에서는 줄을 아예 안 그린다. 평형을 고르면 한 줄(건수·범위·해제)만 남긴다. */
+    const cards = tradeArea === null ? '' : list.map(r => {
       const cnt = off ? r.b_cnt : r.cnt;
       if (off && !cnt) return '';              // 직거래뿐인 평형은 제외하면 남는 게 없다
       const lastAmt = off ? r.b_last_amount : r.last_amount;
