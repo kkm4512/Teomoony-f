@@ -6004,7 +6004,7 @@ app.get('/api/complexes/:id', async (req, res) => {
          통학구역은 교육지원청이 정하고 그 데이터는 우리에게 없다. */
     const _q_schools = () => pool.request().input('id', sql.Int, id).query(`
       WITH v AS (SELECT * FROM gold.v_complex_school WHERE complex_id = @id),
-      n AS (SELECT school_se, school_nm, fond_type, bnhh_se, dist_m,
+      n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
                    rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m)
               FROM v),
       a AS (SELECT school_se,
@@ -6012,13 +6012,24 @@ app.get('/api/complexes/:id', async (req, res) => {
                    r1000 = SUM(CASE WHEN dist_m <= 1000 THEN 1 ELSE 0 END),
                    r2000 = COUNT(*)
               FROM v GROUP BY school_se)
+      /* ★ 2026-10-23 사장님 "학교이름, 학생수, 교사학생수" — 학교알리미 공시(학년별·학급별 학생수, apiType 09)를 **공시값 그대로**.
+           위치(학교ID 'B…') ↔ 학교알리미(정보공시 코드 'S…')는 gold.school_link(335: 학교급 · 설립일/개교일 · 법정동 경계 · 양쪽 후보 1)로만 잇는다 — 이름 안 봄.
+           알리미적재: 이 단지 구의 학교알리미를 받았는가(안 받았으면 SCOPE, 받았는데 못 이었으면 UNSURE) */
       SELECT 학교급 = a.school_se, 가까운곳 = n.school_nm, 설립 = n.fond_type,
              분교 = n.bnhh_se, 최단m = CAST(n.dist_m AS INT),
              a.r500, a.r1000, a.r2000,
+             이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
+             st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
+             알리미적재 = CASE WHEN EXISTS (SELECT 1 FROM silver.schoolinfo i JOIN gold.complex c ON c.complex_id = @id
+                                             WHERE LEFT(i.adrcd_cd, 5) = c.sigungu_cd) THEN 1 ELSE 0 END,
              ord = CASE a.school_se WHEN N'초등학교' THEN 1
                                     WHEN N'중학교'   THEN 2
                                     WHEN N'고등학교' THEN 3 ELSE 9 END
         FROM a JOIN n ON n.school_se = a.school_se AND n.rn = 1
+        LEFT JOIN gold.school_link l ON l.school_id = n.school_id
+        OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
+                            교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
+                       FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
        ORDER BY ord`);
 
     /* 유치원 (유치원알리미, 교육부)  2026-10-19
