@@ -2460,7 +2460,11 @@ async function lookupRegion(pool, cands) {
         FROM meta.lawd_code
        WHERE ri_nm IS NULL AND (${ors})
        ORDER BY CASE WHEN emd_nm IS NULL THEN 0 ELSE 1 END, lawd_cd`);
-    const rows = lr.recordset;
+    let rows = lr.recordset;
+    /* 2026-10-23 QA: **우리 범위(서울 · 안양)** 안에 맞는 것이 있으면 그것만 — '강동구' 가 경남 김해시 '강동',
+       '강서구' 가 부산 강서구, '안양 평촌동' 이 대전·청주 평촌동까지 잡았다. 범위 안에 없을 때만 밖의 것(→ '아직 적재 안 함' 안내). */
+    const 범위안 = r => /^11/.test(r.lawd_cd) || /^4117[13]/.test(r.lawd_cd);
+    if (rows.some(범위안)) rows = rows.filter(범위안);
     /* 동 이름이 **정확히** 맞으면 그 동. 아니면 시군구. (안양 -> 만안+동안) */
     /* ★ 2026-10-22 QA: '성수동' 은 법정동이 성수동1가 · 성수동2가 로 나뉘어 **정확히 맞는 이름이 없었다** → 지역이 통째로 빠지고
        서울 전체가 나갔다. 'X동' 이 'X동N가' 들로만 있으면 그 가들 전부로 본다(이름이 그 꼴로 **정확히** 맞을 때만). */
@@ -2475,13 +2479,21 @@ async function lookupRegion(pool, cands) {
     sggRows = sggRows.filter(r => !sggRows.some(o =>
       o !== r && o.sgg_nm && r.sgg_nm && o.sgg_nm !== r.sgg_nm
       && o.sgg_nm.startsWith(r.sgg_nm)));
-    const picked = emdExact.length ? emdExact : sggRows;
+    /* 2026-10-23 QA: 구와 동을 같이 말했으면('서초구 반포동' · '안양 평촌동') 그 구 **안의** 동만 — 둘 다 맞은 말로 친다 */
+    let 구안동 = emdExact;
+    if (emdExact.length && sggRows.length) {
+      const 안쪽 = emdExact.filter(e => sggRows.some(g => g.sgg_cd === e.sgg_cd));
+      if (안쪽.length) 구안동 = 안쪽;
+    }
+    const picked = 구안동.length ? 구안동 : sggRows;
     지역 = picked.map(r => ({
       lawd_cd: r.lawd_cd, sgg_cd: r.sgg_cd, 수준: r.수준,
       이름: r.수준 === 'sgg' ? `${r.sido_nm} ${r.sgg_nm}` : r.full_nm }));
     for (const c of cands) {
       const hit = picked.some(r =>
-        (r.emd_nm && (r.emd_nm === c.v || 가맞음(c, r.emd_nm))) || (!r.emd_nm && r.sgg_nm && r.sgg_nm.includes(c.v)));
+        (r.emd_nm && (r.emd_nm === c.v || 가맞음(c, r.emd_nm))) || (!r.emd_nm && r.sgg_nm && r.sgg_nm.includes(c.v)))
+        /* 고른 동을 감싸는 구 이름도 알아들은 말이다('서초구 반포동' 의 서초구) */
+        || sggRows.some(g => g.sgg_nm && g.sgg_nm.includes(c.v) && picked.some(r => r.sgg_cd === g.sgg_cd));
       if (hit) 맞은말.push(c.t);
     }
     /* ★ 2026-10-22 ('서울에서 제일 비싼 지역' — '서울에서' 를 못 알아들음): **시도**도 찾는다.
@@ -3166,6 +3178,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     }
 
     const ai보탬 = [];
+    const 미리알림 = [];
     let 단지이름 = null;
     if (ai) {
       /* ★ 단지 이름은 **지역보다 먼저** 본다(2026-10-19). "드림아트빌라가
@@ -3174,6 +3187,11 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       if (ai.단지이름) {
         단지이름 = ai.단지이름;
         ai보탬.push('단지 이름 ' + 단지이름);
+        /* 2026-10-23 QA: 이름 안의 '뉴타운 · 재개발 · 재건축' 은 조건이 아니다 — '길음뉴타운8단지' 가 '재정비촉진 구역' 조건까지 걸려 0건이었다 */
+        if (조건.정비 && /뉴타운|재개발|재건축|재정비/.test(단지이름)) {
+          delete 조건.정비;
+          미리알림.push({ 종류: 'HINT', 말: `단지 이름 '${단지이름}' 안의 말은 정비구역 조건으로 쓰지 않았습니다` });
+        }
         못알아들음 = 못알아들음.filter(t =>
           !(t.includes(단지이름) || 단지이름.includes(t.replace(조사, ''))));
       }
@@ -3225,7 +3243,24 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     const rq2 = pool.request()
       .input('lim', sql.Int, 개수)
       .input('hi', sql.BigInt, 상한).input('lo', sql.BigInt, 하한)
-      .input('nm', sql.NVarChar(400), 단지이름 ? '%' + 글자그대로(String(단지이름).slice(0, 80)) + '%' : null);
+      .input('nm', sql.NVarChar(400), 단지이름 ? '%' + 글자그대로(String(단지이름).slice(0, 80)) + '%' : null)
+      /* 2026-10-23 QA: 이름은 띄어쓰기 빼고 · 대장 이름 + **실거래 이름 · K-apt 이름**으로도('길음뉴타운8단지' 는 실거래 이름이다 — 대장은 '길음뉴타운') */
+      .input('nm0', sql.NVarChar(400), 단지이름 ? '%' + 글자그대로(String(단지이름).slice(0, 80)).replace(/\s+/g, '') + '%' : null);
+    /* 이름 후보를 **먼저 따로** 고른다 — 큰 쿼리 안에 이름 갈래(UNION)를 넣었더니 '은마아파트' 가 50초(계획이 53만 단지를 다 돌았다) */
+    let 이름조건 = '1 = 1';
+    if (단지이름) {
+      const 이름 = String(단지이름).slice(0, 80);
+      const nr = await pool.request()
+        .input('nm', sql.NVarChar(400), '%' + 글자그대로(이름) + '%')
+        .input('nm0', sql.NVarChar(400), '%' + 글자그대로(이름).replace(/\s+/g, '') + '%').query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT TOP 300 complex_id FROM (
+          SELECT complex_id FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND complex_nm_ns LIKE @nm0 AND merged_into IS NULL
+          UNION SELECT complex_id FROM gold.complex_alias WHERE REPLACE(실거래이름, ' ', '') LIKE @nm0
+          UNION SELECT complex_id FROM gold.complex_kapt WHERE REPLACE(kapt_name, ' ', '') LIKE @nm0) x`);
+      const ids = nr.recordset.map(x => Number(x.complex_id)).filter(Number.isInteger);
+      이름조건 = ids.length ? `c.complex_id IN (${ids.join(',')})` : '1 = 0';
+    }
     let 지역조건 = '1 = 1';
     if (지역.length) {
       const sgg = [...new Set(지역.filter(x => x.수준 === 'sgg').map(x => x.sgg_cd))];
@@ -3249,6 +3284,13 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     if (종목근거) { rq2.input('kg3', sql.VarChar(4), 종목.key); 필터.push(`${종목.label} — 그 종류 매매가 있는 단지(종류는 실거래로 압니다)`); }
     const 정렬역 = 정렬.key === 'station';
     const 조건칸 = 조건칸SQL(조건, 정렬역);
+    /* 2026-10-23 QA(사장님 "AI 검색 QA 계속"): 종목을 말하지 않으면 값은 **주거 거래**(아파트·연립·단독·오피스텔)로 본다 —
+       '재건축 구역에 걸친 단지' 에 상가 한 채(잠실동 27-6 판매시설)의 상업용 매매 45억이 단지 최고가로 섞였다. */
+    const 주거거래 = 종목 ? '' : "AND (r.trade_kind LIKE 'APT%' OR r.trade_kind LIKE 'RH%' OR r.trade_kind LIKE 'SH%' OR r.trade_kind LIKE 'OFFI%')";
+    if (!종목 && ['unit', 'amount', 'amount_asc'].includes(정렬.key)) 필터.push('종목을 말하지 않아 주거 매매(아파트·연립·단독·오피스텔)로 셉니다 — 상가·토지 거래는 뺐습니다');
+    /* 신축·구축 순인데 종목이 없으면 세대 있는 단지만 — '역세권 신축' 에 세대 없는 빌딩(금강빌딩 · 복합문화센터)이 1등이었다 */
+    const 세대만 = !종목 && (날짜정렬 || Boolean(정렬역));   // 역 가까운 순도 — '잠실동 역 가까운 순' 이 세대 없는 빌딩으로 찼다
+    if (세대만) 필터.push('종목을 말하지 않아 세대가 있는 단지만 봅니다');
     const 면적거래 = 조건.면적 ? 'AND CAST(r.exclu_use_ar AS DECIMAL(9,2)) >= @alo AND CAST(r.exclu_use_ar AS DECIMAL(9,2)) < @ahi' : '';
     const ORDER = {
       station:    'st.역거리 ASC',
@@ -3282,8 +3324,9 @@ app.get('/api/ask', requireAuth, async (req, res) => {
          CROSS APPLY (SELECT d = MIN(s.dist_m) FROM gold.complex_station s WHERE s.complex_id = c.complex_id
                        ${조건.역 ? 'AND s.dist_m <= @sm ' + (조건.역.lnSQL || '') : ''}) s
          WHERE c.is_active = 1 AND ${지역조건} AND s.d IS NOT NULL
-           AND (@nm IS NULL OR c.complex_nm LIKE @nm)
+           AND ${이름조건}
            AND (@kg2 IS NULL OR EXISTS (SELECT 1 FROM gold.complex_trade_max k2 WHERE k2.complex_id = c.complex_id AND k2.종류 = @kg2))
+           ${세대만 ? 'AND c.hhld_cnt_sum > 0' : ''}
            ${조건조각}
          ORDER BY s.d)`;
     }
@@ -3302,7 +3345,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
                    GROUP BY x.complex_id) m
             JOIN gold.complex c ON c.complex_id = m.complex_id
            WHERE c.is_active = 1 AND ${지역조건}
-             AND (@nm IS NULL OR c.complex_nm LIKE @nm)
+             AND ${이름조건}
              AND (@hi IS NULL OR m.max_amt <= @hi) AND (@lo IS NULL OR m.max_amt >= @lo)
              ${조건조각}
            ORDER BY ${후보순})`;
@@ -3313,7 +3356,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
           SELECT TOP (@cand) m.complex_id FROM gold.complex_trade_max m
             JOIN gold.complex c ON c.complex_id = m.complex_id
            WHERE m.종류 = @kg AND c.is_active = 1 AND ${지역조건}
-             AND (@nm IS NULL OR c.complex_nm LIKE @nm)
+             AND ${이름조건}
              AND (@hi IS NULL OR m.max_amt <= @hi) AND (@lo IS NULL OR m.max_amt >= @lo)
              ${정렬.key === 'unit' ? 'AND m.max_unit IS NOT NULL' : ''}
              ${조건조각}
@@ -3321,7 +3364,11 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       }
     }
 
-    const 알림 = [];
+    const 알림 = [...미리알림];
+    /* 2026-10-23 QA: 정렬을 말하지 않으면 기본이 '최고 실거래가 순' 이라 **매매가 없는 단지가 조용히 빠졌다**
+       ('강남구 역 500m 안 1000세대 이상 2015년 이후' 에서 상록 스타힐스 1,703세대(공공임대) 469m 가 빠짐). 빠진 수를 센다. */
+    /* 종목을 말했으면 세지 않는다 — 종목은 실거래로만 알므로 거래 없는 단지는 그 종목인지부터 모른다(성동구 '아파트' 에 6,428곳이 잡혔다) */
+    const 매매없음셈 = 가격정렬 && 정렬추정 && !종목 && Object.keys(조건).length > 0;
     const r = await rq2.query(`
       SELECT TOP (@lim)
              c.complex_id, c.complex_nm, c.rep_plat_plc, c.hhld_cnt_sum,
@@ -3340,6 +3387,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
            WHERE r.match_complex_id = c.complex_id AND r.is_rent = 0
              AND r.is_canceled = 0 AND r.deal_amount IS NOT NULL
              ${종목 ? 종목.sql.replace(/\bt\./g, 'r.').replace(/^/, 'AND ') : ''}
+             ${주거거래}
              ${면적거래}
            ORDER BY r.deal_amount DESC) t
         ${조건칸.붙}
@@ -3348,15 +3396,24 @@ app.get('/api/ask', requireAuth, async (req, res) => {
          ${조건조각}
          ${정렬역 ? 'AND st.역거리 IS NOT NULL' : ''}
          ${날짜정렬 ? "AND c.oldest_use_apr LIKE '[12][0-9][0-9][0-9][01][0-9][0-3][0-9]'" : ''}
+         ${세대만 ? 'AND c.hhld_cnt_sum > 0' : ''}
          ${종목근거 ? 'AND EXISTS (SELECT 1 FROM gold.complex_trade_max k3 WHERE k3.complex_id = c.complex_id AND k3.종류 = @kg3)' : ''}
-         AND (@nm IS NULL OR c.complex_nm LIKE @nm)
+         AND ${이름조건}
          ${가격정렬 ? 'AND t.max_amount IS NOT NULL' : ''}
          AND (@hi IS NULL OR t.max_amount <= @hi)
          AND (@lo IS NULL OR t.max_amount >= @lo)
        ORDER BY ${ORDER};
       ${Object.keys(조건).length ? `
       ${모름SQL(조건, 지역조건)}
-      SELECT 표, 굳힌때 FROM gold.ask_attr_meta;` : ''}`);
+      SELECT 표, 굳힌때 FROM gold.ask_attr_meta;` : ''}
+      ${매매없음셈 ? `SELECT 매매없음 = COUNT(*) FROM gold.complex c
+         WHERE c.is_active = 1 AND ${지역조건} AND ${이름조건} ${조건조각}
+           AND c.hhld_cnt_sum > 0
+           AND NOT EXISTS (SELECT 1 FROM gold.complex_trade_max k WHERE k.complex_id = c.complex_id AND k.종류 IN ('APT', 'RH', 'OFFI'));` : ''}`);
+    if (매매없음셈) {
+      const n = Number(((r.recordsets[r.recordsets.length - 1] || [])[0] || {}).매매없음 || 0);
+      if (n > 0) 알림.push({ 종류: 'HINT', 말: `조건에 맞는 세대 단지 중 **주거 매매 기록이 없는 ${n.toLocaleString()}곳**은 빠졌습니다 — 정렬을 말하지 않아 기본이 '최고 실거래가 순' 이라서입니다(공공임대 · 거래 없는 단지 등). '세대 많은 순' 이나 '신축 순' 으로 물으면 보입니다` });
+    }
     /* 312: 조건마다 '모름' 수 · 요약표 굳힌 때 */
     const 모름 = [];
     let 굳힌때 = null;
@@ -3373,6 +3430,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       if (m2.recordset[0]) 굳힌때 = m2.recordset[0].굳힌때;
     }
     알림.push(...조읽.알림);
+    if (/전세가?율|전세 ?비율/.test(q)) 알림.push({ 종류: 'HINT', 말: "'전세가율' 순 정렬은 아직 없습니다 — 단지 상세의 평형별 표에 전세가율(최근 순수 전세 ÷ 최근 중개 매매)이 있습니다. 이번엔 쓰지 않았습니다" });
 
     /* ---- 7) 0건이면 '없다' 와 '안 받았다' 를 가른다 ---- */
     /* ★ 이름으로 찾아 0건이면 **'없다' 고 말해선 안 된다**(2026-10-19).
