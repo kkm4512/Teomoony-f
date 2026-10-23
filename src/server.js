@@ -5203,6 +5203,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        (kind=4) -> 상위 PK -> 동 -> 단지. 돈암동 14,666건 전수에서 결손 0 이었다.
        라인은 호명칭에서 파생하며 안 떨어지면 NULL 이다(상가·지하). 26_expos.sql 참조. */
     const _q_hos = () => pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-23: 공시가격 적재(NED MERGE)가 표를 잡고 있으면 단지 상세가 1분씩 멈췄다 — 읽기 전용이라 안 기다린다 */
       /* 공시가격은 **있으면 붙이고 없으면 비운다**(LEFT). 주택가격 축은 적재
          범위가 또 다르다 — 호는 있는데 가격이 없는 상태가 정상이다. */
       /* 전용면적도 **있으면 붙이고 없으면 비운다**(LEFT). 전유공용면적은
@@ -5789,6 +5790,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        ★ 거르는 조건을 호 모달(`/api/ho/:pk`)과 **글자 그대로** 맞춘다:
          `is_current = 1 AND hsprc > 0`. 한쪽을 고치면 다른 쪽도 고친다. */
     const _q_hoPrc = () => pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-23: 공시가격 적재(NED MERGE)가 표를 잡고 있으면 단지 상세가 1분씩 멈췄다 — 읽기 전용이라 안 기다린다 */
       WITH 매긴 AS (
         SELECT p.호PK, 최신 = p.공시가격,
                전체공시호 = COUNT(*) OVER (),
@@ -6263,6 +6265,7 @@ app.get('/api/ho/:pk', async (req, res) => {
     const pr = await pool.request()
       .input('pk', sql.VarChar(50), pk)
       .input('cid', sql.Int, m.complex_id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-23: 공시가격 적재(NED MERGE)가 표를 잡고 있으면 단지 상세가 1분씩 멈췄다 — 읽기 전용이라 안 기다린다 */
       SELECT TOP 1 공시가격, 기준일, 단지분위, 라인분위, 공시출처 = 출처
         FROM gold.v_complex_ho_price
        WHERE complex_id = @cid AND 호PK = @pk`);

@@ -630,6 +630,10 @@ function initMap() {
        반단계에 설 수 있고, 휠 한 번이 반 단계만 움직여 훨씬 부드럽다.
        ★ zoomDelta 는 1 로 둔다 — 좌측 +/- 단추는 한 단계씩 가는 게 맞다. */
     zoomSnap: 0.5, zoomDelta: 1,
+    /* 2026-10-23 사장님 "지도를 360도로 회전 가능하게" — leaflet-rotate(Leaflet 1.9 플러그인).
+       폰: 두 손가락 비틀기 · PC: Shift + 끌기(또는 Shift + 휠) · 나침반 단추를 누르면 북쪽이 위로. */
+    rotate: true, bearing: 0, touchRotate: true, shiftKeyRotate: true,
+    rotateControl: { closeOnZeroBearing: false, position: 'topleft' },
     /* ★ 아래에서 Leaflet 의 휠 확대를 **끄고 직접 돌린다.** 이 값은 남겨 두지만
        실제로는 안 쓰인다(되돌릴 때 기준이 되라고 남긴다). */
   }).setView([37.5885, 126.9680], 16);   // 종로구 청운동
