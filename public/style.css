@@ -1650,6 +1650,8 @@ ul.lu li:last-child{border-bottom:0}
 .ahmark b{font:500 9.5px var(--mono);color:var(--s5)}
 .ahmark span{font-size:12px;font-weight:600;color:var(--ink);letter-spacing:-.3px}
 .ahmark i{font:500 10px var(--mono);font-style:normal;color:var(--ink-3)}
+.ahmark em{font:600 9.5px var(--mono);font-style:normal;color:var(--s5);border-left:1px solid var(--line);padding-left:4px}
+.ahmark.soon em{color:#fff;border-left-color:rgba(255,255,255,.4)}
 .ahmark.soon{background:var(--s5)}
 .ahmark.soon::after{background:var(--s5)}
 .ahmark.soon b,.ahmark.soon span,.ahmark.soon i{color:#fff}

@@ -6007,34 +6007,44 @@ async function 분양핀불러오기() {
   try { r = await fetch(`/api/applyhome/pins?bbox=${bbox}`).then(x => x.json()); } catch (e) { return; }   // 보조 축 — 실패해도 지도는 그대로
   if (차례 !== 분양핀차례 || r.error) return;
   분양핀층.clearLayers();
-  const 집 = new Map();
+  /* ★ 2026-10-23 사장님 "너무 겹쳐 보여" — 같은 주택(관리번호) 묶음에 더해, **같은 자리(같은 공고 지번 필지)** 의 공고도 한 핀으로.
+     장위 푸르지오 마크원처럼 일반공급 · 무순위 · 임의공급이 관리번호가 따로라 핀이 겹겹이 떴다. 묶는 근거는 지번(필지 중심점)이지 이름이 아니다. */
+  const 자리 = new Map();
   for (const p of (r.핀 || [])) {
-    const g = 집.get(p.house_manage_no) || { ...p, 종류: new Set(), n: 0 };
-    g.종류.add(p.공고종류); g.n++; 집.set(p.house_manage_no, g);
+    const k = `${Number(p.lat).toFixed(6)},${Number(p.lng).toFixed(6)}`;
+    const g = 자리.get(k) || { lat: p.lat, lng: p.lng, 집: new Map(), 종류: new Set(), n: 0, 입주: null, 이름: null };
+    if (!g.집.has(p.house_manage_no)) g.집.set(p.house_manage_no, { 이름: p.house_nm, 공고일: p.rcrit_pblanc_de });
+    g.종류.add(p.공고종류); g.n++;
+    if (!g.이름) g.이름 = p.house_nm;                       // 핀은 공고일 최근 순으로 온다 — 첫 이름이 가장 최근 공고
+    if (p.mvn_prearnge_ym && (!g.입주 || p.mvn_prearnge_ym > g.입주)) g.입주 = p.mvn_prearnge_ym;
+    자리.set(k, g);
   }
   const 지금월 = new Date().toISOString().slice(0, 7).replace('-', '');
-  for (const g of 집.values()) {
-    const 입주 = g.mvn_prearnge_ym ? `${g.mvn_prearnge_ym.slice(0, 4)}.${g.mvn_prearnge_ym.slice(4, 6)}` : null;
-    const 앞 = g.mvn_prearnge_ym && g.mvn_prearnge_ym >= 지금월;
+  for (const g of 자리.values()) {
+    const 입주 = g.입주 ? `${g.입주.slice(0, 4)}.${g.입주.slice(4, 6)}` : null;
+    const 앞 = g.입주 && g.입주 >= 지금월;
     const 꼬리 = [...g.종류].map(k => 공고종류짧게[k] || k).join('·');
+    const 이름들 = new Set([...g.집.values()].map(x => x.이름));
     const mk = L.marker([g.lat, g.lng], {
       icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
-        html: `<div class="ahmark${앞 ? ' soon' : ''}"><b>${esc(꼬리)}</b><span>${esc(shortNm(g.house_nm) || '')}</span>${
-               입주 ? `<i>${앞 ? '입주예정' : '입주'} ${esc(입주)}</i>` : ''}</div>` }),
+        html: `<div class="ahmark${앞 ? ' soon' : ''}"><b>${esc(꼬리)}</b><span>${esc(shortNm(g.이름) || '')}${이름들.size > 1 ? ` 외 ${이름들.size - 1}` : ''}</span>${
+               g.n > 1 ? `<em>공고 ${fmt(g.n)}</em>` : ''}${입주 ? `<i>${앞 ? '입주예정' : '입주'} ${esc(입주)}</i>` : ''}</div>` }),
       zIndexOffset: 300, riseOnHover: true,
-      title: `${g.house_nm} · 청약홈 공고 ${g.n}건 · 단지에 아직 안 이어짐`,
+      title: `${[...이름들].join(' · ')} · 청약홈 공고 ${g.n}건 · 단지에 아직 안 이어짐`,
     });
-    mk.on('click', () => 분양핀열기(g.house_manage_no, [g.lat, g.lng]));
+    mk.on('click', () => 분양핀열기([...g.집.keys()], [g.lat, g.lng]));
     mk.addTo(분양핀층);
   }
 }
-async function 분양핀열기(house, ll) {
+async function 분양핀열기(houses, ll) {
+  const hs = (Array.isArray(houses) ? houses : [houses]).slice(0, 6);   // 같은 자리 공고 묶음(최근 순) — 여섯 주택까지
   const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
     .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
   try {
-    const r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json());
-    if (r.error) throw new Error(r.error);
-    pop.setContent(`<div class="ahpopin">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`);
+    const rs = await Promise.all(hs.map(h => fetch(`/api/applyhome?house=${encodeURIComponent(h)}`).then(x => x.json())));
+    const bad = rs.find(r => r.error); if (bad) throw new Error(bad.error);
+    pop.setContent(`<div class="ahpopin">${rs.map(r => `${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}`).join('')}${
+      Array.isArray(houses) && houses.length > hs.length ? `<p class="srcline">이 자리 주택 ${fmt(houses.length)}곳 중 최근 ${fmt(hs.length)}곳</p>` : ''}</div>`);
   } catch (e) { pop.setContent(`<p class="note">공고를 불러오지 못했습니다 — ${esc(e.message || String(e))}</p>`); }
 }
 document.addEventListener('click', e => {
@@ -6364,22 +6374,41 @@ document.addEventListener('click', e => {
      · 자리가 없는 것: **'자리 모르는 공고 N' 묶음 표 하나** — 그 동을 가리키는 표일 뿐 공고의 자리가 아니다(점선 테두리 · 문구로 밝힘).
        누르면 목록 → 고르면 공고 상세. 법정동조차 모르는 공고(44)는 여기 안 나오고 검색 제안으로만. */
 const 공고날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v || '—'); };
-let 동공고층 = null, 동공고지금 = null;
+let 동공고층 = null, 동공고지금 = null, 동공고차례 = 0;
 function 동공고지우기() { if (동공고층) { try { map.removeLayer(동공고층); } catch (e) {} } 동공고층 = null; 동공고지금 = null; }
 async function 동공고그리기(lawd) {
   if (!lawd) { 동공고지우기(); return; }
-  if (동공고지금 === lawd && 동공고층) return;          // 같은 동 — 다시 안 그린다
+  if (동공고지금 === lawd) return;                     // 같은 동 — 다시 안 그린다(받는 중이어도)
   동공고지우기(); 동공고지금 = lawd;
+  const 차례 = ++동공고차례;                            // ★ 10-23: 같은 동을 두 번 받아 표가 두 겹으로 쌓이던 것 — 마지막 부름만 그린다
   let r;
-  try { r = await fetch(`/api/applyhome/dong/${encodeURIComponent(lawd)}`).then(x => x.json()); } catch { return; }
-  if (!r || r.error || 동공고지금 !== lawd || typeof map === 'undefined' || !map) return;
+  try { r = await fetch(`/api/applyhome/dong/${encodeURIComponent(lawd)}`).then(x => x.json()); } catch { if (차례 === 동공고차례) 동공고지금 = null; return; }
+  if (차례 !== 동공고차례 || !r || r.error || 동공고지금 !== lawd || typeof map === 'undefined' || !map) return;
   const g = L.featureGroup().addTo(map);
+  /* ★ 2026-10-23 사장님 "너무 겹쳐 보여" — 같은 공고 지번 필지(pnu)의 공고는 **표 하나**로.
+     장위 푸르지오 마크원처럼 일반공급·무순위·(2차)가 관리번호가 따로라 같은 자리에 표가 겹겹이 섰다.
+     묶는 근거는 지번(pnu)이지 이름이 아니다. 하나면 바로 공고 상세, 여럿이면 목록 → 고르면 공고 상세. */
+  const 필지묶음 = new Map();
   for (const h of (r.자리있음 || [])) {
-    const mk = L.marker([Number(h.lat), Number(h.lng)], { zIndexOffset: 300, riseOnHover: true,
-      title: `${h.house_nm} · 청약 공고 ${h.공고수}건 · 단지에 아직 안 이어짐`,
+    const k = h.pnu || `${Number(h.lat).toFixed(6)},${Number(h.lng).toFixed(6)}`;
+    (필지묶음.get(k) || 필지묶음.set(k, []).get(k)).push(h);     // 서버가 공고일 최근 순 — hs[0] 이 가장 최근
+  }
+  for (const hs of 필지묶음.values()) {
+    const h = hs[0], ll = [Number(h.lat), Number(h.lng)];
+    const 꼬리 = [...new Set(hs.map(x => 공고종류짧게[x.공고종류] || '공고'))].join('·');
+    const 공고수 = hs.reduce((a, x) => a + (Number(x.공고수) || 1), 0);
+    const 이름들 = [...new Set(hs.map(x => x.house_nm || ''))].sort((p, q) => p.length - q.length);
+    const 이름 = 이름들.every(n => n.startsWith(이름들[0])) ? 이름들[0] : `${h.house_nm} 외 ${이름들.length - 1}`;   // '마크원' · '마크원(2차)' → '마크원'
+    const mk = L.marker(ll, { zIndexOffset: 300, riseOnHover: true,
+      title: `${이름들.join(' · ')} · 청약 공고 ${공고수}건 · 단지에 아직 안 이어짐`,
       icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
-        html: `<div class="ahmark"><b>${esc(공고종류짧게[h.공고종류] || '공고')}</b><span>${esc(shortNm(h.house_nm) || '')}</span></div>` }) });
-    mk.on('click', () => 공고상세(h.house_manage_no, Number(h.lat), Number(h.lng)));
+        html: `<div class="ahmark"><b>${esc(꼬리)}</b><span>${esc(shortNm(이름) || '')}</span>${hs.length > 1 ? `<em>공고 ${fmt(공고수)}</em>` : ''}</div>` }) });
+    if (hs.length === 1) mk.on('click', () => 공고상세(h.house_manage_no, ll[0], ll[1]));
+    else mk.on('click', () => L.popup({ maxWidth: 320, minWidth: 240, className: 'ahpop', autoPanPadding: [20, 60] }).setLatLng(ll)
+      .setContent(`<div class="ahpopin"><div class="lt2">이 지번의 청약 공고 ${fmt(공고수)}</div>
+        <p class="note sm">같은 공고 지번(${esc(h.hssply_adres || h.pnu || '')})에 나온 공고들입니다(관리번호가 달라 따로 받은 것). 고르면 공고 상세가 열립니다.</p>
+        <ul class="lu">${hs.map(x => `<li data-ahopen="${esc(x.house_manage_no)}" role="button" tabindex="0"><b>${esc(x.house_nm || '')}</b>
+          <span class="muted"> ${esc(공고종류말[x.공고종류] || x.공고종류 || '')} · 공고 ${esc(공고날(x.rcrit_pblanc_de))}${Number(x.공고수) > 1 ? ` · ${fmt(x.공고수)}건` : ''}</span></li>`).join('')}</ul></div>`).openOn(map));
     mk.addTo(g);
   }
   /* 13:49 '근처' — 공고 지번 필지가 지금 없어 같은 본번 필지들의 가운데에(점선 · '근처' 글씨) */
