@@ -3471,67 +3471,35 @@ async function openHo(pk) {
           f.구획수 ? ` · ${fmt(f.구획수)}구획` : ''}`).join('<br>')
       }<span class="muted"> — 호가 아니라 층 전체입니다</span></div>` : ''}
     </div>
-    <div class="hm-chk" data-hm-chk><p class="muted">이 호에 이어진 대장 · 실거래 불러오는 중…</p></div></div>`;
-  호이어진자료(pk);
+    ${호이어서(pv)}</div>`;
 }
 
-/* ---------------- 호에 이어진 자료 (2026-10-23) ----------------
-   ★ 처음엔 '전세 계약 전 확인' 이라는 따로 된 섹션이었다. 사장님: "우리는 부동산 데이터를 잘 매칭해서 보여주는 게 주 목표" ·
-     "동호배치도에서 특정 호 클릭하면 나오는 데이터에서 연계해서 보여주는 방향" — 조언 틀(기관 안내 · 전세 문구)을 빼고
-     **이 호에서 이어지는 자료**(호 용도 → 그 동 표제부 → 단지 정비구역 → 같은 단지 · 같은 평형 실거래 · 전세가율)로 호 상세에 잇는다.
-   ★ 판정하지 않는다. 원본과 이은 결과만. 실거래에는 동·호가 없다 — 같은 층만 표시. */
-async function 호이어진자료(pk) {
-  const box = document.querySelector('#homodal [data-hm-chk]');
-  if (!box) return;
-  let d;
-  try {
-    const r = await fetch(`/api/ho/${encodeURIComponent(pk)}/check`);
-    if (!r.ok) throw new Error(r.status === 404 ? '이 호를 찾지 못했습니다' : '불러오지 못했습니다');
-    d = await r.json();
-  } catch (e) { box.innerHTML = `<p class="note">${esc(e.message)}</p>`; return; }
-  if (!document.body.contains(box)) return;
-  const d8 = v => { const t = String(v || ''); return t.length === 8 ? `${t.slice(0, 4)}.${t.slice(4, 6)}.${t.slice(6, 8)}` : (t || '—'); };
-  const 전유 = d.전유 || {}, 동 = d.동, 거 = d.거래 || {}, 셈 = 거.셈 || {}, 층 = d.ho && d.ho.층;
-  const 용도 = 전유.용도들 || '';
-  const 주택아님 = 용도 && !/주택|아파트/.test(용도);
-  const 용도줄 = 용도
-    ? `${esc(용도)}${주택아님 ? ` <span class="pill">주택 아님</span>` : ''}`
-    : gapCell('', 'SCOPE', '이 호의 전유부 용도를 아직 받아오지 않았습니다');
-  const 해 = 동 && /^\d{8}$/.test(String(동.사용승인일 || '')) ? new Date().getFullYear() - Number(String(동.사용승인일).slice(0, 4)) : null;
-  const 건물줄 = 동 ? [
-      ['이 동 주용도', `${esc(동.주용도 || '—')}${동.기타용도 && 동.기타용도 !== 동.주용도 ? ` <span class="muted">(${esc(동.기타용도)})</span>` : ''}`],
-      ['사용승인', `${d8(동.사용승인일)}${해 != null ? ` <span class="muted">· ${해 > 0 ? `${해}년 전` : '올해'}</span>` : ''}`],
-      ['구조', esc(동.구조 || '—')],
-      ['층', `지상 ${fmt(동.지상)}${Number(동.지하) ? ` · 지하 ${fmt(동.지하)}` : ''}`],
-      ['세대', [`${fmt(동.세대)}세대`, Number(동.가구) ? `${fmt(동.가구)}가구` : '', Number(동.호수) ? `${fmt(동.호수)}호` : ''].filter(Boolean).join(' · ') + ' <span class="muted">(이 동 표제부)</span>'],
-      ['승강기', 동.승강기 ? `${fmt(동.승강기)}대` : '<span class="muted">이 동 표제부엔 0</span>'],
-      ['주차', 동.주차 ? `${fmt(동.주차)}대 <span class="muted">(이 동 표제부 · 옥내·옥외 기계식·자주식 합)</span>`
-                     : '<span class="muted">이 동 표제부엔 0 — 단지 전체 주차는 총괄표제부(단지 상세)에 있을 수 있습니다</span>'],
-    ].map(([k, v]) => `<div class="hm-k">${k}</div><div class="hm-v">${v}</div>`).join('')
-    : `<div class="hm-k">건물</div><div class="hm-v">${gapCell('', 'SCOPE', '이 동의 표제부를 찾지 못했습니다')}</div>`;
-  const 표 = (rows, kind) => rows.length ? `<table class="hm-t"><tbody>${rows.map(x => `<tr class="${x.is_canceled ? 'canc' : ''}">
-      <td>${d8(x.deal_ymd)}</td>
-      <td class="n">${kind === '매매' ? eok(x.deal_amount) : kind === '전세' ? eok(x.deposit) : `${eok(x.deposit)} / 월 ${fmt(Math.round(Number(x.monthly_rent || 0) / 10000))}만`}</td>
-      <td class="n">${x.floor_no != null ? `${x.floor_no}층${층 != null && Number(x.floor_no) === Number(층) ? ' <span class="pill">같은 층</span>' : ''}` : ''}</td>
-      <td>${x.is_canceled ? '<span class="pill">해제</span>' : ''}${/직거래/.test(x.dealing_gbn || '') ? '<span class="pill">직거래</span>' : ''}${/갱신/.test(x.contract_type || '') ? '<span class="pill">갱신</span>' : ''}</td></tr>`).join('')}</tbody></table>`
-    : `<p class="muted">없음</p>`;
-  const 율 = 거.전세가율;
-  const 거래칸 = 거.묶음 == null
-    ? `<p class="note">${gapCell('', 'SCOPE', '이 호의 전용면적이 없어 같은 평형 거래를 고를 수 없습니다')}</p>`
-    : `<p class="muted">같은 단지 · 전용 <b>${fmt(거.묶음)}㎡대</b>(정수 묶음 — 단지 상세 평형 표와 같음) · 매매 ${fmt(셈.매매 || 0)}건${셈.해제 ? ` (해제 ${fmt(셈.해제)})` : ''} · 전세 ${fmt(셈.전세 || 0)} · 월세 ${fmt(셈.월세 || 0)}${셈.처음 ? ` · ${d8(셈.처음)}~${d8(셈.끝)}` : ''}.
-         실거래에는 <b>동·호가 없어</b> 이 호의 거래인지는 알 수 없습니다 — 층이 같으면 표시합니다.</p>
-       <div class="hm-k2">최근 매매</div>${표(거.매매 || [], '매매')}
-       <div class="hm-k2">최근 전세</div>${표(거.전세 || [], '전세')}
-       ${(거.월세 || []).length ? `<div class="hm-k2">최근 월세</div>${표(거.월세, '월세')}` : ''}
-       ${율 ? `<p class="hm-s2">전세가율 <b>${Number(율.전세가율).toFixed(1)}%</b>
-           <span class="muted">최근 순수 전세 ${eok(율.전세금)}(${d8(율.전세일)}) ÷ 최근 중개 매매 ${eok(율.매매가)}(${d8(율.매매일)})${Number(율.개월차) >= 12 ? ` · <b>${fmt(율.개월차)}개월 떨어진 거래</b>라 같은 시점 값이 아닙니다` : ` · ${fmt(율.개월차)}개월 차`}</span></p>`
-         : `<p class="muted">전세가율: 이 평형에 중개 매매와 순수 전세가 둘 다 있어야 냅니다 — 없습니다</p>`}`;
-  const 정비 = (d.정비 || []).length
-    ? `<div class="hm-k">정비구역</div><div class="hm-v">${d.정비.map(z => `${esc(z.zone_nm || '')} <span class="muted">${esc([z.biz_nm, z.propel_nm].filter(Boolean).join(' · '))} · 단지 필지의 ${Number(z.걸침).toFixed(1)}%</span>`).join('<br>')}</div>` : '';
-  box.innerHTML = `<div class="hm-f hm-f2"><div class="hm-k">대장 용도</div><div class="hm-v">${용도줄}</div>${건물줄}${정비}</div>
-    <div class="hm-k2">같은 평형 실거래</div>${거래칸}
-    <p class="muted">어떻게 이었나: <a href="#policy" data-pol-go="호자료" data-ho-close>정책</a></p>`;
+/* ---------------- 호에서 이어서 보기 (2026-10-23 사장님 원칙: 중복 데이터 없고 · 연계된 데이터를 보기 좋게 · 틀린 데이터 없고) ----------------
+   ★ 처음엔 호 상세 안에 그 동 표제부 · 같은 평형 실거래 · 정비구역을 **다시 적었다** — 전부 다른 칸에 이미 있는 값이라 중복이었다.
+   ★ 그래서 숫자를 다시 적지 않고 **그 칸으로 가는 길**만 둔다: 이 호의 전용면적 묶음(㎡ 정수 = 실거래 탭 평형 칩과 같은 키)으로 걸러진 실거래 탭 ·
+     단지가 걸친 정비구역 칸. 갈 곳이 없으면(그 평형 거래가 없으면) 길도 안 보인다. */
+function 호이어서(pv) {
+  const d = lastDetail || {};
+  const g = pv && pv.면적 != null ? String(Math.floor(Number(pv.면적))) : null;
+  const 평형거래 = g == null ? 0 : (d.tradeStats || []).filter(r => r.area_grp != null && String(r.area_grp) === g && (!r.area_src || r.area_src === '전용'))
+    .reduce((t, r) => t + (Number(r.cnt) || 0), 0);
+  const 길 = [];
+  if (평형거래) 길.push(`<button type="button" class="achip" data-hogo="price" data-area="${esc(g)}">이 평형 실거래 <b>${fmt(평형거래)}</b> <span class="muted">전용 ${esc(g)}㎡대</span></button>`);
+  if ((d.redev || []).length) 길.push(`<button type="button" class="achip" data-hogo="land">정비구역 <b>${fmt(d.redev.length)}</b></button>`);
+  return 길.length ? `<div class="hm-go"><span class="muted">이어서 보기</span>${길.join('')}</div>` : '';
 }
+document.addEventListener('click', e => {
+  const b = e.target.closest('#homodal [data-hogo]');
+  if (!b || !lastDetail) return;
+  $('#homodal').classList.remove('on');
+  detailTab = b.dataset.hogo;
+  if (detailTab === 'price') { tradeArea = b.dataset.area || null; 거래Shown = 10; }
+  renderDetail(lastDetail);
+  setTimeout(() => {
+    const t = document.querySelector(detailTab === 'land' ? '#detail [data-redev], #detail .rdv' : '#detail .apick');
+    if (t) t.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, 300);
+});
 
 /* 동 이름을 뽑는 **단 하나의 규칙**. 대장에 이름이 세 칸으로 흩어져 있고
    단지마다 채워진 칸이 다르다(269 는 bld_nm 만, 다른 곳은 dong_nm 만).
@@ -5410,6 +5378,7 @@ async function 이용그리기() {
    ★ 키는 SRC(출처 배지)의 키와 같다 — 배지 → 절이 끊기지 않게. */
 const 정책 = [
   { 키: '공통', 제목: '공통 원칙', 글: [
+    '세 가지를 지킵니다 — <b>중복 데이터 없이</b>(같은 값은 한 칸에만 두고, 다른 곳에서는 그 칸으로 가는 길만 둡니다) · <b>이어진 데이터를 보기 좋게</b> · <b>틀린 데이터 없이</b>.',
     '국가가 공개한 데이터를 <b>원본 그대로</b> 보여 줍니다. 값을 고치거나 지어내지 않고, 모르는 것은 모른다고 적습니다.',
     '서로 다른 자료는 <b>코드·지번(PNU)·좌표·면적</b>으로만 잇습니다. <b>이름으로는 잇지 않습니다.</b> 코드가 없어 다른 단서(날짜·세대수 등)로 이은 것은 <b>추정 연결</b>이라고 표시합니다.',
     '빈칸의 뜻을 가릅니다 — <b>SCOPE</b> 아직 안 받음 · <b>EMPTY</b> 받았는데 없음 · <b>NA</b> 해당 없음 · <b>UNSURE</b> 확인 못 함.',
@@ -5469,14 +5438,13 @@ const 정책 = [
     'AI 검색 질문 문장은 기능 개선을 위해 로그인 아이디와 함께 보관합니다.',
   ] },
   { 키: '역사', 제목: '이 땅의 역사 (단지 상세 · 토지·허가 탭)', 글: [
-    '<b>새로 잇지 않습니다.</b> 이미 이어 둔 자료만 날짜순으로 한 줄씩 모읍니다 — 날짜는 원문 그대로이고 없는 날짜는 메우지 않습니다(\'날짜 없음\' 으로 끝에).',
-    '<b>옛 건물</b> = 이 단지 필지의 폐쇄·말소 대장(또는 폐쇄 대장에서 지금 단지로 이어 둔 것) — 사용승인 · 말소/폐쇄 날. <b>옛 건물 실거래</b> = 그 지번으로 신고되고 어느 단지에도 안 붙은 거래 중 대장이 닫힌 날 전 것. <b>정비구역</b> = 단지 필지의 1% 이상 걸친 서울 정비사업 구역(지정일 · 지금 단계 · 계획 세대는 서울 정비계획 자료로 이어 둔 것). <b>건축 허가 · 착공</b> = 이 단지 필지의 건축인허가. <b>청약 공고</b> = 이 단지에 이은 공고. <b>분양권·입주권</b> = 실거래 탭과 같은 규칙. 끝으로 지금 대장 사용승인과 이 단지 실거래 시작.',
+    '<b>새로 잇지 않습니다.</b> 이미 이어 둔 자료의 <b>날짜만</b> 모은 목차입니다 — 건수 · 세대 · 금액 같은 값은 다시 적지 않고(중복 없음), 줄을 누르면 그 값이 있는 칸으로 갑니다(옛 대장 줄은 지도에 그 자리도 표시). 날짜는 원문 그대로이고 없는 날짜는 메우지 않습니다.',
+    '들어가는 일: <b>옛 건물</b>(이 단지 필지의 폐쇄·말소 대장, 또는 폐쇄 대장에서 지금 단지로 이어 둔 것)의 사용승인 · 그 지번 옛 실거래(어느 단지에도 안 붙은 것, 대장 닫힌 날 전)의 시작 · 말소/폐쇄 · <b>정비구역</b>(필지의 1% 이상 걸친 서울 정비사업 구역 — 지정일 · 지금 단계의 날짜) · 이 단지 필지의 <b>건축 허가 · 착공</b> · 이 단지에 이은 <b>청약 공고</b> · <b>분양권·입주권</b> 거래 시작(실거래 탭과 같은 규칙) · 지금 대장 사용승인 · 이 단지 실거래 시작.',
     '이 단지 앞의 일(옛 대장 · 정비구역 · 인허가 · 청약 · 분양권)이 하나도 없으면 칸을 보이지 않습니다. 재건축으로 지번이 바뀐 단지(예: 가락시영 → 헬리오시티)는 옛 대장이 다른 지번에 있어 이어 두지 않은 한 여기 나오지 않습니다.',
   ] },
-  { 키: '호자료', 제목: '호 상세 — 이어진 자료', 글: [
-    '단지 상세의 동 구성(동·호 배치도)에서 <b>호 칸을 누르면</b> 그 호의 공시가격 회차 · 면적 아래에 <b>그 호에서 이어지는 자료</b>를 같이 보입니다 — 원본과 이은 결과만이고 판정 · 점수는 내지 않습니다.',
-    '<b>대장 용도</b>는 그 호 전유부의 용도 원문입니다(주택이 아니면 \'주택 아님\' 표시). <b>이 동</b>은 그 호가 든 동의 표제부(주용도 · 사용승인 · 구조 · 층 · 세대 · 승강기 · 주차) 원문입니다. 단지가 서울 정비사업 구역에 필지의 1% 이상 걸쳐 있으면 구역 · 사업 · 진행 단계(정비사업 자료 원문)를 적습니다.',
-    '<b>같은 평형 실거래</b>: 실거래에는 동·호가 없어서 <b>이 호의 거래인지 알 수 없습니다</b>. 같은 단지 · 같은 전용면적 묶음(㎡ 정수 — 단지 상세 평형 표와 같은 묶음)의 최근 매매 · 전세(월세 0) · 월세를 보이고, 층이 이 호와 같으면 표시합니다. 해제 · 직거래 · 갱신은 원문 표시 그대로. 전세가율은 단지 상세와 같은 정의(최근 순수 전세 1건 ÷ 최근 중개 매매 1건)이고 두 거래가 1년 넘게 떨어지면 그렇게 적습니다.',
+  { 키: '호자료', 제목: '호 상세 — 이어서 보기', 글: [
+    '동·호 배치도에서 호를 누르면 그 호의 공시가격 회차 · 면적 아래에 <b>이어서 보기</b>가 있습니다 — 같은 값을 여기 다시 적지 않고(중복 없음) 그 값이 있는 칸으로 바로 갑니다.',
+    '<b>이 평형 실거래</b> = 이 호의 전용면적 묶음(㎡ 정수 — 실거래 탭 평형 칩과 같은 키)으로 걸러진 실거래 탭. 실거래에는 동·호가 없어 <b>이 호의 거래</b>가 아니라 같은 단지 · 같은 평형의 거래입니다. 그 평형 거래가 없으면 길도 안 보입니다. <b>정비구역</b> = 단지가 걸친 정비사업 구역 칸(토지·허가 탭).',
   ] },
   { 키: 'kapt', 제목: 'K-apt 공동주택관리정보', 글: [
     'K-apt 는 단지 코드를 대장과 공유하지 않아 <b>법정동 + 사용승인일</b>, 또는 <b>공식 도로명코드+건물번호 · 공식 지번 + 세대 5% 안</b>으로 잇습니다(양쪽 하나씩일 때만). 자세한 규칙은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',
@@ -6508,8 +6476,10 @@ document.addEventListener('click', e => {
   setTimeout(() => { const b = document.querySelector('#detail .clbox'); if (b) b.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 400);
 });
 /* ---------------- 이 땅의 역사 (2026-10-23 사장님 "2번은 좋은거같아") ----------------
-   ★ 새로 잇지 않는다 — 이미 이어 둔 것(옛 대장 · 옛 거래 · 정비구역 · 인허가 · 청약 · 분양권 · 지금 대장 · 실거래)을 **시간순으로 한 줄씩**.
-   ★ 날짜는 원문 그대로. 날짜가 없는 일은 끝에 날짜 없이. 이 단지 '앞의 일' 이 하나도 없으면 칸을 안 보인다(사용승인 · 실거래만으로는 역사가 아니다). */
+   ★ 새로 잇지 않는다 — 이미 이어 둔 것(옛 대장 · 옛 거래 · 정비구역 · 인허가 · 청약 · 분양권 · 지금 대장 · 실거래)을 **시간순 목차**로.
+   ★ 사장님 원칙(18:11) "중복 데이터 없고 · 연계된 데이터를 보기 좋게 · 틀린 데이터 없고" — 숫자(건수 · 세대 · 면적)는 **다시 적지 않는다**.
+     줄마다 날짜 · 무슨 일 · 어디에 있는지만 적고, 누르면 그 값이 있는 칸으로 간다(옛 대장 줄은 지도에 그 자리도 그린다).
+   ★ 날짜는 원문 그대로. 날짜가 없는 일은 끝에. 이 단지 '앞의 일' 이 하나도 없으면 칸을 안 보인다. */
 async function 역사채우기() {
   const box = document.querySelector('#detail .hsbox');
   if (!box) return;
@@ -6521,48 +6491,60 @@ async function 역사채우기() {
   const 숫 = v => String(v || '').replace(/[^0-9]/g, '');
   const 날 = v => { const t = 숫(v); return t.length >= 8 ? `${t.slice(0, 4)}.${t.slice(4, 6)}.${t.slice(6, 8)}` : t.length === 6 ? `${t.slice(0, 4)}.${t.slice(4, 6)}` : ''; };
   const ev = [];
-  const 넣 = (날짜, 무엇, 보조, 출처, 키2) => ev.push({ d: 숫(날짜).slice(0, 8), 무엇, 보조, 출처, 키2 });
-  const 옛 = (d.옛대장 && d.옛대장.줄) || [];
-  for (const s of 옛) {
+  /* 간다 = [탭, 그 칸 제목] · 폐쇄 = 지도에 그릴 옛 대장 키 */
+  const 넣 = (날짜, 무엇, 간다, 출처, 폐쇄) => ev.push({ d: 숫(날짜).slice(0, 8), 무엇, 간다, 출처, 폐쇄 });
+  const 옛칸 = ['land', '이 필지의 옛 대장'];
+  for (const s of ((d.옛대장 && d.옛대장.줄) || [])) {
     const 이름 = s.이름 || s.주용도 || '이름 없는 건물';
-    const 규모 = [s.동수 ? `${fmt(s.동수)}동` : '', Number(s.총괄세대) ? `${fmt(s.총괄세대)}세대` : ''].filter(Boolean).join(' · ');
-    if (s.사용승인일) 넣(s.사용승인일, `옛 건물 사용승인 — ${이름}`, 규모, '폐쇄·말소 대장', s.site_key);
-    const n = Number(s.매매 || 0) + Number(s.전월세 || 0);
-    if (n) 넣(s.처음, `옛 건물 실거래 ${fmt(n)}건`, `매매 ${fmt(s.매매 || 0)} · 전월세 ${fmt(s.전월세 || 0)} · ${날(s.처음)}~${날(s.끝)} · 그 지번에 신고되고 어느 단지에도 안 붙은 거래`, '국토부 실거래', s.site_key);
-    if (s.shter_day) 넣(s.shter_day, `옛 대장 ${s.폐쇄구분 || '폐쇄'} — ${이름}`, 규모, '폐쇄·말소 대장', s.site_key);
+    if (s.사용승인일) 넣(s.사용승인일, `옛 건물 사용승인 — ${이름}`, 옛칸, '폐쇄·말소 대장', s.site_key);
+    if (Number(s.매매 || 0) + Number(s.전월세 || 0)) 넣(s.처음, `옛 건물 실거래 시작 — ${이름}`, 옛칸, '국토부 실거래', s.site_key);
+    if (s.shter_day) 넣(s.shter_day, `옛 대장 ${s.폐쇄구분 || '폐쇄'} — ${이름}`, 옛칸, '폐쇄·말소 대장', s.site_key);
   }
   for (const z of (d.정비 || [])) {
-    if (z.지정일) 넣(z.지정일, `정비구역 지정 — ${z.zone_nm || z.사업명 || ''}`, z.biz_nm || '', '서울 정비사업');
-    넣(z.추진일 || '', `추진 단계 '${z.추진단계 || z.propel_nm || '모름'}' — ${z.zone_nm || ''}`, `단지 필지의 ${Number(z.걸침).toFixed(1)}%가 구역 안${z.공급세대 ? ` · 계획 ${fmt(z.공급세대)}세대` : ''}`, '서울 정비사업');
+    if (z.지정일) 넣(z.지정일, `정비구역 지정 — ${z.zone_nm || z.사업명 || ''}`, ['land', '정비사업 구역'], '서울 정비사업');
+    if (z.추진일) 넣(z.추진일, `${z.추진단계 || z.propel_nm || '추진 단계'} — ${z.zone_nm || ''}`, ['land', '정비사업 구역'], '서울 정비사업');
   }
-  /* 구분 · 용도 · 세대가 다 빈 인허가(원문이 비었다)는 한 줄로 묶는다 — 날짜만 있는 줄이 역사를 덮는다 */
-  const 빈허가 = (d.인허가 || []).filter(a => !a.arch_gb_nm && !a.main_purps_nm && !Number(a.hhld_cnt));
-  if (빈허가.length) { const ds = 빈허가.map(a => 숫(a.arch_pms_day)).filter(Boolean).sort();
-    넣(ds[0] || '', `건축인허가 ${fmt(빈허가.length)}건 — 구분 · 용도 원문 없음`, ds.length > 1 ? `허가일 ${날(ds[0])}~${날(ds[ds.length - 1])}` : '', '건축인허가'); }
-  for (const a of (d.인허가 || []).filter(a => !빈허가.includes(a)).slice(0, 5)) {
-    const 무엇 = [a.arch_gb_nm || '구분 원문 없음', a.main_purps_nm].filter(Boolean).join(' · ');
-    const 규모 = [a.tot_area ? `연면적 ${fmt(Math.round(a.tot_area))}㎡` : '', Number(a.hhld_cnt) ? `${fmt(a.hhld_cnt)}세대` : ''].filter(Boolean).join(' · ');
-    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, 규모, '건축인허가');
-    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, 규모, '건축인허가');
+  /* 구분 · 용도가 둘 다 빈 인허가는 첫 허가일 한 줄로만(같은 말 '인허가' 줄이 일곱 번 이어지면 목차가 아니다) */
+  const 빈 = (d.인허가 || []).filter(a => !a.arch_gb_nm && !a.main_purps_nm).map(a => 숫(a.arch_pms_day)).filter(Boolean).sort();
+  if (빈.length) 넣(빈[0], '건축 허가 — 구분 원문 없음(첫 허가)', ['land', '건축인허가'], '건축인허가');
+  for (const a of (d.인허가 || []).filter(a => a.arch_gb_nm || a.main_purps_nm)) {
+    const 무엇 = a.arch_gb_nm || a.main_purps_nm;
+    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, ['land', '건축인허가'], '건축인허가');
+    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, ['land', '건축인허가'], '건축인허가');
   }
-  for (const p of (d.청약 || []))
-    넣(p.rcrit_pblanc_de, `청약 공고 — ${p.house_nm || ''}`, [공고종류말[p.공고종류] || p.공고종류, p.tot_suply ? `공급 ${fmt(p.tot_suply)}` : '', p.mvn_prearnge_ym ? `입주 예정 ${날(p.mvn_prearnge_ym)}` : ''].filter(Boolean).join(' · '), '청약홈');
+  for (const p of (d.청약 || [])) 넣(p.rcrit_pblanc_de, `청약 공고 — ${p.house_nm || ''}`, ['sale', '분양'], '청약홈');
   const 권 = d.분양권 || {};
-  if (Number(권.건수)) 넣(권.처음, `분양권·입주권 거래 ${fmt(권.건수)}건`, `${날(권.처음)}~${날(권.끝)}${Number(권.입주권) ? ` · 입주권 ${fmt(권.입주권)}` : ''} · 실거래 탭과 같은 규칙`, '국토부 분양권전매');
-  const 앞 = ev.length;
-  if (!앞) { 지금.innerHTML = ''; return; }
+  if (Number(권.건수)) 넣(권.처음, '분양권·입주권 거래 시작', ['price', '거래 내역'], '국토부 분양권전매');
+  if (!ev.length) { 지금.innerHTML = ''; return; }
   const c = d.단지 || {};
-  if (c.oldest_use_apr) 넣(c.oldest_use_apr, `사용승인 — 지금 대장${c.latest_use_apr && c.latest_use_apr !== c.oldest_use_apr ? `(마지막 동 ${날(c.latest_use_apr)})` : ''}`, [c.dong_cnt ? `${fmt(c.dong_cnt)}동` : '', c.hhld_cnt_sum ? `${fmt(c.hhld_cnt_sum)}세대` : ''].filter(Boolean).join(' · '), '건축물대장');
-  const 실 = d.실거래 || {};
-  if (실.처음) 넣(실.처음, `이 단지 실거래 시작`, `매매 ${fmt(실.매매 || 0)} · 전월세 ${fmt(실.전월세 || 0)} · 마지막 ${날(실.끝)}`, '국토부 실거래');
+  if (c.oldest_use_apr) 넣(c.oldest_use_apr, '사용승인 — 지금 대장', ['info', '단지 요약'], '건축물대장');
+  if ((d.실거래 || {}).처음) 넣(d.실거래.처음, '이 단지 실거래 시작', ['price', '거래 내역'], '국토부 실거래');
   ev.sort((a, b) => (a.d ? 0 : 1) - (b.d ? 0 : 1) || a.d.localeCompare(b.d));
-  const 더 = d.옛대장 && d.옛대장.전체 > 옛.length ? `<p class="srcline">옛 대장 ${fmt(d.옛대장.전체)}묶음 중 세대·동이 큰 ${fmt(옛.length)}묶음만 적었습니다 — 아래 '옛 대장' 칸에 다 있습니다.</p>` : '';
-  지금.innerHTML = `${sect('이 땅의 역사', 'hist', ` ${fmt(ev.length)}`)}
-    <ol class="hist">${ev.map(e => `<li${e.키2 ? ` data-clsite="${esc(e.키2)}" role="button" tabindex="0" title="누르면 지도에 그 옛 대장 자리를 표시합니다 · 다시 누르면 지웁니다"` : ''}>
+  /* 같은 날 · 같은 일은 한 줄(인허가가 같은 날 여러 건) */
+  const 줄 = ev.filter((e, i) => !ev.slice(0, i).some(x => x.d === e.d && x.무엇 === e.무엇));
+  지금.innerHTML = `${sect('이 땅의 역사', 'hist')}
+    <ol class="hist">${줄.map(e => `<li data-histgo="${esc(e.간다.join('|'))}"${e.폐쇄 ? ` data-histcl="${esc(e.폐쇄)}"` : ''} role="button" tabindex="0" title="누르면 그 칸으로 갑니다${e.폐쇄 ? ' · 지도에 그 옛 대장 자리를 표시합니다' : ''}">
       <span class="hist-d">${esc(날(e.d) || '날짜 없음')}</span>
-      <span class="hist-w"><b>${esc(e.무엇)}</b>${e.보조 ? `<span class="muted"> ${esc(e.보조)}</span>` : ''}<span class="hist-s">${esc(e.출처)}</span></span></li>`).join('')}</ol>
-    ${더}<p class="srcline">이미 이어 둔 자료만 날짜순으로 모았습니다 — 새로 잇지 않고, 날짜는 원문 그대로입니다. 어떻게 이었나: <a href="#policy" data-pol-go="역사">정책</a></p>`;
+      <span class="hist-w">${esc(e.무엇)}<span class="hist-s">${esc(e.출처)} · ${esc(e.간다[1])} 칸</span></span></li>`).join('')}</ol>
+    <p class="srcline">이미 이어 둔 자료의 날짜만 모은 목차입니다 — 값은 각 칸에 있습니다. 어떻게 이었나: <a href="#policy" data-pol-go="역사">정책</a></p>`;
 }
+document.addEventListener('click', async e => {
+  const li = e.target.closest('#detail [data-histgo]');
+  if (!li || !lastDetail) return;
+  const [탭, 칸] = li.dataset.histgo.split('|');
+  const 옛 = li.dataset.histcl;
+  if (탭 !== detailTab) { detailTab = 탭; renderDetail(lastDetail); }
+  setTimeout(() => {
+    const t = [...document.querySelectorAll('#detail .sect')].find(x => x.textContent.trim().startsWith(칸));
+    if (t) t.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, 350);
+  if (옛) {
+    try {
+      const r = await fetch(`/api/closed/site/${encodeURIComponent(옛)}`).then(x => x.json());
+      if (!r.error) 닫힌자리그리기(r, 'clmap:' + 옛);
+    } catch (x) { /* 지도 표시는 덤 — 못 그려도 칸 이동은 했다 */ }
+  }
+});
 async function 폐쇄채우기() {
   const box = document.querySelector('#detail .clbox');
   if (!box) return;
