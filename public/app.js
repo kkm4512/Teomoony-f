@@ -4081,7 +4081,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt) {
 function renderDetail(payload) {
   lastDetail = payload;
   const { complex: c, dongs, parcels, tradeStats, offsite, spec, permits, permitDongs, kapt, cost,
-          floors, hos, scope, 호총수, 전용률, 호공시, 공시적재, 거래목록, zones, redev, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, vlrat, busRoutes, busList, 좌표없음, kinders, kinderLoaded, jeonse, academy } = payload;
+          floors, hos, scope, 호총수, 전용률, 호공시, 공시적재, 거래목록, zones, redev, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, vlrat, busRoutes, busList, 좌표없음, kinders, kinderLoaded, jeonse, academy, schoolList } = payload;
   /* 실거래는 평형(전용면적) 단위로 묶어서 본다. 동/호 특정은 하지 않는다.
      (아파트 매매 말고는 동 정보가 API 에 아예 없다. ../Teomoony/CONTEXT.md 4절) */
   const stats = tradeStats || [];
@@ -4346,11 +4346,13 @@ function renderDetail(payload) {
      '전체'(브라운스톤 돈암 6 · 센트라스 11)인데 탭에는 4만 들어가 두 숫자가 어긋났다.
      같은 사실은 한 곳에서 — 머리글과 같은 '전체' 를 쓴다(작업방식 10장). */
   const subN = sub.length ? (Number(sub[0].전체) || sub.length) : 0;
-  const nearN = subN + (bus && Number(bus.r500) || 0)
-              + sch.reduce((t, x) => t + Number(x.r1000 || 0), 0);
+  /* 2026-10-24 학교는 '교육' 탭으로 — 주변 숫자는 지하철 + 버스(500m) 만 */
+  const nearN = subN + (bus && Number(bus.r500) || 0);
   const TABS = [
     ['info',  `단지정보`],
     ['near',  `주변 <b>${fmt(nearN)}</b>`],
+    /* 2026-10-24 사장님 "어린이집·유치원·초등·중등·고등은 주변에서 분리" — 나이 순(어린이집 → 고등). 학원은 주변에 그대로(사장님) */
+    ['edu',   `교육`],
     ['dong',  `동·호 <b>${fmt(dongN)}</b>`],
     ['mgmt',  `관리`],
     ['price', `실거래 <b>${fmt(saleN + rentN)}</b>`],
@@ -4529,60 +4531,6 @@ function renderDetail(payload) {
           ? gapCell('', 'NA', '단지 500m 안에 버스정류장이 없습니다')
           : gapCell('', 'SCOPE', '버스정류장을 아직 적재하지 않았습니다')}</p>`}
 
-    ${/* ★ 2026-10-21 QA: 이 머리글만 **1km 기준**인데 지도 점은 뷰 그대로 **2km** 다.
-          다른 절(지하철·버스·유치원)은 머리글 = 점이라, 학교만 "7" 인데 점이 26개
-          찍혀 어긋나 보였다. 실측으로 점 = r2000 이 **정확히 맞는 것**은 확인했다
-          (6단지 · 학교급별까지 전부 일치) — 즉 수가 틀린 게 아니라 **기준을 안 적은** 것이다.
-          숫자를 바꾸지 않고 **기준을 적는다.** 자르는 곳마다 무엇을 기준으로 셌는지 밝힌다. */''}
-    ${sect('주변 학교', 'school', sch.length
-        ? ` ${fmt(sch.reduce((t,x)=>t+Number(x.r1000||0),0))}<span class="muted">· 1km</span>` : '')}
-    ${sz.length ? `
-      <div class="zrow2">
-        <span class="zt">배정 초등</span>
-        <b>${sz.map(z => esc(z.학구)).join(' / ')}</b>
-        ${sz.some(z => Number(z.공동)) ? '<span class="zb">공동통학구역</span>' : ''}
-      </div>
-      <p class="note sm">${esc((sz[0] && sz[0].교육지원청) || '')} · 기준일 ${esc((sz[0] && sz[0].기준일) || '')}</p>` : `
-      <p class="note sm">${gapCell('', schoolZoneLoaded ? 'UNSURE' : 'SCOPE',
-        schoolZoneLoaded
-          ? '단지 중심점이 어느 통학구역에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다'
-          : '이 지역의 통학구역(학구도)을 아직 받지 않았습니다 — 원본이 빠진 게 아닙니다')}</p>`}
-    ${sch.length ? `
-      <div class="schrow">${sch.map(x => `
-        <div class="scell" data-pt="school|${esc(x.학교급)}">
-          <span class="sg">${esc(x.학교급)}</span>
-          <b>${esc(x.가까운곳 || '—')}</b>
-          <span class="sd">${fmt(x.최단m)}m${x.설립 ? ' · ' + esc(x.설립) : ''}</span>
-          ${학교공시줄(x)}
-          <span class="sn">1km 안 ${fmt(x.r1000)}곳 · 2km 안 ${fmt(x.r2000)}곳</span>
-        </div>`).join('')}</div>
-      ${sch.some(x => x.학생 != null) ? `<p class="note sm">학생 · 학급 · 교사 수는 <b>학교알리미 ${esc(String(Math.max(...sch.filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</b>(학년별·학급별 학생수) 그대로입니다 — 학급당 학생 수 · 수업교원 1인당 학생 수도 공시값이며 우리가 나누지 않았습니다.
-        학교는 코드 규칙(학교급 · 설립일 · 법정동)으로만 이었습니다.</p>` : ''}
-      `
-      : `<p class="note">${gapCell('', 'SCOPE',
-          '이 단지 2km 안에 초·중·고가 없거나, 단지 좌표가 없습니다')}</p>`}
-
-    ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
-    ${kin.length ? `
-      <div class="schrow">${kin.map(x => `
-        <div class="scell" data-pt="kinder|" data-pt-r="500">
-          <span class="sg">${esc((x.설립 || '').replace(/\s/g, '') || '—')}</span>
-          <b>${esc(x.이름 || '—')}</b>
-          <span class="sd">${fmt(x.거리m)}m${
-            x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${
-            x.원아 != null ? ` · 원아 ${fmt(x.원아)}` : ''}</span>
-          <span class="sn">${x.학급 != null ? `${fmt(x.학급)}학급` : ''}${
-            x.운영시간 ? ' · ' + esc(x.운영시간) : ''}${
-            x.공시 ? ` · <b>${esc(String(x.공시).slice(0, 4))}년 ${
-              esc(String(x.공시).slice(4))}차 공시</b>` : ''}</span>
-        </div>`).join('')}</div>
-      ${(Number(kin[0].전체) || 0) > kin.length ? `<p class="note sm">500m 안 ${fmt(kin[0].전체)}곳 중 가까운 ${fmt(kin.length)}곳</p>` : ''}`
-      : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
-          kinderLoaded
-            ? '이 단지 500m 안에 유치원이 없습니다'
-            : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
-
-    <div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>
 
     ${학원칸(academy)}
 
@@ -4623,6 +4571,63 @@ function renderDetail(payload) {
           '이 법정동의 상가업소를 아직 받아오지 않았습니다')}</p>`}
 
 
+`;
+
+
+  /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 (나이 순). 학원은 주변 탭(사장님) */
+  const paneE = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 <b>중심좌표가 아직 없습니다</b> — 어린이집·유치원·학교는 거리로 찾으므로 <b>볼 수 없습니다.</b></div>` : `
+    <div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>
+    ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
+    ${kin.length ? `
+      <div class="schrow">${kin.map(x => `
+        <div class="scell" data-pt="kinder|" data-pt-r="500">
+          <span class="sg">${esc((x.설립 || '').replace(/\s/g, '') || '—')}</span>
+          <b>${esc(x.이름 || '—')}</b>
+          <span class="sd">${fmt(x.거리m)}m${
+            x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${
+            x.원아 != null ? ` · 원아 ${fmt(x.원아)}` : ''}</span>
+          <span class="sn">${x.학급 != null ? `${fmt(x.학급)}학급` : ''}${
+            x.운영시간 ? ' · ' + esc(x.운영시간) : ''}${
+            x.공시 ? ` · <b>${esc(String(x.공시).slice(0, 4))}년 ${
+              esc(String(x.공시).slice(4))}차 공시</b>` : ''}</span>
+        </div>`).join('')}</div>
+      ${(Number(kin[0].전체) || 0) > kin.length ? `<p class="note sm">500m 안 ${fmt(kin[0].전체)}곳 중 가까운 ${fmt(kin.length)}곳</p>` : ''}`
+      : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
+          kinderLoaded
+            ? '이 단지 500m 안에 유치원이 없습니다'
+            : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
+
+    ${sect('배정 초등학교', 'school')}
+    ${sz.length ? `
+      <div class="zrow2">
+        <span class="zt">배정 초등</span>
+        <b>${sz.map(z => esc(z.학구)).join(' / ')}</b>
+        ${sz.some(z => Number(z.공동)) ? '<span class="zb">공동통학구역</span>' : ''}
+      </div>
+      <p class="note sm">${esc((sz[0] && sz[0].교육지원청) || '')} · 기준일 ${esc((sz[0] && sz[0].기준일) || '')} — 단지 중심점 한 점으로 판정(큰 단지는 동마다 다를 수 있음)</p>` : `
+      <p class="note sm">${gapCell('', schoolZoneLoaded ? 'UNSURE' : 'SCOPE',
+        schoolZoneLoaded
+          ? '단지 중심점이 어느 통학구역에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다'
+          : '이 지역의 통학구역(학구도)을 아직 받지 않았습니다 — 원본이 빠진 게 아닙니다')}</p>`}
+    ${['초등학교', '중학교', '고등학교'].map(급 => {
+      const 요 = sch.find(x => x.학교급 === 급);
+      const 목 = (schoolList || []).filter(x => x.학교급 === 급);
+      const 짧 = 급.replace('학교', '');
+      if (!요) return `${sect(급, 'school')}<p class="note">${gapCell('', 'NA', `이 단지 2km 안에 ${짧}학교가 없습니다`)}</p>`;
+      return `${sect(급, 'school', ` ${fmt(요.r1000)}<span class="muted">· 1km</span>`)}
+        <div class="schrow">${목.map(x => `
+          <div class="scell" data-pt="school|${esc(급)}">
+            <span class="sg">${esc(x.설립 || '')}${x.분교 === '분교' ? ' 분교' : ''}</span>
+            <b>${esc(x.이름 || '—')}</b>
+            <span class="sd">${fmt(x.거리m)}m${x.남녀 && x.남녀 !== '남녀공학' ? ' · ' + esc(x.남녀 === '남' ? '남학교' : x.남녀 === '여' ? '여학교' : x.남녀) : ''}</span>
+            ${학교공시줄(x)}
+          </div>`).join('')}</div>
+        <p class="note sm">${Number(요.r1000) ? `1km 안 ${fmt(요.r1000)}곳` : `1km 안에 없어 가장 가까운 한 곳(${fmt(요.최단m)}m)`} · 2km 안 ${fmt(요.r2000)}곳 · 직선거리(배정 아님)</p>`;
+    }).join('')}
+    ${(schoolList || []).some(x => x.학생 != null) ? `<p class="note sm">학생 · 학급 · 교사 수는 <b>학교알리미 ${esc(String(Math.max(...(schoolList || []).filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</b>(학년별·학급별 학생수) 그대로입니다 — 학급당 학생 수 · 수업교원 1인당 학생 수도 공시값이며 우리가 나누지 않았습니다.
+      학교는 코드 규칙(학교급 · 설립일 · 법정동)으로만 이었습니다.</p>` : ''}
 `;
 
   /* 사는 정보 — K-apt 축. 대장에도 실거래에도 없는 것들이 여기 있다. */
@@ -4741,7 +4746,7 @@ function renderDetail(payload) {
     <p class="sub muted usecomp" data-usecomp="${esc(String(c.complex_id))}" hidden></p>
     <div class="tabs">${TABS.map(([k, label]) =>
       `<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !분양수(c.complex_id) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
-    <div class="pane">${({ info: paneI, near: paneN, dong: paneD, mgmt: paneM,
+    <div class="pane">${({ info: paneI, near: paneN, edu: paneE, dong: paneD, mgmt: paneM,
                            price: paneP, sale: paneS, land: paneL })[detailTab] || paneI}</div>`;
 
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
@@ -4761,7 +4766,7 @@ function renderDetail(payload) {
     document.title = [표시이름(c) || `단지 ${c.complex_id}`, 동네, 세대 ? `${세대.toLocaleString('ko-KR')}세대` : null].filter(Boolean).join(' · ') + ' — 터무니';
   } catch (e) {}
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
-  어린이집채우기();        // 어린이집 칸 — 주변 탭에 있을 때만 그릇이 있다
+  어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 주변 탭에 있을 때만 그릇이 있다
   약국채우기();            // 행안부 약국 인허가 칸 — 주변 탭에 있을 때만 그릇이 있다
 

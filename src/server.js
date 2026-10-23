@@ -6030,7 +6030,29 @@ app.get('/api/complexes/:id', async (req, res) => {
         OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
                             교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
                        FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
-       ORDER BY ord`);
+       ORDER BY ord;
+      /* ★ 2026-10-24 사장님 "어린이집·유치원·초·중·고는 주변에서 분리" — 교육 탭의 **학교 목록**.
+           학교급마다 1km 안 전부(가까운 순), 1km 안에 없으면 2km 안 가장 가까운 한 곳. 거리는 위 요약 · AI 검색과 **같은 뷰**(v_complex_school). */
+      WITH v AS (SELECT * FROM gold.v_complex_school WHERE complex_id = @id),
+      n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
+                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m),
+                   k1 = SUM(CASE WHEN dist_m <= 1000 THEN 1 ELSE 0 END) OVER (PARTITION BY school_se)
+              FROM v)
+      SELECT 학교급 = n.school_se, 이름 = n.school_nm, 설립 = n.fond_type, 분교 = n.bnhh_se, 거리m = CAST(n.dist_m AS INT),
+             이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
+             st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
+             남녀 = i.coedu, 홈 = i.hmpg,
+             알리미적재 = CASE WHEN EXISTS (SELECT 1 FROM silver.schoolinfo i2 JOIN gold.complex c ON c.complex_id = @id
+                                             WHERE LEFT(i2.adrcd_cd, 5) = c.sigungu_cd) THEN 1 ELSE 0 END,
+             ord = CASE n.school_se WHEN N'초등학교' THEN 1 WHEN N'중학교' THEN 2 WHEN N'고등학교' THEN 3 ELSE 9 END
+        FROM n
+        LEFT JOIN gold.school_link l ON l.school_id = n.school_id
+        LEFT JOIN silver.schoolinfo i ON i.schul_code = l.schul_code
+        OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
+                            교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
+                       FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
+       WHERE n.dist_m <= 1000 OR (n.k1 = 0 AND n.rn = 1)
+       ORDER BY ord, n.dist_m`);
 
     /* 유치원 (유치원알리미, 교육부)  2026-10-19
        ★ 학교(초·중·고)만 있으면 '애 키우기' 는 절반만 보인다.
@@ -6572,7 +6594,8 @@ app.get('/api/complexes/:id', async (req, res) => {
                poi: poi.recordset, poiSum: poiSum.recordset[0] || null,
                poiBrand: poiBrand.recordset,
                poiLife: poiLife.recordset,
-               schools: schools.recordset,
+               schools: schools.recordsets[0] || [],
+               schoolList: schools.recordsets[1] || [],
                kinders: kinders.recordset,
                academy: {
                  묶음: (aca.recordsets && aca.recordsets[0]) || [],
