@@ -4338,7 +4338,8 @@ app.get('/api/closed/site/:key', async (req, res) => {
          닫히기 전 = 옛 건물 거래 · 닫힌 뒤 = 이 자리 새 건물 거래(새 대장이 아직 없거나 다른 지번에 있다). 날짜로만 가른다 · 이름은 안 본다. */
       IF OBJECT_ID('tempdb..#ot') IS NOT NULL DROP TABLE #ot;
       SELECT t.trade_sk, t.deal_ymd, t.trade_kind, t.is_rent, t.deal_amount, t.deposit, t.monthly_rent, t.exclu_use_ar, t.floor_no,
-             t.bld_nm, t.is_canceled, 때 = CASE WHEN t.deal_ymd <= s.shter_day THEN N'전' ELSE N'뒤' END
+             t.bld_nm, t.is_canceled, 때 = CASE WHEN t.deal_ymd <= s.shter_day THEN N'전' ELSE N'뒤' END,
+             t.total_floor_ar, t.building_ar, t.dealing_gbn, t.contract_type
         INTO #ot
         FROM gold.closed_site s JOIN silver.rtms_trade t ON t.match_pnu = s.pnu
        WHERE s.site_key = @k AND LEN(s.shter_day) = 8 AND t.match_complex_id IS NULL AND t.trade_kind NOT LIKE 'SILV%';
@@ -4350,7 +4351,50 @@ app.get('/api/closed/site/:key', async (req, res) => {
       SELECT TOP 80 때, 계약일 = deal_ymd, 종류 = trade_kind, 전월세 = CAST(is_rent AS INT), 거래원 = deal_amount, 보증금 = deposit, 월세 = monthly_rent,
              전용 = exclu_use_ar, 층 = floor_no, 취소 = CAST(ISNULL(is_canceled, 0) AS INT)
         FROM (SELECT *, rn = ROW_NUMBER() OVER (PARTITION BY 때 ORDER BY deal_ymd DESC, trade_sk DESC) FROM #ot) x
-       WHERE rn <= 40 ORDER BY 때, deal_ymd DESC;`);
+       WHERE rn <= 40 ORDER BY 때, deal_ymd DESC;
+      /* ===== 2026-10-23 사장님 "폐쇄 말소대장도 기존 단지상세처럼 동호나 그런 정보들을 동일하게" (323) =====
+         동 = 이 지번의 폐쇄 표제부 전부(묶음이 여럿이면 다 — 호가 어느 묶음 것인지 원문이 안 알려 준다) ·
+         호 = 폐쇄 전유부 · 전용면적 = 폐쇄 전유공용면적의 '전유' 합 · 층 = 폐쇄 층별개요.
+         ★ 호 → 동은 **같은 지번 안에서 동명칭으로** 맞춘다 — 폐쇄 대장 기본개요에는 지금 대장처럼 '상위 대장 번호'가 없다(probe_closed_ops 실측). */
+      SELECT mgm_bldrgst_pk = t.mgm_shtreg_pk, t.dong_nm, t.bld_nm, is_recap = CAST(0 AS BIT), t.hhld_cnt, t.ho_cnt, t.main_purps_nm, t.tot_area,
+             t.regstr_kind_nm, t.grnd_flr_cnt, t.ugrnd_flr_cnt, t.shter_day, 이묶음 = CASE WHEN ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') THEN 1 ELSE 0 END
+        FROM gold.closed_site s JOIN silver.bld_closed_title t ON t.pnu = s.pnu
+       WHERE s.site_key = @k ORDER BY t.dong_nm, t.mgm_shtreg_pk;
+      SELECT mgm_bldrgst_pk = f.mgm_shtreg_pk, 동 = f.dong_nm, 층 = CASE WHEN f.flr_gb_nm = N'지하' THEN -f.flr_no ELSE f.flr_no END,
+             층명 = f.flr_no_nm, 용도 = f.main_purps_nm, 면적 = f.area, 주부속 = f.main_atch_gb_nm
+        FROM gold.closed_site s JOIN silver.bld_closed_flr f ON f.pnu = s.pnu
+       WHERE s.site_key = @k ORDER BY f.dong_nm, 층 DESC;
+      SELECT TOP 20000 호PK = e.mgm_shtreg_pk, 동PK = ISNULL(d.pk, N'이름:' + ISNULL(e.dong_nm, N'')), 동 = e.dong_nm, 호_동명 = e.dong_nm,
+             층 = CASE WHEN e.flr_gb_nm = N'지하' THEN -e.flr_no ELSE e.flr_no END, 호 = e.ho_nm,
+             라인 = CASE WHEN TRY_CONVERT(INT, REPLACE(e.ho_nm, N'호', '')) / 100 = e.flr_no THEN TRY_CONVERT(INT, REPLACE(e.ho_nm, N'호', '')) % 100 END,
+             호번호 = TRY_CONVERT(INT, REPLACE(e.ho_nm, N'호', '')),
+             ea.전용면적, 평형 = CAST(FLOOR(ea.전용면적) AS INT)
+        FROM gold.closed_site s JOIN silver.bld_closed_expos e ON e.pnu = s.pnu
+        OUTER APPLY (SELECT TOP 1 pk = t.mgm_shtreg_pk FROM silver.bld_closed_title t
+                      WHERE t.pnu = e.pnu AND (t.dong_nm = e.dong_nm
+                            /* 동 이름이 양쪽 다 없으면, 이 지번에 이름 없는 동이 하나뿐일 때만 그 동 */
+                            OR (ISNULL(e.dong_nm, N'') = N'' AND ISNULL(t.dong_nm, N'') = N''
+                                AND 1 = (SELECT COUNT(*) FROM silver.bld_closed_title t2 WHERE t2.pnu = e.pnu AND ISNULL(t2.dong_nm, N'') = N'')))
+                      ORDER BY CASE WHEN ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') THEN 0 ELSE 1 END, t.hhld_cnt DESC) d
+        OUTER APPLY (SELECT 전용면적 = SUM(a.area) FROM silver.bld_closed_expos_area a
+                      WHERE a.pnu = e.pnu AND a.mgm_shtreg_pk = e.mgm_shtreg_pk AND a.expos_pubuse_gb_nm = N'전유') ea
+       WHERE s.site_key = @k ORDER BY e.dong_nm, 층 DESC, e.ho_nm;
+      /* 실거래 탭 — 단지 상세와 같은 칸(tradeList 가 읽는 모양). 옛 건물(닫히기 전) 것만 · 종류마다 120 */
+      SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수 = 0
+        FROM (SELECT 날짜 = deal_ymd, 취소 = CAST(ISNULL(is_canceled, 0) AS INT), 전월세 = CAST(is_rent AS BIT),
+                     월세냐 = CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
+                     금액 = deal_amount, 보증금 = deposit, 월세 = monthly_rent,
+                     면적 = COALESCE(exclu_use_ar, total_floor_ar, building_ar),
+                     면적칸 = CASE WHEN exclu_use_ar IS NOT NULL THEN N'전용' WHEN total_floor_ar IS NOT NULL THEN N'연' WHEN building_ar IS NOT NULL THEN N'건물' END,
+                     평형 = CAST(FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)) AS INT), 층 = floor_no,
+                     직거래 = CASE WHEN dealing_gbn LIKE N'%직거래%' THEN 1 ELSE 0 END, 갱신 = CASE WHEN contract_type = N'갱신' THEN 1 ELSE 0 END,
+                     분양권 = CAST(NULL AS NVARCHAR(10)), 근거 = CAST(NULL AS NVARCHAR(30)),
+                     전체 = COUNT(*) OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END),
+                     rn = ROW_NUMBER() OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END
+                                             ORDER BY deal_ymd DESC, trade_sk DESC)
+                FROM #ot WHERE 때 = N'전') x
+       WHERE rn <= 120 ORDER BY 전월세, 월세냐, 날짜 DESC;
+      SELECT op, 건수, 받은때 FROM silver.bld_closed_detail_done d JOIN gold.closed_site s ON s.pnu = d.pnu WHERE s.site_key = @k;`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
     const g = (r.recordsets[2] || [])[0];
@@ -4358,7 +4402,10 @@ app.get('/api/closed/site/:key', async (req, res) => {
     res.json({ 묶음: site, 동: r.recordsets[1], 필지: g && g.geojson ? JSON.parse(g.geojson) : null,
                이력: 이력줄.length ? { 받은시각: 이력줄[0].받음, 줄: 이력줄.filter(z => z.이동일 || z.이동사유) } : null,
                분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {},
-               옛거래: { 셈: r.recordsets[6] || [], 줄: r.recordsets[7] || [] } });
+               옛거래: { 셈: r.recordsets[6] || [], 줄: r.recordsets[7] || [] },
+               대장: { 동: r.recordsets[8] || [], 층: r.recordsets[9] || [], 호: r.recordsets[10] || [],
+                       받음: Object.fromEntries((r.recordsets[12] || []).map(x => [x.op, { 건수: x.건수, 받은때: x.받은때 }])) },
+               거래: r.recordsets[11] || [] });
   } catch (e) { fail(res, e, 'closed-site'); }
 });
 app.get('/api/complexes/:id/closed', async (req, res) => {
