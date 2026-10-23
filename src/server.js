@@ -6746,6 +6746,61 @@ app.get('/api/complexes/:id/geo', async (req, res) => {
   } catch (e) { fail(res, e, 'complex-geo'); }
 });
 
+/* ---------- 이 땅의 역사 (2026-10-23 사장님 "2번은 좋은거같아" — 차별점 2번) ----------
+   ★ **새로 잇지 않는다**(사장님 "매칭 무리하지 마"). 이미 이어 둔 것만 시간순으로 모은다:
+     옛 건물 = 이 단지 필지(또는 now_complex_id)의 폐쇄·말소 대장 · 옛 거래 = 그 지번에 신고됐고 어느 단지에도 안 붙은 거래(대장 닫힌 날 전) ·
+     정비구역 = 필지의 1% 이상 걸친 구역(+ 서울 정비계획 자료로 이은 것) · 인허가 = 이 단지 필지의 건축인허가 ·
+     청약 = 이 단지에 이은 공고 · 분양권·입주권 = gold.fn_complex_silv(실거래 탭과 같은 함수) · 지금 대장 사용승인 · 실거래.
+   ★ 날짜는 원문 그대로 — 고르거나 메우지 않는다. 날짜가 없는 일은 날짜 없이 적는다. */
+app.get('/api/complexes/:id/history', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1 || id > 2147483647) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    if (!(await 단지있나(pool, id))) return res.status(404).json({ error: 'not found' });
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT complex_nm, oldest_use_apr, latest_use_apr, hhld_cnt_sum, dong_cnt FROM gold.complex WHERE complex_id = @id;
+      IF OBJECT_ID('tempdb..#p') IS NOT NULL DROP TABLE #p;
+      SELECT DISTINCT pnu INTO #p FROM gold.complex_pnu WHERE complex_id = @id;
+      IF OBJECT_ID('tempdb..#s') IS NOT NULL DROP TABLE #s;
+      SELECT s.site_key, s.pnu, s.이름, s.폐쇄구분, s.shter_day, s.사용승인일, s.총괄세대, s.동수, s.주용도
+        INTO #s FROM (SELECT s.* FROM gold.closed_site s JOIN #p ON #p.pnu = s.pnu
+                      UNION SELECT s.* FROM gold.closed_site s WHERE s.now_complex_id = @id) s;
+      SELECT 전체 = COUNT(*) FROM #s;
+      SELECT TOP 12 s.*, o.매매, o.전월세, o.처음, o.끝
+        FROM #s s
+        OUTER APPLY (SELECT 매매 = SUM(CASE WHEN t.is_rent = 0 THEN 1 ELSE 0 END), 전월세 = SUM(CASE WHEN t.is_rent = 1 THEN 1 ELSE 0 END),
+                            처음 = MIN(t.deal_ymd), 끝 = MAX(t.deal_ymd)
+                       FROM silver.rtms_trade t
+                      WHERE t.match_pnu = s.pnu AND t.match_complex_id IS NULL AND t.trade_kind NOT LIKE 'SILV%' AND ISNULL(t.is_canceled, 0) = 0
+                        AND LEN(s.shter_day) = 8 AND t.deal_ymd <= s.shter_day) o
+       ORDER BY ISNULL(s.총괄세대, 0) DESC, ISNULL(s.동수, 0) DESC, s.shter_day DESC;
+      SELECT z.present_sn, z.zone_nm, z.biz_nm, z.propel_nm, 걸침 = CAST(100.0 * h.xarea / NULLIF(h.parea, 0) AS DECIMAL(5, 1)),
+             p.사업명, p.지정일, p.추진단계, p.추진일, p.공급세대
+        FROM gold.complex_redev_hit h JOIN silver.redev_zone z ON z.present_sn = h.present_sn AND z.is_current = 1
+        LEFT JOIN gold.redev_plan_link l ON l.present_sn = h.present_sn
+        LEFT JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
+       WHERE h.complex_id = @id AND h.xarea >= 0.01 * h.parea ORDER BY h.xarea DESC;
+      SELECT TOP 10 a.arch_gb_nm, a.main_purps_nm, a.bld_nm, a.hhld_cnt, a.tot_area, a.arch_pms_day, a.real_stcns_day, a.use_apr_day
+        FROM silver.arch_permit a WHERE a.is_current = 1 AND a.pnu IN (SELECT pnu FROM #p)
+       ORDER BY ISNULL(a.tot_area, 0) DESC;
+      SELECT TOP 10 p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.tot_suply, p.mvn_prearnge_ym
+        FROM (SELECT DISTINCT house_manage_no, pblanc_no FROM gold.applyhome_link WHERE complex_id = @id) l
+        JOIN silver.applyhome_pblanc p ON p.house_manage_no = l.house_manage_no AND p.pblanc_no = l.pblanc_no
+       ORDER BY p.rcrit_pblanc_de;
+      SELECT 건수 = COUNT(*), 처음 = MIN(t.deal_ymd), 끝 = MAX(t.deal_ymd),
+             입주권 = SUM(CASE WHEN t.ownership_gbn = N'입' THEN 1 ELSE 0 END)
+        FROM gold.fn_complex_silv(@id) f JOIN silver.rtms_trade t ON t.trade_sk = f.trade_sk WHERE ISNULL(t.is_canceled, 0) = 0;
+      SELECT 매매 = SUM(CASE WHEN is_rent = 0 THEN 1 ELSE 0 END), 전월세 = SUM(CASE WHEN is_rent = 1 THEN 1 ELSE 0 END),
+             처음 = MIN(deal_ymd), 끝 = MAX(deal_ymd)
+        FROM silver.rtms_trade WHERE match_complex_id = @id AND trade_kind NOT LIKE 'SILV%' AND ISNULL(is_canceled, 0) = 0;`);
+    const R = r.recordsets;
+    res.json({ 단지: R[0][0] || null, 옛대장: { 전체: Number((R[1][0] || {}).전체 || 0), 줄: R[2] }, 정비: R[3], 인허가: R[4],
+               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null });
+  } catch (e) { fail(res, e, 'complex-history'); }
+});
+
 /* ---------- 심평원 병원·약국 (295 · load_hira.py, 2026-10-21) ----------
    ★ 상가정보(semas)와 **다른 출처**다 — 건강보험 요양기관 신고. 종별(상급종합·종합병원·병원·의원 …)과 의사 수가 있다.
    ★ 진료과목은 내지 않는다(신고 과목이 넓어 '소아과 133곳' 같은 거짓말이 된다 — CONTEXT 11-168).

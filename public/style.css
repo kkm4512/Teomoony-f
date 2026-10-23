@@ -1920,3 +1920,14 @@ table.cned td.sm { line-height: 1.6; }
 .hm-links li{margin:2px 0}
 .hm-t tr.canc td{color:var(--ink-4);text-decoration:line-through}
 .hm-t tr.canc td:last-child{text-decoration:none}
+
+/* 이 땅의 역사 (2026-10-23) — 날짜순 한 줄씩 */
+.hist{list-style:none;margin:4px 0 6px;padding:0 0 0 2px;border-left:2px solid var(--line-2)}
+.hist li{display:grid;grid-template-columns:78px 1fr;gap:8px;padding:4px 0 4px 10px;position:relative;font-size:12.5px}
+.hist li::before{content:'';position:absolute;left:-6px;top:10px;width:8px;height:8px;border-radius:50%;background:var(--surface);border:2px solid var(--ink-4)}
+.hist li[data-clsite]{cursor:pointer}
+.hist li[data-clsite]:hover .hist-w b{text-decoration:underline}
+.hist li.on::before{background:var(--ink-3)}
+.hist-d{font:400 11px var(--mono);color:var(--ink-3);padding-top:1px}
+.hist-w{color:var(--ink-2)}
+.hist-s{display:block;font:400 10px var(--mono);color:var(--ink-4);margin-top:1px}

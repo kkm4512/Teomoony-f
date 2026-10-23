@@ -4938,6 +4938,7 @@ function renderDetail(payload) {
   const rv = (redev || []);
 
   const paneL = `
+    <div class="hsbox" data-hs="${esc(String(c.complex_id))}"></div>
     ${sect('필지', 'parcel', ` ${fmt(parcels.length)}`, `폴리곤 ${fmt(parcels.filter(p => p.centroid_lat).length)}`)}
     <table><thead><tr><th>지번</th><th>구분</th><th class="n">공시지가</th></tr></thead><tbody>
       ${parcels.map(p => `<tr>
@@ -5018,6 +5019,7 @@ function renderDetail(payload) {
   분양탭확인(c.complex_id); // 이어진 공고가 있으면 분양·청약 탭을 연다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
+  역사채우기();            // 이 땅의 역사 — 토지 탭 맨 위
   폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
   용도채우기(c.complex_id); // 머리 용도 표 — 대장 원문 주용도 · 기타용도 · 전유부 호별 용도
   /* 14:05 QA: 다른 단지로 옮겨도 탭 제목이 첫 단지 그대로였다 — 서버 /c/:id 제목과 같은 규칙으로 맞춘다 */
@@ -5465,6 +5467,11 @@ const 정책 = [
     '이름은 찾았는데 함께 말한 조건에 맞는 단지가 없으면 \'없다\'(NA) 와 \'이름을 못 찾음\'(SCOPE) 을 가릅니다. 지금 대장에 없는 이름이 폐쇄·말소 대장이나 정비구역 이름에 있으면 그쪽을 알려 드립니다. 지역을 하나도 못 알아들었으면 받은 곳 전체에서 찾았다고 적습니다(조용히 넓히지 않습니다).',
     '노선 이름은 원본 노선 이름과 같거나, 원본 이름의 <b>마지막 말</b>이 같을 때 그 노선입니다(\'신림선\' = \'수도권 경량도시철도 신림선\'). 노선을 말하고 \'가까운\' 이라고 하면 역 가까운 순입니다.',
     'AI 검색 질문 문장은 기능 개선을 위해 로그인 아이디와 함께 보관합니다.',
+  ] },
+  { 키: '역사', 제목: '이 땅의 역사 (단지 상세 · 토지·허가 탭)', 글: [
+    '<b>새로 잇지 않습니다.</b> 이미 이어 둔 자료만 날짜순으로 한 줄씩 모읍니다 — 날짜는 원문 그대로이고 없는 날짜는 메우지 않습니다(\'날짜 없음\' 으로 끝에).',
+    '<b>옛 건물</b> = 이 단지 필지의 폐쇄·말소 대장(또는 폐쇄 대장에서 지금 단지로 이어 둔 것) — 사용승인 · 말소/폐쇄 날. <b>옛 건물 실거래</b> = 그 지번으로 신고되고 어느 단지에도 안 붙은 거래 중 대장이 닫힌 날 전 것. <b>정비구역</b> = 단지 필지의 1% 이상 걸친 서울 정비사업 구역(지정일 · 지금 단계 · 계획 세대는 서울 정비계획 자료로 이어 둔 것). <b>건축 허가 · 착공</b> = 이 단지 필지의 건축인허가. <b>청약 공고</b> = 이 단지에 이은 공고. <b>분양권·입주권</b> = 실거래 탭과 같은 규칙. 끝으로 지금 대장 사용승인과 이 단지 실거래 시작.',
+    '이 단지 앞의 일(옛 대장 · 정비구역 · 인허가 · 청약 · 분양권)이 하나도 없으면 칸을 보이지 않습니다. 재건축으로 지번이 바뀐 단지(예: 가락시영 → 헬리오시티)는 옛 대장이 다른 지번에 있어 이어 두지 않은 한 여기 나오지 않습니다.',
   ] },
   { 키: '호자료', 제목: '호 상세 — 이어진 자료', 글: [
     '단지 상세의 동 구성(동·호 배치도)에서 <b>호 칸을 누르면</b> 그 호의 공시가격 회차 · 면적 아래에 <b>그 호에서 이어지는 자료</b>를 같이 보입니다 — 원본과 이은 결과만이고 판정 · 점수는 내지 않습니다.',
@@ -6500,6 +6507,62 @@ document.addEventListener('click', e => {
   detailTab = 'land'; renderDetail(lastDetail);
   setTimeout(() => { const b = document.querySelector('#detail .clbox'); if (b) b.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 400);
 });
+/* ---------------- 이 땅의 역사 (2026-10-23 사장님 "2번은 좋은거같아") ----------------
+   ★ 새로 잇지 않는다 — 이미 이어 둔 것(옛 대장 · 옛 거래 · 정비구역 · 인허가 · 청약 · 분양권 · 지금 대장 · 실거래)을 **시간순으로 한 줄씩**.
+   ★ 날짜는 원문 그대로. 날짜가 없는 일은 끝에 날짜 없이. 이 단지 '앞의 일' 이 하나도 없으면 칸을 안 보인다(사용승인 · 실거래만으로는 역사가 아니다). */
+async function 역사채우기() {
+  const box = document.querySelector('#detail .hsbox');
+  if (!box) return;
+  const 키 = box.dataset.hs;
+  let d;
+  try { d = await fetch(`/api/complexes/${encodeURIComponent(키)}/history`).then(r => r.ok ? r.json() : null); } catch (e) { d = null; }
+  const 지금 = document.querySelector('#detail .hsbox');
+  if (!d || !지금 || 지금.dataset.hs !== 키) return;
+  const 숫 = v => String(v || '').replace(/[^0-9]/g, '');
+  const 날 = v => { const t = 숫(v); return t.length >= 8 ? `${t.slice(0, 4)}.${t.slice(4, 6)}.${t.slice(6, 8)}` : t.length === 6 ? `${t.slice(0, 4)}.${t.slice(4, 6)}` : ''; };
+  const ev = [];
+  const 넣 = (날짜, 무엇, 보조, 출처, 키2) => ev.push({ d: 숫(날짜).slice(0, 8), 무엇, 보조, 출처, 키2 });
+  const 옛 = (d.옛대장 && d.옛대장.줄) || [];
+  for (const s of 옛) {
+    const 이름 = s.이름 || s.주용도 || '이름 없는 건물';
+    const 규모 = [s.동수 ? `${fmt(s.동수)}동` : '', Number(s.총괄세대) ? `${fmt(s.총괄세대)}세대` : ''].filter(Boolean).join(' · ');
+    if (s.사용승인일) 넣(s.사용승인일, `옛 건물 사용승인 — ${이름}`, 규모, '폐쇄·말소 대장', s.site_key);
+    const n = Number(s.매매 || 0) + Number(s.전월세 || 0);
+    if (n) 넣(s.처음, `옛 건물 실거래 ${fmt(n)}건`, `매매 ${fmt(s.매매 || 0)} · 전월세 ${fmt(s.전월세 || 0)} · ${날(s.처음)}~${날(s.끝)} · 그 지번에 신고되고 어느 단지에도 안 붙은 거래`, '국토부 실거래', s.site_key);
+    if (s.shter_day) 넣(s.shter_day, `옛 대장 ${s.폐쇄구분 || '폐쇄'} — ${이름}`, 규모, '폐쇄·말소 대장', s.site_key);
+  }
+  for (const z of (d.정비 || [])) {
+    if (z.지정일) 넣(z.지정일, `정비구역 지정 — ${z.zone_nm || z.사업명 || ''}`, z.biz_nm || '', '서울 정비사업');
+    넣(z.추진일 || '', `추진 단계 '${z.추진단계 || z.propel_nm || '모름'}' — ${z.zone_nm || ''}`, `단지 필지의 ${Number(z.걸침).toFixed(1)}%가 구역 안${z.공급세대 ? ` · 계획 ${fmt(z.공급세대)}세대` : ''}`, '서울 정비사업');
+  }
+  /* 구분 · 용도 · 세대가 다 빈 인허가(원문이 비었다)는 한 줄로 묶는다 — 날짜만 있는 줄이 역사를 덮는다 */
+  const 빈허가 = (d.인허가 || []).filter(a => !a.arch_gb_nm && !a.main_purps_nm && !Number(a.hhld_cnt));
+  if (빈허가.length) { const ds = 빈허가.map(a => 숫(a.arch_pms_day)).filter(Boolean).sort();
+    넣(ds[0] || '', `건축인허가 ${fmt(빈허가.length)}건 — 구분 · 용도 원문 없음`, ds.length > 1 ? `허가일 ${날(ds[0])}~${날(ds[ds.length - 1])}` : '', '건축인허가'); }
+  for (const a of (d.인허가 || []).filter(a => !빈허가.includes(a)).slice(0, 5)) {
+    const 무엇 = [a.arch_gb_nm || '구분 원문 없음', a.main_purps_nm].filter(Boolean).join(' · ');
+    const 규모 = [a.tot_area ? `연면적 ${fmt(Math.round(a.tot_area))}㎡` : '', Number(a.hhld_cnt) ? `${fmt(a.hhld_cnt)}세대` : ''].filter(Boolean).join(' · ');
+    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, 규모, '건축인허가');
+    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, 규모, '건축인허가');
+  }
+  for (const p of (d.청약 || []))
+    넣(p.rcrit_pblanc_de, `청약 공고 — ${p.house_nm || ''}`, [공고종류말[p.공고종류] || p.공고종류, p.tot_suply ? `공급 ${fmt(p.tot_suply)}` : '', p.mvn_prearnge_ym ? `입주 예정 ${날(p.mvn_prearnge_ym)}` : ''].filter(Boolean).join(' · '), '청약홈');
+  const 권 = d.분양권 || {};
+  if (Number(권.건수)) 넣(권.처음, `분양권·입주권 거래 ${fmt(권.건수)}건`, `${날(권.처음)}~${날(권.끝)}${Number(권.입주권) ? ` · 입주권 ${fmt(권.입주권)}` : ''} · 실거래 탭과 같은 규칙`, '국토부 분양권전매');
+  const 앞 = ev.length;
+  if (!앞) { 지금.innerHTML = ''; return; }
+  const c = d.단지 || {};
+  if (c.oldest_use_apr) 넣(c.oldest_use_apr, `사용승인 — 지금 대장${c.latest_use_apr && c.latest_use_apr !== c.oldest_use_apr ? `(마지막 동 ${날(c.latest_use_apr)})` : ''}`, [c.dong_cnt ? `${fmt(c.dong_cnt)}동` : '', c.hhld_cnt_sum ? `${fmt(c.hhld_cnt_sum)}세대` : ''].filter(Boolean).join(' · '), '건축물대장');
+  const 실 = d.실거래 || {};
+  if (실.처음) 넣(실.처음, `이 단지 실거래 시작`, `매매 ${fmt(실.매매 || 0)} · 전월세 ${fmt(실.전월세 || 0)} · 마지막 ${날(실.끝)}`, '국토부 실거래');
+  ev.sort((a, b) => (a.d ? 0 : 1) - (b.d ? 0 : 1) || a.d.localeCompare(b.d));
+  const 더 = d.옛대장 && d.옛대장.전체 > 옛.length ? `<p class="srcline">옛 대장 ${fmt(d.옛대장.전체)}묶음 중 세대·동이 큰 ${fmt(옛.length)}묶음만 적었습니다 — 아래 '옛 대장' 칸에 다 있습니다.</p>` : '';
+  지금.innerHTML = `${sect('이 땅의 역사', 'hist', ` ${fmt(ev.length)}`)}
+    <ol class="hist">${ev.map(e => `<li${e.키2 ? ` data-clsite="${esc(e.키2)}" role="button" tabindex="0" title="누르면 지도에 그 옛 대장 자리를 표시합니다 · 다시 누르면 지웁니다"` : ''}>
+      <span class="hist-d">${esc(날(e.d) || '날짜 없음')}</span>
+      <span class="hist-w"><b>${esc(e.무엇)}</b>${e.보조 ? `<span class="muted"> ${esc(e.보조)}</span>` : ''}<span class="hist-s">${esc(e.출처)}</span></span></li>`).join('')}</ol>
+    ${더}<p class="srcline">이미 이어 둔 자료만 날짜순으로 모았습니다 — 새로 잇지 않고, 날짜는 원문 그대로입니다. 어떻게 이었나: <a href="#policy" data-pol-go="역사">정책</a></p>`;
+}
 async function 폐쇄채우기() {
   const box = document.querySelector('#detail .clbox');
   if (!box) return;
