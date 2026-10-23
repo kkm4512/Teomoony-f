@@ -6649,6 +6649,71 @@ app.get('/api/ho/:pk', async (req, res) => {
   } catch (e) { fail(res, e, 'ho-detail'); }
 });
 
+/* ---------- 전세 계약 전 확인 (2026-10-23 사장님 "너의견대로 ㄱㄱ" — 차별점 1번) ----------
+   ★ 빌라·다세대는 정보가 가장 모자란 곳이다. 우리는 **호 단위** 공식 원본을 이미 갖고 있다 — 그걸 한 화면에 모은다.
+   ★ 판정하지 않는다. '안전/위험' · 점수 · 보증 가입 가능 여부를 내지 않는다(기준이 바뀌고, 우리가 고르면 거짓 기준이 된다).
+     **원본에 적힌 것**과 **같은 단지 · 같은 평형의 실거래**만 낸다. 못 보는 것은 화면이 공식 확인 경로와 함께 적는다.
+   ★ 실거래에는 동·호가 없다 — '이 호의 거래' 가 아니라 '같은 단지 · 같은 전용면적 묶음(㎡ 정수, 전세가율 표와 같은 묶음)' 이다. 그렇게 적는다. */
+app.get('/api/ho/:pk/check', async (req, res) => {
+  const pk = String(req.params.pk || '');
+  if (!/^[A-Za-z0-9\-_]{1,50}$/.test(pk)) return res.status(400).json({ error: 'bad pk' });
+  try {
+    const pool = await getPool();
+    const meta = await pool.request().input('pk', sql.VarChar(50), pk).query(`
+      SELECT TOP 1 h.호PK, h.동PK, h.동, h.층, h.호, h.complex_id FROM gold.v_complex_ho h WHERE h.호PK = @pk`);
+    if (!meta.recordset.length) return res.status(404).json({ error: 'not found' });
+    const m = meta.recordset[0];
+    const r = await pool.request().input('pk', sql.VarChar(50), pk).input('dong', sql.VarChar(50), m.동PK).input('cid', sql.Int, m.complex_id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      /* 1 이 호 전유(대장 전유공용면적의 '전유' 줄) — 용도는 원문 그대로 */
+      SELECT 면적 = SUM(a.area), 줄 = COUNT(*),
+             용도들 = STRING_AGG(CAST(ISNULL(a.main_purps_nm, N'') AS NVARCHAR(MAX)), N' · ')
+        FROM silver.bld_expos_pubuse_area a
+       WHERE a.mgm_bldrgst_pk = @pk AND a.is_current = 1 AND a.expos_pubuse_gb_cd = '1';
+      /* 2 이 호가 든 동의 표제부 */
+      SELECT TOP 1 동이름 = t.dong_nm, 건물이름 = t.bld_nm, 대장종류 = t.regstr_kind_nm, 주용도 = t.main_purps_nm, 기타용도 = t.etc_purps,
+             구조 = t.strct_nm, 사용승인일 = t.use_apr_day, 지상 = t.grnd_flr_cnt, 지하 = t.ugrnd_flr_cnt,
+             세대 = t.hhld_cnt, 가구 = t.fmly_cnt, 호수 = t.ho_cnt, 승강기 = ISNULL(t.ride_use_elvt_cnt, 0) + ISNULL(t.emgen_use_elvt_cnt, 0),
+             주차 = ISNULL(t.indr_mech_utcnt, 0) + ISNULL(t.oudr_mech_utcnt, 0) + ISNULL(t.indr_auto_utcnt, 0) + ISNULL(t.oudr_auto_utcnt, 0)
+        FROM silver.bld_title t WHERE t.mgm_bldrgst_pk = @dong AND t.is_current = 1;
+      /* 3 단지가 걸친 정비구역(필지의 1% 이상 — AI 검색 · 정비구역 상세와 같은 기준) */
+      SELECT z.zone_nm, z.biz_nm, z.propel_nm, 걸침 = CAST(100.0 * h.xarea / NULLIF(h.parea, 0) AS DECIMAL(5, 1))
+        FROM gold.complex_redev_hit h JOIN silver.redev_zone z ON z.present_sn = h.present_sn AND z.is_current = 1
+       WHERE h.complex_id = @cid AND h.xarea >= 0.01 * h.parea ORDER BY h.xarea DESC;
+      SELECT c.complex_nm, c.rep_plat_plc, c.rep_road_addr, c.hhld_cnt_sum, c.dong_cnt, c.oldest_use_apr FROM gold.complex c WHERE c.complex_id = @cid;`);
+    const 전유 = r.recordsets[0][0] || {};
+    const 면적 = 전유.면적 == null ? null : Number(전유.면적);
+    const 묶음 = 면적 == null ? null : Math.floor(면적);
+    let 거래 = { 묶음, 매매: [], 전세: [], 월세: [], 셈: null, 전세가율: null };
+    if (묶음 != null) {
+      const t = await pool.request().input('cid', sql.Int, m.complex_id).input('g', sql.Int, 묶음).query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        IF OBJECT_ID('tempdb..#t') IS NOT NULL DROP TABLE #t;
+        SELECT r.deal_ymd, r.is_rent, r.is_canceled, r.deal_amount, r.deposit, r.monthly_rent, r.floor_no, r.dealing_gbn, r.contract_type,
+               r.trade_kind, 면적 = COALESCE(r.exclu_use_ar, r.total_floor_ar, r.building_ar)
+          INTO #t FROM silver.rtms_trade r
+         WHERE r.match_complex_id = @cid AND r.trade_kind NOT LIKE 'SILV%'
+           AND CAST(FLOOR(COALESCE(r.exclu_use_ar, r.total_floor_ar, r.building_ar)) AS INT) = @g;
+        SELECT TOP 6 * FROM #t WHERE is_rent = 0 AND deal_amount IS NOT NULL ORDER BY deal_ymd DESC;
+        SELECT TOP 6 * FROM #t WHERE is_rent = 1 AND deposit IS NOT NULL AND ISNULL(monthly_rent, 0) = 0 AND is_canceled = 0 ORDER BY deal_ymd DESC;
+        SELECT TOP 4 * FROM #t WHERE is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 AND is_canceled = 0 ORDER BY deal_ymd DESC;
+        SELECT 매매 = SUM(CASE WHEN is_rent = 0 AND is_canceled = 0 THEN 1 ELSE 0 END), 해제 = SUM(CASE WHEN is_rent = 0 AND is_canceled = 1 THEN 1 ELSE 0 END),
+               전세 = SUM(CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) = 0 AND is_canceled = 0 THEN 1 ELSE 0 END),
+               월세 = SUM(CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 AND is_canceled = 0 THEN 1 ELSE 0 END),
+               처음 = MIN(deal_ymd), 끝 = MAX(deal_ymd) FROM #t;
+        /* 전세가율 — 단지 상세 평형 표와 같은 정의: 최근 순수 전세 1건 ÷ 최근 중개 매매 1건(직거래 · 해제 뺌) */
+        SELECT 매매가 = b.deal_amount, 매매일 = b.deal_ymd, 전세금 = j.deposit, 전세일 = j.deal_ymd,
+               전세가율 = CAST(100.0 * j.deposit / NULLIF(b.deal_amount, 0) AS DECIMAL(5, 1)),
+               개월차 = ABS(DATEDIFF(MONTH, CONVERT(DATE, b.deal_ymd, 112), CONVERT(DATE, j.deal_ymd, 112)))
+          FROM (SELECT TOP 1 * FROM #t WHERE is_rent = 0 AND is_canceled = 0 AND deal_amount IS NOT NULL AND ISNULL(dealing_gbn, N'') NOT LIKE N'%직거래%' ORDER BY deal_ymd DESC) b
+          CROSS JOIN (SELECT TOP 1 * FROM #t WHERE is_rent = 1 AND is_canceled = 0 AND deposit IS NOT NULL AND ISNULL(monthly_rent, 0) = 0 ORDER BY deal_ymd DESC) j;`);
+      거래 = { 묶음, 매매: t.recordsets[0], 전세: t.recordsets[1], 월세: t.recordsets[2], 셈: t.recordsets[3][0] || null, 전세가율: t.recordsets[4][0] || null };
+    }
+    res.json({ ho: m, 전유: { 면적, 줄: 전유.줄 || 0, 용도들: 전유.용도들 || null }, 동: r.recordsets[1][0] || null,
+               정비: r.recordsets[2], 단지: r.recordsets[3][0] || null, 거래 });
+  } catch (e) { fail(res, e, 'ho-check'); }
+});
+
 /* ---------- 없는 단지는 404 (2026-10-21, 사장님 결정) ----------
    /geo · /floorplans · /buildings 가 없는 단지코드에도 200 + 빈 값을 줬다.
    **없는 단지** 와 **경계·평면도·외곽선이 아직 없는 단지** 가 같은 답이었다

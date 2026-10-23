@@ -1908,3 +1908,14 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 /* 2026-10-23 폐쇄 자리 공시가격 */
 .nowrap { white-space: nowrap; }
 table.cned td.sm { line-height: 1.6; }
+
+/* 전세 계약 전 확인 (2026-10-23) — 호 상세 아래 */
+.hm-chk{margin-top:12px;padding-top:10px;border-top:2px solid var(--line-2)}
+.hm-ch{font:500 13.5px var(--font);color:var(--ink);display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.hm-ch .muted{font-size:11px}
+.hm-k2{font:500 11.5px var(--font);color:var(--ink-2);margin:10px 0 3px}
+.hm-warn{margin-top:3px;padding:4px 7px;border-radius:5px;background:var(--paper);border:1px solid var(--line-2);color:var(--ink);font-size:11.5px}
+.hm-links{margin:2px 0 6px;padding-left:18px;font-size:12px;color:var(--ink-2)}
+.hm-links li{margin:2px 0}
+.hm-t tr.canc td{color:var(--ink-4);text-decoration:line-through}
+.hm-t tr.canc td:last-child{text-decoration:none}
