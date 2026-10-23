@@ -5500,6 +5500,9 @@ app.get('/api/complexes/:id', async (req, res) => {
                         WHERE a.is_current=1 AND a.pnu LIKE @lawd + '%') THEN 1 ELSE 0 END,
         kapt   = CASE WHEN EXISTS(SELECT 1 FROM silver.kapt_complex k
                         WHERE k.is_current=1 AND k.bjd_code = @lawd) THEN 1 ELSE 0 END,
+        /* 2026-10-23: 관리비(K-apt 월별)는 받은 구가 일부다(종로·성북·은평) — 구 안에 받은 관리비가 하나라도 있나 */
+        관리비구 = CASE WHEN EXISTS(SELECT 1 FROM silver.kapt_cost kc JOIN silver.kapt_complex k2 ON k2.kapt_code = kc.kapt_code AND k2.is_current = 1
+                        WHERE k2.bjd_code LIKE LEFT(@lawd, 5) + '%') THEN 1 ELSE 0 END,
         /* 층별개요는 테이블에 법정동 컬럼이 없다(동 PK 만 있다). 표제부를 거쳐 본다 */
         주택가격 = CASE WHEN EXISTS(SELECT 1 FROM silver.bld_hsprc hp
                         WHERE hp.is_current=1 AND hp.pnu LIKE @lawd + '%') THEN 1 ELSE 0 END,

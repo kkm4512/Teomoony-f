@@ -3663,6 +3663,10 @@ function costBlock(co, ctx) {
     const hh = Number((ctx && ctx.hhld) || 0);
     if (hh < 150) return '';   // K-apt 대상이 아니다. 단독주택이 절대다수라 안내도 잡음이 된다
     const inLawd = Number((ctx && ctx.kapt) || 0);
+    /* 2026-10-23: K-apt 가 **이어져 있는데** 관리비만 없으면 '연결이 확정되지 않았다' 는 틀린 말이다(관악드림타운) — 그 경우를 가른다 */
+    if (ctx && ctx.이음) return sect('관리비', 'cost') + `<p class="note">${Number(ctx.관리비구)
+      ? gapCell('', 'UNSURE', '이 단지는 K-apt 에 이어져 있지만 그 K-apt 단지의 관리비가 없습니다 — 같은 구의 관리비는 받았으니 그 단지가 공시하지 않았거나 그 단지만 못 받은 것입니다(둘을 가를 기록이 아직 없습니다).')
+      : gapCell('', 'SCOPE', '이 구의 K-apt 관리비를 아직 받지 않았습니다 — 관리비는 일부 구만 받아 두었습니다.')}</p>`;
     return sect('관리비', 'cost') + `<p class="note">${
       inLawd
         ? gapCell('', 'UNSURE',
@@ -3670,7 +3674,7 @@ function costBlock(co, ctx) {
           + '승인된 단지가 여럿이면 버립니다 — 추측으로 붙이면 다른 단지의 관리비가 '
           + '사실처럼 보입니다. 데이터가 없는 것이 아니라 이 단지의 것이라고 확신할 수 없는 것입니다.')
         : gapCell('', 'SCOPE',
-            '이 법정동의 K-apt(공동주택관리정보)를 아직 받아오지 않았습니다. 현재 성북구만 적재돼 있습니다.')
+            '이 법정동의 K-apt(공동주택관리정보)를 아직 받아오지 않았습니다.')
     }</p>`;
   }
   const L = co.latest || {}, P = co.peer || {};
@@ -3741,22 +3745,12 @@ function kaptBlock(k) {
   if (k.kapt_세대 && k.대장_세대 && Number(k.kapt_세대) !== Number(k.대장_세대))
     diffs.push(`K-apt ${fmt(k.kapt_세대)}세대 / 대장 ${fmt(k.대장_세대)}세대`);
 
-  const ev = (k.전기차_지상 || 0) + (k.전기차_지하 || 0);
+  /* 2026-10-23: 규모(세대·동·호수) · 주차 · 전기차 · CCTV · 난방 · 복도는 단지정보 '제원' 의 제자리로 옮겼다(중복 없음). 여기는 관리 운영만. */
   if (k.지하철) add('지하철', `${esc(k.지하철)}${k.지하철노선 ? ` <span class="muted">${esc(k.지하철노선)}</span>` : ''}${
     k.지하철도보 ? ` <span class="muted">· 도보 ${esc(k.지하철도보)}</span>` : ''}`);
   else if (k.지하철도보) add('지하철', `도보 ${esc(k.지하철도보)}`);
   if (k.버스도보) add('버스', `도보 ${esc(k.버스도보)}`);
-  add('전기차 충전기', ev ? `${fmt(ev)}기${
-    (k.전기차_지상 && k.전기차_지하) ? ` <span class="muted">(지상 ${fmt(k.전기차_지상)}·지하 ${fmt(k.전기차_지하)})</span>` : ''}` : '');
-  /* 호수와 세대수가 다르면 둘 다 보여준다. 같은 단지의 다른 사실이다 */
-  if (k.kapt_호수 && k.kapt_세대 && Number(k.kapt_호수) !== Number(k.kapt_세대))
-    add('호수', `${fmt(k.kapt_호수)}호 <span class="muted">(세대 ${fmt(k.kapt_세대)})</span>`);
-  if (k.주차) add('주차', `${fmt(k.주차)}대${
-    (k.주차_지상 || k.주차_지하) ? ` <span class="muted">(지상 ${fmt(k.주차_지상 || 0)}·지하 ${fmt(k.주차_지하 || 0)})</span>` : ''}`);
-  add('난방', k.난방 ? esc(k.난방) : '');
-  add('복도 유형', k.복도 ? esc(k.복도) : '');
   add('관리 방식', k.관리 ? esc(k.관리) : '');
-  add('CCTV', k.CCTV ? fmt(k.CCTV) + '대' : '');
   if (k.경비인원 || k.경비업체) add('경비',
     [k.경비인원 ? `${fmt(k.경비인원)}명` : '', k.경비방식 ? esc(k.경비방식) : '',
      k.경비업체 ? `<span class="muted">${esc(k.경비업체)}</span>` : ''].filter(Boolean).join(' · '));
@@ -3769,19 +3763,11 @@ function kaptBlock(k) {
   add('편의시설', k.편의시설 ? esc(k.편의시설) : '');
   add('교육시설', k.교육시설 ? esc(k.교육시설) : '');
 
-  if (!r.length && !diffs.length) return '';
+  if (!r.length && !diffs.length) return '';   // 규모·설비는 제원으로 옮겼다 — 남은 관리 운영 줄이 없으면 칸을 안 그린다
   return sect('관리 정보', 'kapt', '<span class="est">추정 연결</span>') + `
     <p class="srcline">K-apt <b>${esc(k.kapt_name || '')}</b> 기준 · 법정동 + 사용승인일로 이음(추정)</p>
-    ${diffs.length ? `<p class="note off"><b>세대수가 대장과 어긋납니다</b> — ${diffs.join(' · ')}.
-      상가·관리동이 섞였거나, 다른 단지를 잘못 이었을 수 있습니다.</p>` : ''}
-    <dl>
-      ${(k.kapt_세대 || k.kapt_동수) ? `<dt>규모</dt><dd>${
-        k.kapt_세대 ? `${fmt(k.kapt_세대)}세대` : ''}${
-        k.kapt_동수 ? ` · ${fmt(k.kapt_동수)}개동` : ''}${
-        (k.대장_동수 && k.kapt_동수 && Number(k.대장_동수) !== Number(k.kapt_동수))
-          ? `<br><span class="muted" title="K-apt 는 주거동만, 대장은 상가·부속동까지 셉니다">대장 기준 ${fmt(k.대장_동수)}개동</span>` : ''}</dd>` : ''}
-      ${r.join('')}
-    </dl>`;
+    ${diffs.length ? `<p class="note off">세대수가 대장과 어긋납니다 — 단지정보 '제원' 세대 줄에 적었습니다.</p>` : ''}
+    <dl>${r.join('')}</dl>`;
 }
 
 /* 건축인허가 — 대장은 '지어진 것', 인허가는 '지으려는 것'.
@@ -4132,7 +4118,7 @@ function prcBlock(rows, scope, 적재, dongs) {
     + `<div class="hplist">${줄}</div>${더}`;
 }
 
-function specBlock(spec, c, 분위들, 전용률, 호총수) {
+function specBlock(spec, c, 분위들, 전용률, 호총수, kapt) {
   if (!spec) return '';
   const n1 = v => Number(v).toFixed(1).replace(/\.0$/, '');
   /* 0 과 결측을 가른다 — 서버가 NULL 은 '안 적었다', 0 은 '적었는데 0' 으로 내려보낸다 */
@@ -4158,6 +4144,23 @@ function specBlock(spec, c, 분위들, 전용률, 호총수) {
   add('용도구역', spec.용도구역 ? esc(spec.용도구역) : '');
 
   grp('규모');
+  /* 2026-10-23 사장님 원칙 "중복 없고 · 이어진 데이터를 보기 좋게" — 흩어져 있던 규모(세대 · 동 · 층 · 연면적)를 여기 한 곳에.
+     '단지 요약'(같은 탭) · '관리 정보'(K-apt, 관리 탭)에 따로 있던 줄을 옮겼다. 출처가 다른 값은 **한 칸에 출처를 달아** 같이 둔다. */
+  const k = kapt || null;
+  {
+    /* 단지 머리 · 지도 · AI 검색과 **같은 값**(동별 표제부 세대 합 = hhld_cnt_sum). 총괄표제부 값이 다르면 옆에 적는다 */
+    const 대장 = c.hhld_cnt_sum || spec.세대;
+    const kh = k && Number(k.kapt_세대) ? Number(k.kapt_세대) : null;
+    add('세대', 대장 ? `${fmt(대장)}세대${spec.세대 && Number(spec.세대) !== Number(대장) ? ` <span class="muted">· 총괄표제부 ${fmt(spec.세대)}세대</span>` : ''}${kh ? (kh === Number(대장) ? ` <span class="muted">· K-apt 같음</span>`
+        : spec.세대 && kh === Number(spec.세대) ? ` <span class="muted">· K-apt ${fmt(kh)}세대(총괄표제부와 같음)</span>`
+        : ` <span class="gap g-unknown">K-apt ${fmt(kh)}세대 — 대장과 다릅니다(상가·관리동이 섞였거나 다른 단지를 이었을 수 있음)</span>`) : ''}${
+        k && Number(k.kapt_호수) && kh && Number(k.kapt_호수) !== kh ? ` <span class="muted">· K-apt 호수 ${fmt(k.kapt_호수)}</span>` : ''}` : '');
+    add('동', [c.dong_cnt != null ? `대장 ${fmt(c.dong_cnt)}동` : '', c.bld_cnt != null ? `건물 외곽선 ${fmt(c.bld_cnt)}` : '',
+               k && Number(k.kapt_동수) ? `K-apt 주거동 ${fmt(k.kapt_동수)}` : ''].filter(Boolean).join(' · '));
+    add('층', [c.max_floor ? `지상 최고 ${fmt(c.max_floor)}층 <span class="muted">(건물 외곽선)</span>` : '',
+               has(spec.지하층) ? (spec.지하층 ? `지하 ${fmt(spec.지하층)}층` : '지하 없음') : ''].filter(Boolean).join(' · '), dongOnly, dongNote);
+    add('연면적', c.tot_area_sum ? fmt(Math.round(c.tot_area_sum)) + ' ㎡' : '');
+  }
 
   /* ★ 건폐율은 정의상 100% 를 넘을 수 없다(대지면적 대비 건축면적).
      넘는 값이 실제로 온다 — 정릉동 258-37 이 59,315% 다(대장에 소수점이 빠진 듯).
@@ -4210,8 +4213,6 @@ function specBlock(spec, c, 분위들, 전용률, 호총수) {
   add('대지면적', spec.대지면적 ? fmt(Math.round(spec.대지면적)) + ' ㎡' : '');
   add('건축면적', spec.건축면적 ? fmt(Math.round(spec.건축면적)) + ' ㎡' : '');
   add('높이', spec.높이 ? n1(spec.높이) + ' m' : '', dongOnly, dongNote);
-  add('지하층', has(spec.지하층)
-    ? (spec.지하층 ? '지하 ' + fmt(spec.지하층) + '층' : '지하 없음') : '', dongOnly, dongNote);
   add('건물', (has(spec.주건축물) || has(spec.부속건축물))
     ? [has(spec.주건축물) ? `주 ${fmt(spec.주건축물)}동` : '',
        has(spec.부속건축물) ? `부속 ${fmt(spec.부속건축물)}동` : ''].filter(Boolean).join(' · ') : '');
@@ -4263,7 +4264,11 @@ function specBlock(spec, c, 분위들, 전용률, 호총수) {
     const gap = (spec.주차_내역합 && spec.주차_내역합 !== spec.주차)
       ? ` <span class="muted">· 내역 합 ${fmt(spec.주차_내역합)}대로 ${
           fmt(Math.abs(spec.주차 - spec.주차_내역합))}대 차이</span>` : '';
-    add('주차', spec.주차 ? `${fmt(spec.주차)}대${mix}${per}${gap}` : '');
+    const kp = k && Number(k.주차) ? `<br><span class="muted">K-apt ${fmt(k.주차)}대${(k.주차_지상 || k.주차_지하) ? ` (지상 ${fmt(k.주차_지상 || 0)}·지하 ${fmt(k.주차_지하 || 0)})` : ''}</span>` : '';
+    add('주차', (spec.주차 || kp) ? `${spec.주차 ? `${fmt(spec.주차)}대${mix}${per}${gap}` : '<span class="muted">대장에 없음</span>'}${kp}` : '');
+    const ev = k ? (k.전기차_지상 || 0) + (k.전기차_지하 || 0) : 0;
+    if (ev) add('전기차 충전기', `${fmt(ev)}기 <span class="muted">(K-apt${(k.전기차_지상 && k.전기차_지하) ? ` · 지상 ${fmt(k.전기차_지상)}·지하 ${fmt(k.전기차_지하)}` : ''})</span>`);
+    if (k && k.CCTV) add('CCTV', `${fmt(k.CCTV)}대 <span class="muted">(K-apt)</span>`);
   }
   /* ★ 승용 0 + 비상용 N 은 **모순이다.** 비상용 승강기가 있는 건물에 승용이
      0 대일 수 없다(보통 겸용으로 잡힌다). 0 을 살리기로 했다고 해서 모순까지
@@ -4285,6 +4290,8 @@ function specBlock(spec, c, 분위들, 전용률, 호총수) {
   grp('구조');
   add('구조', spec.구조 ? esc(spec.구조) : '', dongOnly, dongNote);
   add('지붕', spec.지붕 ? esc(spec.지붕) : '', dongOnly, dongNote);
+  if (k && k.복도) add('복도 유형', `${esc(k.복도)} <span class="muted">(K-apt)</span>`);
+  if (k && k.난방) add('난방', `${esc(k.난방)} <span class="muted">(K-apt)</span>`);
 
   grp('공사');
 
@@ -4670,16 +4677,16 @@ function renderDetail(payload) {
   const pl   = (poiLife || []).filter(x => Number(x.r1000) > 0);
 
   const paneI = `
-    ${specBlock(spec, c, vlrat, 전용률, 호총수)}
+    ${specBlock(spec, c, vlrat, 전용률, 호총수, kapt)}
+    ${permitBlock(permits, scope, permitDongs)}
     ${sect('단지 요약', 'bld')}
     <dl>
       ${row('단지코드', c.complex_id)}
-      ${row('대장 동 / 건물', `${fmt(c.dong_cnt)} / ${c.bld_cnt == null ? '—' : fmt(c.bld_cnt)}`)}
-      ${row('필지', fmt(c.pnu_cnt))}
+      ${spec ? '' : `${row('대장 동 / 건물', `${fmt(c.dong_cnt)} / ${c.bld_cnt == null ? '—' : fmt(c.bld_cnt)}`)}
       ${c.max_floor ? row('최고 층수', '지상 ' + fmt(c.max_floor) + '층') : ''}
       ${row('세대수', fmt(c.hhld_cnt_sum))}
       ${row('연면적', c.tot_area_sum ? fmt(Math.round(c.tot_area_sum)) + ' ㎡' : '—')}
-      ${row('사용승인', day(c.oldest_use_apr))}
+      ${row('사용승인', day(c.oldest_use_apr))}`}
       ${row('대표지번', esc(c.rep_jibun || '—'))}
       ${c.centroid_lat ? row('좌표', `${Number(c.centroid_lat).toFixed(5)}, ${Number(c.centroid_lng).toFixed(5)}`) : ''}
     </dl>
@@ -4862,7 +4869,7 @@ function renderDetail(payload) {
   /* 사는 정보 — K-apt 축. 대장에도 실거래에도 없는 것들이 여기 있다. */
   const _관리 = `
     ${kaptBlock(kapt)}
-    ${costBlock(cost, { hhld: (spec && spec.세대) || c.hhld_cnt_sum, ...(scope || {}) })}`;
+    ${costBlock(cost, { hhld: (spec && spec.세대) || c.hhld_cnt_sum, ...(scope || {}), 이음: Boolean(kapt) })}`;
   /* ★ 2026-10-21 QA: 150세대 미만이면 두 칸이 **둘 다 일부러 비어** 탭이 통째로 빈 화면이었다
      (리얼파크2차 16세대). 칸마다 안내를 띄우면 잡음이지만, 탭 전체가 비면 '왜 비었나' 를 한 줄 적는다. */
   const paneM = _관리.trim() ? _관리 : `<p class="note">${gapCell('', 'NA',
@@ -4959,7 +4966,7 @@ function renderDetail(payload) {
 
     <!-- 2026-10-22 사장님 "건물 외곽선 표는 의미없어 — 지도에만" : 표를 뺐다. 외곽선은 지도에 그대로 그린다(층·면적은 동·호 탭의 대장 원문). -->
 
-    ${permitBlock(permits, scope, permitDongs)}`;
+`;
 
   $('#detail').innerHTML = `
     ${shotsMarkup(c)}
@@ -6506,18 +6513,18 @@ async function 역사채우기() {
   }
   /* 구분 · 용도가 둘 다 빈 인허가는 첫 허가일 한 줄로만(같은 말 '인허가' 줄이 일곱 번 이어지면 목차가 아니다) */
   const 빈 = (d.인허가 || []).filter(a => !a.arch_gb_nm && !a.main_purps_nm).map(a => 숫(a.arch_pms_day)).filter(Boolean).sort();
-  if (빈.length) 넣(빈[0], '건축 허가 — 구분 원문 없음(첫 허가)', ['land', '건축인허가'], '건축인허가');
+  if (빈.length) 넣(빈[0], '건축 허가 — 구분 원문 없음(첫 허가)', ['info', '건축인허가'], '건축인허가');
   for (const a of (d.인허가 || []).filter(a => a.arch_gb_nm || a.main_purps_nm)) {
     const 무엇 = a.arch_gb_nm || a.main_purps_nm;
-    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, ['land', '건축인허가'], '건축인허가');
-    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, ['land', '건축인허가'], '건축인허가');
+    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, ['info', '건축인허가'], '건축인허가');
+    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, ['info', '건축인허가'], '건축인허가');
   }
   for (const p of (d.청약 || [])) 넣(p.rcrit_pblanc_de, `청약 공고 — ${p.house_nm || ''}`, ['sale', '분양'], '청약홈');
   const 권 = d.분양권 || {};
   if (Number(권.건수)) 넣(권.처음, '분양권·입주권 거래 시작', ['price', '거래 내역'], '국토부 분양권전매');
   if (!ev.length) { 지금.innerHTML = ''; return; }
   const c = d.단지 || {};
-  if (c.oldest_use_apr) 넣(c.oldest_use_apr, '사용승인 — 지금 대장', ['info', '단지 요약'], '건축물대장');
+  if (c.oldest_use_apr) 넣(c.oldest_use_apr, '사용승인 — 지금 대장', ['info', '제원'], '건축물대장');
   if ((d.실거래 || {}).처음) 넣(d.실거래.처음, '이 단지 실거래 시작', ['price', '거래 내역'], '국토부 실거래');
   ev.sort((a, b) => (a.d ? 0 : 1) - (b.d ? 0 : 1) || a.d.localeCompare(b.d));
   /* 같은 날 · 같은 일은 한 줄(인허가가 같은 날 여러 건) */
