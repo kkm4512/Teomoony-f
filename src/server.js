@@ -174,7 +174,6 @@ const 이용_무늬 = [
   [/^\/api\/complexes\/\d+$/,            '단지 상세'],
   [/^\/api\/complexes\/\d+\/points$/,    '주변 지점 보기'],
   [/^\/api\/complexes\/\d+\/geo$/,       '단지 경계'],
-  [/^\/api\/complexes\/\d+\/floorplans$/,'평면도'],
   [/^\/api\/complexes\/\d+\/buildings$/, '동 목록'],
   [/^\/api\/ho\/[^/]+$/,                 '호 상세'],
   [/^\/api\/newbuilds\/[^/]+$/,          '신축 단지'],
@@ -6556,8 +6555,6 @@ app.get('/api/complexes/:id', async (req, res) => {
                공시적재: prcScope.recordset[0] || null,
                거래목록: trades.recordset,
                전용률: exar.recordset[0] || null,
-               /* 평면도는 DB 가 아니라 파일에서 온다. readdir 한 번이라 싸다. */
-               평면도: await listPlans(id),
                scope: scope.recordset[0] || null });
   } catch (e) { fail(res, e, 'complex-detail'); }
 });
@@ -6821,52 +6818,7 @@ app.get('/api/complexes/:id/landuse', async (req, res) => {
   } catch (e) { fail(res, e, 'complex-landuse'); }
 });
 
-/* ---------- 평형별 평면도 이미지 ----------
-   ★ 왜 DB 가 아니라 파일인가 (2026-10-18)
-     평면도는 **그림일 뿐 좌표가 아니다.** 벽선도 치수도 없다 - 면적을 여기서
-     뽑아 쓸 일이 없다. 보여주기 전용이라 적재기도 마이그레이션도 필요 없다.
-     `public/floorplans/<complex_id>/<전용면적>.jpg` 하나면 넣고 빼는 게 끝난다.
-   ★ 파일명이 **화면의 평형 칩과 같은 수**다(전용면적 소수 2자리).
-     그래서 화면이 "없으면 여기에 넣으세요" 를 스스로 말할 수 있다. */
-const FP_DIR = path.join(__dirname, '..', 'public', 'floorplans');
-const FP_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.svg']);
-
-async function listPlans(id) {
-  const dir = path.join(FP_DIR, String(id));
-  try {
-    const names = await fs.promises.readdir(dir);
-    const out = [];
-    for (const n of names) {
-      const ext = path.extname(n).toLowerCase();
-      if (!FP_EXT.has(ext)) continue;
-      const base = path.basename(n, ext);
-      /* 84.94 또는 84.94_A */
-      const m = /^(\d+(?:\.\d+)?)(?:_(.+))?$/.exec(base);
-      if (!m) continue;
-      out.push({ area: m[1], type: m[2] || null,
-                 url: `/floorplans/${id}/${encodeURIComponent(n)}` });
-    }
-    out.sort((a, b) => Number(a.area) - Number(b.area)
-                    || String(a.type).localeCompare(String(b.type)));
-    return out;
-  } catch (e) {
-    /* 폴더가 없는 것은 오류가 아니다 - **아직 안 넣은 것**이다. */
-    if (e && e.code === 'ENOENT') return [];
-    throw e;
-  }
-}
-
-app.get('/api/complexes/:id/floorplans', async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
-  /* ★ 2026-10-21: INT 칸을 넘는 수(99999999999)는 sql.Int 검증에서 터져 **500** 이 났다.
-     그런 단지는 있을 수 없으므로 '없다' 가 맞는 답이다 */
-  if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
-  try {
-    if (!(await 단지있나(await getPool(), id))) return res.status(404).json({ error: 'not found' });
-    res.json({ complex_id: id, dir: `public/floorplans/${id}`, plans: await listPlans(id) });
-  } catch (e) { fail(res, e, 'floorplans'); }
-});
+/* 2026-10-23 사장님 "평면도는 그냥 다 빼줘" — 평형별 평면도 그림(public/floorplans · /api/complexes/:id/floorplans)을 지웠다. */
 
 /* ---------- 단지 하나의 건물 외곽선 (GeoJSON) ---------- */
 app.get('/api/complexes/:id/buildings', async (req, res) => {

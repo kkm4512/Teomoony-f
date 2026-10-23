@@ -714,56 +714,14 @@ td .muted { font: 400 10px var(--mono); line-height: 1.3; }
    빗금은 쓰면 안 된다: .p0(공시가격 없음)가 이미 빗금이라 한 무늬에 두 뜻이
    생긴다. 화면에서 실제로 섞여 보였다(2026-10-18). */
 .fp-c.unk{border-style:dashed;border-color:var(--line-2);background:var(--surface-2)}
-.gx-h.hit{cursor:pointer}
-.gx-h.hit:hover{text-decoration:underline}
 
 /* 평형 칩 2단 - 같은 평형 안의 타입(정확한 전용면적) (2026-10-18) */
 .apick2{margin-top:-2px;padding-left:10px;border-left:2px solid var(--line)}
 .achip em{font-style:normal;font-size:10px;color:var(--mark);margin-left:3px}
 
-/* 평형별 평면도 (2026-10-18). 그림이지 좌표가 아니다 - 설명을 같이 단다. */
-.fplan{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 2px}
-.fplan figure{margin:0;flex:1 1 180px;max-width:100%;border:1px solid var(--line);
-              border-radius:8px;overflow:hidden;background:var(--surface)}
-.fplan img{display:block;width:100%;height:auto}
-.fplan figcaption{padding:4px 6px;font-size:12px;border-top:1px solid var(--line);
-                  background:var(--surface-2)}
-.fplan .srcline{flex:1 1 100%;margin:2px 0 0}
 code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 4px;border-radius:3px}
 
-/* 동 윤곽 위 평면 모식도 (2026-10-18).
-   윤곽은 실측 폴리곤, 칸은 전용면적 비율. 방·벽은 원본에 없어 안 그린다. */
-.pl-wrap{position:relative;padding:8px;background:var(--surface-2);
-         border:1px solid var(--line);border-radius:8px;margin:6px 0 2px}
-svg.pl{display:block;width:100%;max-height:260px}
-.pl-bg{fill:var(--surface);stroke:none}
-.pl-ol{fill:none;stroke:var(--bld-edge);stroke-width:.8;vector-effect:non-scaling-stroke}
-.pl-s rect{fill:var(--s3);opacity:.9}
-.pl-s line{stroke:var(--bld-edge);stroke-opacity:.45;stroke-width:1;
-           vector-effect:non-scaling-stroke}
-.pl-s.p1 rect{fill:var(--s1)} .pl-s.p2 rect{fill:var(--s2)}
-.pl-s.p3 rect{fill:var(--s3)} .pl-s.p4 rect{fill:var(--s4)}
-.pl-s.p5 rect{fill:var(--s5)} .pl-s.p0 rect{fill:var(--none);opacity:.5}
-.pl-s.dim rect{opacity:.15;filter:grayscale(1)}
-.pl-s.hit{cursor:pointer}
-.pl-s.hit:hover rect{opacity:1}
-.pl-lb text{font:2.6px var(--font);fill:var(--ink);text-anchor:middle;pointer-events:none}
-.pl-lb text.sm{font-size:2.1px;fill:var(--ink-2)}
-.pl-n{position:absolute;right:10px;top:10px;font-size:11px;color:var(--ink-3);
-      display:flex;align-items:center;gap:2px}
-.pl-n span{display:inline-block}
-/* 탑상형(거의 정사각형) 동은 윤곽만 그린다 - 칸을 나누면 없는 배치를 지어낸다 */
-svg.pl.tower{max-height:150px}
-svg.pl.tower .pl-bg{fill:var(--surface);stroke:none}
-
-/* 기준층 평면 보기 버튼 (2026-10-18)
-   층 라벨 클릭은 발견되지 않는다 — 눌리게 생긴 것을 하나 내놓는다. */
-.planrow{display:flex;align-items:center;gap:8px;margin:6px 0 2px;flex-wrap:wrap}
-.planbtn{border:1px solid var(--mark);background:var(--surface);color:var(--ink);
-  cursor:pointer;border-radius:3px;padding:5px 10px;font-size:11.5px;line-height:1.3}
-.planbtn:hover{background:var(--mark-soft)}
-.planbtn b{font:400 10px var(--mono);color:var(--mark);margin-left:6px}
-.planrow .muted{font-size:10.5px}
+/* 평면 모식도 · 평면도 그림은 2026-10-23 지웠다(사장님 "평면도는 그냥 다 빼줘") */
 
 /* 용도지역 비중 (2026-10-19)
    표가 아니라 막대다 — 읽는 사람이 보는 건 "어디가 더 큰가" 하나다. */

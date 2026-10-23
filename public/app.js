@@ -20,7 +20,6 @@ const 로딩 = (() => {
     [/^\/api\/complexes\/\d+\/points$/,   '주변 지점'],
     [/^\/api\/complexes\/\d+\/geo$/,      '단지 경계'],
     [/^\/api\/complexes\/\d+\/buildings$/,'건물 외곽선'],
-    [/^\/api\/complexes\/\d+\/floorplans$/,'평면도'],
     [/^\/api\/complexes\/\d+$/,           '단지 상세'],
     [/^\/api\/complexes$/,                '검색'],
     [/^\/api\/newbuilds\/[^/]+$/,         '신축 상세'],
@@ -2843,9 +2842,7 @@ function gridBlock(dongs, floors, hos, scope, sel, areaSel) {
   const byPrice = H.some(h => h.공시가격);
 
   const body = flrs.map(f => `<div class="gx-row">
-      <div class="gx-h${f < 0 ? ' dn' : ''}${
-        H.length ? ' hit' : ''}"${H.length ? ` data-ho-flr="${f}"` : ''
-        } title="${H.length ? esc(fnm(f) + '층 평면 펼치기') : ''}">${fnm(f)}</div>
+      <div class="gx-h${f < 0 ? ' dn' : ''}">${fnm(f)}</div>
       ${cols.map(c => {
         const orp = c.line === '?' ? (orphanAt.get(c.pk + '\u0000' + f) || []) : [];
         const ho = c.line === '?' ? (orp[0] || null)
@@ -2920,192 +2917,7 @@ function gridBlock(dongs, floors, hos, scope, sel, areaSel) {
            <span class="fg-k f-park"></span>주차 <span class="fg-k f-etc"></span>기타.`}</p></div>`;
 }
 
-/* ---------------- 동 윤곽 위에 호 얹기 ----------------
-   ★ 어디까지가 실제 값인가 (2026-10-18)
-       윤곽   = VWorld 건물 외곽선 **실측 폴리곤**
-       긴 축   = 그 폴리곤에서 계산한 주축(공분산 고유벡터)
-       칸의 폭 = 전용면적 **실측값**
-       방위    = 주축을 가로로 눕히면서 북쪽이 어디로 갔는지 계산한 값
-     여기까지가 데이터다. **아래는 전부 없다**: 방 배치, 벽, 문, 창,
-     그리고 **어느 끝이 01라인인지**. 마지막 것은 특히 조심해야 한다 -
-     좌우가 뒤집혀 있을 수 있는데 그림은 그 사실을 숨긴다. 그래서 적는다.
-
-   ★ 왜 윤곽으로 자르나(clipPath)
-     칸을 네모로 그려 놓고 윤곽을 겹쳐 그리면 칸이 윤곽 밖으로 삐져나온다.
-     clipPath 로 **윤곽이 칸을 자르게** 하면 L자든 Y자든 모양을 따라간다.
-     모양을 지어내지 않고 **실측 윤곽이 결정하게** 두는 방법이다. */
-let _planSeq = 0;
-
-function outlineOf(dongNm) {
-  const feats = (lastBgeo && lastBgeo.features) || [];
-  const norm = v => String(v || '').replace(/\s/g, '');
-  const want = norm(dongNm);
-  if (!want) return null;
-  const f = feats.find(x => norm(x.properties && x.properties.buld_nm_dc) === want);
-  if (!f || !f.geometry) return null;
-  const g = f.geometry;
-  const polys = g.type === 'MultiPolygon' ? g.coordinates
-              : g.type === 'Polygon' ? [g.coordinates] : [];
-  const rings = polys.map(p => p[0]).filter(r => r && r.length > 3);
-  return rings.length ? { rings, props: f.properties || {} } : null;
-}
-
-/* 경위도 -> 미터(평면 근사). 서울 위도에서 충분하다. */
-function toLocal(rings) {
-  const all = rings.flat();
-  const lon0 = all.reduce((t, c) => t + c[0], 0) / all.length;
-  const lat0 = all.reduce((t, c) => t + c[1], 0) / all.length;
-  const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
-  return rings.map(r => r.map(c => [(c[0] - lon0) * kx, (c[1] - lat0) * ky]));
-}
-
-/* 주축 각도. 공분산 행렬의 큰 고유벡터 방향 = 건물이 누운 방향. */
-function mainAxis(pts) {
-  const n = pts.length;
-  const mx = pts.reduce((t, p) => t + p[0], 0) / n;
-  const my = pts.reduce((t, p) => t + p[1], 0) / n;
-  let sxx = 0, syy = 0, sxy = 0;
-  for (const p of pts) { const dx = p[0] - mx, dy = p[1] - my;
-    sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
-  return 0.5 * Math.atan2(2 * sxy, sxx - syy);
-}
-
-function planSVG(R, dongNm, flr, areaSel) {
-  const o = outlineOf(dongNm);
-  if (!o) return null;
-  const rings = toLocal(o.rings);
-  const th = mainAxis(rings.flat());
-  const c = Math.cos(-th), s = Math.sin(-th);
-  const rot = p => [p[0] * c - p[1] * s, p[0] * s + p[1] * c];
-  const rr = rings.map(r => r.map(rot));
-  const xs = rr.flat().map(p => p[0]), ys = rr.flat().map(p => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const W = x1 - x0, H = y1 - y0;
-  if (!(W > 1 && H > 1)) return null;
-  /* 긴 쪽을 가로로 둔다. 격자의 가로축(라인)과 같은 방향이 되도록. */
-  const flip = H > W;
-  const px = p => ((flip ? (p[1] - y0) : (p[0] - x0)) / (flip ? H : W)) * 100;
-  const py = p => ((flip ? (p[0] - x0) : (p[1] - y0)) / (flip ? W : H)) * 100;
-  /* ★★ 길쭉한 동에서만 칸을 나눈다 (2026-10-18, 화면에서 잡았다).
-     처음엔 모든 동을 긴 축으로 썰었다. 그런데 주축 기준으로 재 보니
-     **대부분이 거의 정사각형**이었다 - 래미안 장위 504동 45x36m(비 1.24),
-     래미안베라힐즈 215동 32x31m(1.03), DMC 104동 41x36m(1.14).
-     16동 중 13동이 비 2 미만이다. 이건 **탑상형**이고, 호가 가운데 코어를
-     둘러싼 구조지 한 줄로 늘어선 게 아니다.
-     그런 동을 세로로 썰면 **없는 배치를 지어낸다.** 막대로 그릴 때는 모양이
-     없어서 '목록' 으로 읽혔는데, 실측 윤곽 안에 넣는 순간 '지도' 로 읽힌다 -
-     그럴듯해질수록 거짓말이 커진다.
-     그래서 비가 2 미만이면 **윤곽만 그리고 칸은 나누지 않는다.** */
-  const ratio = Math.max(W, H) / Math.max(1, Math.min(W, H));
-  const slab = ratio >= 2;
-  const VW = 100, VH = 100 * ((flip ? W : H) / (flip ? H : W));
-  const d = rr.map(r => 'M' + r.map(p => `${px(p).toFixed(2)},${(VH - py(p)).toFixed(2)}`)
-                              .join('L') + 'Z').join(' ');
-  const id = 'plc' + (++_planSeq);
-
-  const known = R.filter(h => h.전용면적);
-  const tot = known.reduce((t, h) => t + Number(h.전용면적), 0);
-  let acc = 0;
-  const slices = R.map(h => {
-    const a = h.전용면적 ? Number(h.전용면적)
-            : (tot && known.length ? tot / known.length : 1);
-    const w = (a / (tot || R.length)) * VW;
-    const x = acc; acc += w;
-    const dim = areaSel && !hoMatches(h, areaSel);
-    const cls = h.단지분위 ? `p${h.단지분위}` : 'p0';
-    return `<g class="pl-s ${cls}${dim ? ' dim' : ''}${h.호PK ? ' hit' : ''}"${
-        h.호PK ? ` data-ho-pk="${esc(String(h.호PK))}"` : ''}>
-      <rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${VH.toFixed(2)}"/>
-      <line x1="${(x + w).toFixed(2)}" y1="0" x2="${(x + w).toFixed(2)}" y2="${VH.toFixed(2)}"/>
-      </g>`;
-  }).join('');
-  const labels = (() => { let a2 = 0;
-    return R.map(h => {
-      const ar = h.전용면적 ? Number(h.전용면적)
-               : (tot && known.length ? tot / known.length : 1);
-      const w = (ar / (tot || R.length)) * VW, x = a2 + w / 2; a2 += w;
-      if (w < 7) return '';
-      return `<text x="${x.toFixed(2)}" y="${(VH / 2 - 1).toFixed(2)}">${esc(String(h.호))}</text>
-        <text x="${x.toFixed(2)}" y="${(VH / 2 + 4).toFixed(2)}" class="sm">${
-          h.전용면적 ? Number(h.전용면적).toFixed(1) + '㎡' : '?'}</text>`;
-    }).join(''); })();
-
-  /* 북쪽. 주축을 눕히느라 돌린 만큼 북도 같이 돌았다. */
-  const nAng = (-th * 180 / Math.PI) + (flip ? 90 : 0);
-  return { slab, ratio, w: Math.round(Math.max(W, H)), h: Math.round(Math.min(W, H)),
-    html: `<svg class="pl${slab ? '' : ' tower'}" viewBox="0 0 ${VW} ${VH.toFixed(2)}"
-        preserveAspectRatio="xMidYMid meet">
-      <defs><clipPath id="${id}"><path d="${d}"/></clipPath></defs>
-      <path class="pl-bg" d="${d}"/>
-      ${slab ? `<g clip-path="url(#${id})">${slices}</g>
-                <g clip-path="url(#${id})" class="pl-lb">${labels}</g>` : ''}
-      <path class="pl-ol" d="${d}"/>
-    </svg>
-    <div class="pl-n"><span style="transform:rotate(${(-nAng).toFixed(1)}deg)">↑</span> 북</div>` };
-}
-
-/* ---------------- 층 평면 (모식도) ----------------
-   ★ 이것은 **도면이 아니다.** 그렇게 안 보이게 그리는 것이 이 함수의 절반이다.
-
-   이 DB에 건물 **내부** geometry 는 한 점도 없다. 전유공용면적은 호마다
-   `전유 46.35㎡ · 아파트` 한 줄이고 방 배치도 치수도 현관 방향도 없다.
-   층별개요도 용도별 면적 합이다. 실측 모양이 있는 것은 `building_footprint`
-   의 **동 외곽선**뿐이고 그건 바깥 윤곽이다.
-
-   그래서 **실제 값으로 뒷받침되는 두 가지만** 쓴다:
-     가로 위치 = 라인 번호 (호명칭에서 떨어진 실제 값)
-     폭        = 전용면적 (전유공용면적의 실제 값)
-   나머지(깊이, 모양, 방향, 방 배치)는 **그리지 않는다.** 없는 것을 그리면
-   그건 도면이 아니라 상상이고, 상상은 화면에서 사실과 구분되지 않는다.
-   그래서 상자도 일부러 네모 한 칸이다 — 발코니 모서리 하나만 그려 넣어도
-   사람은 그 순간부터 평면도로 읽는다. */
-function floorPlan(hos, sel, flr, nm, areaSel) {
-  if (flr === null || flr === undefined) return '';
-  const R = (hos || []).filter(h => h.동PK === sel && Number(h.층) === Number(flr));
-  const fnm = f => (f < 0 ? `지하${-f}` : `${f}`);
-  if (!R.length) return `<p class="note">${gapCell('', 'NA',
-      `${esc(nm || '')} ${fnm(flr)}층에는 호가 없습니다`)}</p>`;
-  /* 라인 순으로. 라인을 못 가른 호는 뒤에 호명칭 순으로 붙인다 - 버리지 않는다. */
-  R.sort((a, b) => (a.라인 == null) - (b.라인 == null)
-                || (a.라인 - b.라인)
-                || String(a.호).localeCompare(String(b.호)));
-  const known = R.filter(h => h.전용면적);
-  const tot = known.reduce((t, h) => t + Number(h.전용면적), 0);
-  const py = a => (Number(a) / 3.3058).toFixed(1);
-
-  const boxes = R.map(h => {
-    const a = h.전용면적 ? Number(h.전용면적) : null;
-    /* 면적을 모르는 호는 **같은 폭**으로 둔다. 0 으로 두면 사라지고,
-       사라지면 '그 호가 없다' 로 읽힌다. 대신 빗금으로 모른다고 적는다. */
-    const grow = a != null ? a : (tot && known.length ? tot / known.length : 1);
-    const dim = areaSel && !hoMatches(h, areaSel) ? ' dim' : '';
-    const cls = h.단지분위 ? `p${h.단지분위}` : 'p0';
-    return `<div class="fp-c ${cls}${dim}${a == null ? ' unk' : ''}"
-       style="flex:${grow.toFixed(2)} 1 0"
-       data-ho-pk="${esc(String(h.호PK))}"
-       title="${esc(`${h.라인 == null ? '라인 모름' : String(h.라인).padStart(2,'0') + '라인'} ${h.호}호`
-              + (a != null ? ` · 전용 ${a.toFixed(2)}㎡` : ' · 전용면적 모름')
-              + (h.공시가격 ? ` · 공시 ${eok(h.공시가격)}` : ''))}">
-       <b>${esc(String(h.호))}</b>
-       <span>${a != null ? `${a.toFixed(1)}㎡` : '—'}</span>
-       <i>${a != null ? `${py(a)}평` : '면적 모름'}</i></div>`;
-  }).join('');
-
-  /* 동 윤곽이 있으면 그 안에 얹고, 없으면 네모 막대로 떨어진다.
-     윤곽은 실측이고 막대는 비율뿐이다 - 둘을 같은 말로 설명하면 안 된다. */
-  const pl = planSVG(R, nm, flr, areaSel);
-  const svg = pl && pl.html;
-  return `<div class="fp">
-    <div class="fp-h">${esc(nm || '')} <b>${fnm(flr)}층</b>
-      <span class="muted">${fmt(R.length)}호${
-        tot ? ` · 전용 합계 ${tot.toFixed(1)}㎡` : ''}</span>
-      <button type="button" class="hm-x" data-ho-flr="">닫기</button></div>
-    ${svg ? `<div class="pl-wrap">${svg}</div>` : ''}
-    ${(!svg || !pl.slab) ? `<div class="fp-row">${boxes}</div>` : ''}
-    ${ known.length < R.length ? `<p class="srcline"><b>점선</b> ${fmt(R.length - known.length)}칸은 전용면적을 아직 안 받아온 호입니다 — 폭은 평균으로 뒀습니다.</p>` : ''}</div>`;
-}
-
+/* 2026-10-23 사장님 "평면도는 그냥 다 빼줘" — 층 평면 모식도(floorPlan) · 평형별 평면도 그림(public/floorplans) 을 지웠다. */
 /* ---------------- 동 구성 (단지 -> 동 -> 호) ----------------
    세 축을 한 섹션에 **3단계로 쌓는다.** 2026-10-17 에 합쳤다.
 
@@ -3121,7 +2933,7 @@ function floorPlan(hos, sel, flr, nm, areaSel) {
    ★ 합치면서 **단계별 출처는 유지한다.** 세 축이 각각 표제부 / 층별개요 /
      전유부에서 오고 적재 범위가 다르다. 한 덩어리로 보이면 "무엇이 없어서
      무엇이 안 보이는지" 가 흐려진다 — 오늘 만든 빈칸 어휘가 거기서 깎인다. */
-function structureBlock(dongs, floors, hos, scope, hoTotal, plans, cid) {
+function structureBlock(dongs, floors, hos, scope, hoTotal) {
   const real = (dongs || []).filter(d => !d.is_recap);
   if (!real.length && !(floors || []).length && !(hos || []).length) return '';
 
@@ -3252,61 +3064,8 @@ function structureBlock(dongs, floors, hos, scope, hoTotal, plans, cid) {
   /* 격자 한 장으로 끝난다. 층·호가 둘 다 없으면 입면으로 내려간다.
      입면은 단지 전체를 한 장에 그리므로 동 선택과 무관하다. */
   const grid = gridBlock(real, floors, hos, scope, sel, areaOn);
-  const plan = grid ? floorPlan(hos, sel, hoFloor,
-                 (dongStat.get(sel) || {}).nm, areaOn) : '';
-  /* ---- 평형별 평면도 (2026-10-18) ----
-     ★ 이건 **그림이지 좌표가 아니다.** 벽선도 치수도 없다 - 여기서 면적을
-       뽑아 쓰지 않는다. 그래서 DB 가 아니라 파일로 둔다
-       (`public/floorplans/<단지코드>/<전용면적>.jpg`).
-     ★ 파일명이 **위 평형 칩과 같은 수**다. 그래서 없을 때 화면이
-       "어디에 넣으면 되는지" 를 스스로 말할 수 있다 - 설명서를 따로 안 둔다.
-     ★ 고른 평형이 있으면 그것만, 없으면 이 동에 있는 평형 전부를 띄운다. */
-  const P = plans || [];
-  const want = hoAreaX ? (v => v === hoAreaX)
-             : hoArea  ? (v => String(Math.floor(Number(v))) === hoArea)
-             : (v => aEx.size === 0 || [...aEx.values()].some(m => m.has(v)));
-  const shown = P.filter(p => want(p.area));
-  const fpBlock = (() => {
-    if (shown.length) return `<div class="fplan">${shown.map(p => `
-        <figure><img src="${esc(p.url)}" alt="${esc(p.area)}㎡ 평면도" loading="lazy">
-          <figcaption>${esc(p.area)}㎡${p.type ? ` <b>${esc(p.type)}</b>` : ''}</figcaption>
-        </figure>`).join('')}
-        
-      </div>`;
-    /* ★ 평면도가 없으면 **아무것도 띄우지 않는다**(2026-10-19). 지금 넣어 둔
-       평면도는 0 개라, 전에는 모든 단지의 모든 평형에서 "아직 넣지 않았습니다"
-       가 떴다. 없는 걸 매번 알리는 건 정보가 아니라 잡음이다.
-       넣는 방법 안내는 **내 화면에서만** 보이게 둔다 - 넣으면 저절로 살아난다. */
-    if (!aKeys.length || !개발중) return '';
-    const ex = [...(aEx.get(hoArea || aKeys[0]) || new Map()).keys()][0] || '84.94';
-    return `<p class="note">이 평형의 <b>평면도를 아직 넣지 않았습니다.</b>
-      <span class="muted">넣으려면 <code>public/floorplans/${esc(String(cid))}/${esc(ex)}.jpg</code>
-      로 저장하세요 — 파일명이 위 평형 칩의 숫자입니다.</span></p>`;
-  })();
-
-  /* ---- 기준층 평면 보기 (2026-10-18) ----
-     ★ 평면 모식도는 **격자의 층 번호를 눌러야** 열렸다. 그걸 아무도 모른다 --
-       층 라벨이 눌리는 것처럼 생기지 않았기 때문이다. 기능이 있는데 닫혀 있는
-       것과 아예 없는 것은 **화면에서 똑같다.** 그래서 버튼을 내놓는다.
-     ★ 기준층은 "호가 가장 많은 층" 이다. 고른 평형이 있으면 **그 평형이 가장
-       많은 층**으로 간다 -- 46㎡ 를 골라 놓고 46㎡ 가 없는 층이 열리면
-       흐려진 빈 평면을 보여주는 셈이다.
-     ★ 같은 수면 낮은 층을 고른다. 고를 때마다 달라지면 안 되므로
-       Map 의 순서에 기대지 않는다. */
-  const fCnt = new Map();
-  const bump = h => { const f = Number(h.층); fCnt.set(f, (fCnt.get(f) || 0) + 1); };
-  for (const h of hoSel) if (h.층 != null && (!areaOn || hoMatches(h, areaOn))) bump(h);
-  if (!fCnt.size) for (const h of hoSel) if (h.층 != null) bump(h);
-  let base = null, bn = -1;
-  for (const [f, n] of fCnt) if (n > bn || (n === bn && f < base)) { base = f; bn = n; }
-  const atBase = base != null && hoFloor != null && Number(hoFloor) === base;
-  const planBtn = (base == null || !grid) ? '' : `<div class="planrow">
-      <button type="button" class="planbtn" data-ho-flr="${atBase ? '' : base}">${
-        atBase ? '평면 접기'
-               : `기준층 평면 보기<b>${base < 0 ? '지하' + (-base) : base}층 · ${fmt(bn)}호</b>`
-      }</button><span class="muted">격자의 층 번호를 눌러 다른 층도 볼 수 있습니다 · <b>호 칸을 누르면</b> 공시가격 회차와 그 호에 이어진 대장 · 실거래가 열립니다</span></div>`;
-
-  const body = grid ? picker + apick + xpick + fpBlock + aMiss + aNone + grid + planBtn + plan
+  const body = grid ? picker + apick + xpick + aMiss + aNone + grid
+      + `<p class="note sm muted"><b>호 칸을 누르면</b> 공시가격 회차와 이어서 볼 곳이 열립니다</p>`
                     : elevationBlock(real, sel);
 
   /* 호가 없을 때만 그 사유를 적는다 — 격자는 이미 떠 있으므로 섹션이 비지 않는다 */
@@ -4322,7 +4081,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt) {
 function renderDetail(payload) {
   lastDetail = payload;
   const { complex: c, dongs, parcels, tradeStats, offsite, spec, permits, permitDongs, kapt, cost,
-          floors, hos, scope, 호총수, 전용률, 호공시, 공시적재, 거래목록, 평면도, zones, redev, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, vlrat, busRoutes, busList, 좌표없음, kinders, kinderLoaded, jeonse, academy } = payload;
+          floors, hos, scope, 호총수, 전용률, 호공시, 공시적재, 거래목록, zones, redev, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, vlrat, busRoutes, busList, 좌표없음, kinders, kinderLoaded, jeonse, academy } = payload;
   /* 실거래는 평형(전용면적) 단위로 묶어서 본다. 동/호 특정은 하지 않는다.
      (아파트 매매 말고는 동 정보가 API 에 아예 없다. ../Teomoony/CONTEXT.md 4절) */
   const stats = tradeStats || [];
@@ -4875,7 +4634,7 @@ function renderDetail(payload) {
 
   /* 어떻게 생겼나 — 동/층별개요/전유부. 셋의 적재 범위가 서로 다르다. */
   const paneD = `
-    ${structureBlock(dongs, floors, hos, scope, 호총수, 평면도, c.complex_id)}
+    ${structureBlock(dongs, floors, hos, scope, 호총수)}
     ${/* 2026-10-23: 공시가격 추이는 실거래 탭에서 여기로 — 호마다 매기는 값이라 동·호 배치도(호 칸 · 호 상세)와 한 자리 */''}
     ${prcBlock(호공시, scope, 공시적재, dongs)}
 
@@ -5019,12 +4778,6 @@ function renderDetail(payload) {
   /* 격자 칸 -> 호 상세 */
   $('#detail').querySelectorAll('[data-ho-pk]').forEach(c =>
     c.addEventListener('click', () => openHo(c.dataset.hoPk)));
-  /* 층 라벨 -> 그 층의 평면 모식도 (빈 값이면 접는다) */
-  $('#detail').querySelectorAll('[data-ho-flr]').forEach(b =>
-    b.addEventListener('click', () => {
-      const v = b.dataset.hoFlr;
-      hoFloor = (v === '' || String(hoFloor) === v) ? null : Number(v);
-      renderDetail(lastDetail); }));
   /* 격자 평형 고르기 */
   $('#detail').querySelectorAll('[data-ho-area]').forEach(b =>
     b.addEventListener('click', () => {
@@ -5404,9 +5157,7 @@ const 정책 = [
     '<b>단지</b>는 대장의 총괄표제부·표제부를 지번과 관리번호로 묶은 것입니다. 동은 이름이 아니라 <b>관리건축물대장PK</b>로 잇습니다.',
     '<b>동 막대</b>의 높이는 지상 층수입니다 — 동의 실제 위치가 아니라 층 구성입니다(위치는 지도). 진한 것이 주거동, 옅은 것이 부속동입니다.',
     '<b>동·호 격자</b>는 가로가 라인, 세로가 층, 칸이 호입니다. 라인은 호번호가 <b>층×100+라인</b> 꼴일 때만 가릅니다(상가·지하 등은 ? 칸).',
-    '<b>평면 배치</b>는 실제 도면이 아닙니다. 바깥 윤곽은 건물 외곽선(실측), 칸의 폭은 전용면적(실측)이고, 방·벽·문·창은 원본에 없어 그리지 않습니다. <b>어느 끝이 01라인인지는 원본에 없어</b> 좌우가 뒤집혀 있을 수 있습니다. 거의 정사각형인 탑상형은 칸을 나누지 않습니다(없는 배치를 지어내지 않으려고).',
     '격자 칸에 올리면 동·라인·층·호와 용도·공시가격이 나오고, 누르면 그 호의 공시가격 이력이 열립니다. 한 라인 안을 세로로 읽는 것이 순수한 층 차이입니다(라인이 다르면 평형이 섞입니다).',
-    '<b>평면도 그림</b>은 그림일 뿐이라 면적을 재거나 뽑아 쓸 수 없습니다. 전용면적이 정확한 값입니다.',
     '<b>전용률</b>은 전유 ÷ <b>계약면적</b>(전유+공용 전부)입니다. 공용 합계가 과소일 수 있어 실제보다 높게 나올 수 있습니다. 흔히 말하는 70~80%는 전유 ÷ 공급(분양)면적인데, 공용을 주거공용·기타공용으로 가르는 코드가 원본에 없어 공급면적은 내지 않습니다.',
   ] },
   { 키: '주택가격', 제목: '공시가격 (공동주택가격)', 글: [
