@@ -2147,6 +2147,9 @@ const SORTS = [
     words: ['구축', '오래된', '낡은'] },
   { key: 'trades', label: '거래 많은 순',             dir: 'desc',
     words: ['거래 많은', '거래가 많은', '활발'] },
+  /* 2026-10-23 사장님 "AI 검색에 더 집중" — 학교 가까운 순. 거리 기준(문턱)을 지어내지 않고 **줄만 세운다**(단지 상세 학교 칸과 같은 거리 · 2km 안 · 배정 아님) */
+  { key: 'school', label: '학교 가까운 순(2km 안 · 직선거리 · 배정 아님)', dir: 'asc',
+    words: ['초등학교 가까운', '중학교 가까운', '고등학교 가까운', '학교 가까운', '학교에서 가까운', '학교가 가까운', '학교 근처', '학교 바로 앞', '학교 앞', '학교 옆'] },
   /* 312 (2026-10-22): 역 가까운 순 — gold.complex_station(단지 상세 지하철 칸과 같은 거리, 1.5km 안만) */
   { key: 'station', label: '역 가까운 순(1.5km 안)', dir: 'asc',
     words: ['역 가까운', '역에서 가까운', '역이 가까운', '역과 가까운', '역 근처', '지하철 가까운', '지하철역 가까운', '역 바로 앞', '역 앞'] },
@@ -2937,7 +2940,6 @@ function 조건읽기(q0) {
     [/조용한|쾌적한|살기\s*좋은|분위기\s*좋은/, "주관적인 말이라 조건으로 바꿀 수 없습니다"],
     [/숲세권|공세권|몰세권|슬세권|학세권|편세권/, "정해진 거리가 없습니다 — 거리로 적어 주세요(역 · 학교만 셉니다)"]])
     if ((m = 잡(re))) 알림.push({ 종류: 'HINT', 말: `'${m[0].trim()}' — ${말}. 이번엔 쓰지 않았습니다` });
-  if (!학 && (m = 잡(/(초등학교|중학교|고등학교|학교)\s*(가까운|근처|앞|옆)/))) 알림.push({ 종류: 'HINT', 말: `'${m[0].trim()}' 은 거리가 없습니다 — '${m[1] === '학교' ? '초등학교' : m[1]} 300m 안' 처럼 거리로 적어 주세요(학교 가까운 순 정렬은 없습니다). 이번엔 쓰지 않았습니다` });
   if ((m = 잡(/초품아/))) 알림.push({ 종류: 'HINT', 말: `'초품아' 는 정해진 기준이 없고, 배정은 거리가 아니라 학구도로 정해집니다 — '초등학교 300m 안' 처럼 거리로 적어 주세요. 이번엔 쓰지 않았습니다` });
 
   /* ---- 정비구역 (서울 정비사업 자료) ---- */
@@ -3010,7 +3012,7 @@ function 노선SQL(노선, rq) {
   return `AND s.line_nm = @ln`;
 }
 /* 결과 줄에 붙일 사실 — 쓴 조건만. 값은 같은 요약표에서. */
-function 조건칸SQL(조건, 정렬역) {
+function 조건칸SQL(조건, 정렬역, 정렬학교) {
   const 칸 = [], 붙 = [];
   if (조건.면적) {
     칸.push('ar.면적최소, ar.면적최대, ar.면적호수');
@@ -3025,8 +3027,13 @@ function 조건칸SQL(조건, 정렬역) {
   }
   if (조건.학교) {
     칸.push('sk.학교이름, sk.학교거리');
+    /* 2026-10-23 QA: ORDER BY 가 없어 '가장 가까운' 이 아니라 아무 학교가 붙었다 */
     붙.push(`OUTER APPLY (SELECT TOP 1 학교이름 = k.school_nm, 학교거리 = k.dist_m FROM gold.complex_school_near k
-                WHERE k.complex_id = c.complex_id AND k.school_se = @kse) sk`);
+                WHERE k.complex_id = c.complex_id AND k.school_se = @kse ORDER BY k.dist_m) sk`);
+  } else if (정렬학교) {
+    칸.push('sk.학교이름, sk.학교거리');
+    붙.push(`OUTER APPLY (SELECT TOP 1 학교이름 = k.school_nm, 학교거리 = k.dist_m FROM gold.complex_school_near k
+                WHERE k.complex_id = c.complex_id AND (@kse2 IS NULL OR k.school_se = @kse2) ORDER BY k.dist_m) sk`);
   }
   if (조건.정비 && !조건.정비.아님) {     // '안 걸친' 을 물었으면 다른 구역 이름을 붙이지 않는다(헷갈린다)
     칸.push('rz.정비이름, rz.정비종류, rz.정비포함률');
@@ -3339,17 +3346,21 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     const 종목근거 = Boolean(종목) && !['unit', 'amount', 'amount_asc'].includes(정렬.key);
     if (종목근거) { rq2.input('kg3', sql.VarChar(4), 종목.key); 필터.push(`${종목.label} — 그 종류 매매가 있는 단지(종류는 실거래로 압니다)`); }
     const 정렬역 = 정렬.key === 'station';
-    const 조건칸 = 조건칸SQL(조건, 정렬역);
+    const 정렬학교 = 정렬.key === 'school';
+    const 학교종 = /초등/.test(q) ? '초등학교' : /중학/.test(q) ? '중학교' : /고등|고교/.test(q) ? '고등학교' : null;
+    if (정렬학교) { rq2.input('kse2', sql.NVarChar(20), 조건.학교 ? 조건.학교.se : 학교종); 필터.push(`학교 가까운 순: ${(조건.학교 ? 조건.학교.se : 학교종) || '초·중·고'} 중 가장 가까운 학교까지 직선거리(2km 안 · 배정 아님)`); }
+    const 조건칸 = 조건칸SQL(조건, 정렬역, 정렬학교);
     /* 2026-10-23 QA(사장님 "AI 검색 QA 계속"): 종목을 말하지 않으면 값은 **주거 거래**(아파트·연립·단독·오피스텔)로 본다 —
        '재건축 구역에 걸친 단지' 에 상가 한 채(잠실동 27-6 판매시설)의 상업용 매매 45억이 단지 최고가로 섞였다. */
     const 주거거래 = 종목 ? '' : "AND (r.trade_kind LIKE 'APT%' OR r.trade_kind LIKE 'RH%' OR r.trade_kind LIKE 'SH%' OR r.trade_kind LIKE 'OFFI%')";
     if (!종목 && ['unit', 'amount', 'amount_asc'].includes(정렬.key)) 필터.push('종목을 말하지 않아 주거 매매(아파트·연립·단독·오피스텔)로 셉니다 — 상가·토지 거래는 뺐습니다');
     /* 신축·구축 순인데 종목이 없으면 세대 있는 단지만 — '역세권 신축' 에 세대 없는 빌딩(금강빌딩 · 복합문화센터)이 1등이었다 */
-    const 세대만 = !종목 && (날짜정렬 || Boolean(정렬역));   // 역 가까운 순도 — '잠실동 역 가까운 순' 이 세대 없는 빌딩으로 찼다
+    const 세대만 = !종목 && (날짜정렬 || Boolean(정렬역) || Boolean(정렬학교));   // 역 가까운 순도 — '잠실동 역 가까운 순' 이 세대 없는 빌딩으로 찼다
     if (세대만) 필터.push('종목을 말하지 않아 세대가 있는 단지만 봅니다');
     const 면적거래 = 조건.면적 ? 'AND CAST(r.exclu_use_ar AS DECIMAL(9,2)) >= @alo AND CAST(r.exclu_use_ar AS DECIMAL(9,2)) < @ahi' : '';
     const ORDER = {
       station:    'st.역거리 ASC',
+      school:     'sk.학교거리 ASC',
       unit:       't.unit_won DESC',
       amount:     't.max_amount DESC',
       amount_asc: 't.max_amount ASC',
@@ -3382,6 +3393,19 @@ app.get('/api/ask', requireAuth, async (req, res) => {
          WHERE c.is_active = 1 AND ${지역조건} AND s.d IS NOT NULL
            AND ${이름조건}
            AND (@kg2 IS NULL OR EXISTS (SELECT 1 FROM gold.complex_trade_max k2 WHERE k2.complex_id = c.complex_id AND k2.종류 = @kg2))
+           ${세대만 ? 'AND c.hhld_cnt_sum > 0' : ''}
+           ${조건조각}
+         ORDER BY s.d)`;
+    }
+    if (정렬학교) {
+      /* 학교 가까운 순도 학교 거리로 후보를 먼저(역 가까운 순과 같은 까닭) */
+      rq2.input('candS', sql.Int, 개수 * 3 + 30).input('kgS', sql.VarChar(4), 종목 ? 종목.key : null);
+      후보 = `AND c.complex_id IN (
+        SELECT TOP (@candS) c.complex_id FROM gold.complex c
+         CROSS APPLY (SELECT d = MIN(k.dist_m) FROM gold.complex_school_near k WHERE k.complex_id = c.complex_id
+                       AND (@kse2 IS NULL OR k.school_se = @kse2)) s
+         WHERE c.is_active = 1 AND ${지역조건} AND s.d IS NOT NULL AND ${이름조건}
+           AND (@kgS IS NULL OR EXISTS (SELECT 1 FROM gold.complex_trade_max k2 WHERE k2.complex_id = c.complex_id AND k2.종류 = @kgS))
            ${세대만 ? 'AND c.hhld_cnt_sum > 0' : ''}
            ${조건조각}
          ORDER BY s.d)`;
@@ -3465,6 +3489,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
          ${후보}
          ${조건조각}
          ${정렬역 ? 'AND st.역거리 IS NOT NULL' : ''}
+         ${정렬학교 ? 'AND sk.학교거리 IS NOT NULL' : ''}
          ${날짜정렬 ? "AND c.oldest_use_apr LIKE '[12][0-9][0-9][0-9][01][0-9][0-3][0-9]'" : ''}
          ${세대만 ? 'AND c.hhld_cnt_sum > 0' : ''}
          ${종목근거 ? 'AND EXISTS (SELECT 1 FROM gold.complex_trade_max k3 WHERE k3.complex_id = c.complex_id AND k3.종류 = @kg3)' : ''}
