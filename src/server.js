@@ -890,6 +890,10 @@ const 내보내기목록 = {
        AND (l.lawd_cd LIKE '11%' OR LEFT(l.lawd_cd, 5) IN ('41171', '41173'))
        AND NOT EXISTS (SELECT 1 FROM silver.juso_addr_done d WHERE d.lawd_cd = l.lawd_cd AND d.다받음 = 1)
      ORDER BY l.lawd_cd;`,
+  /* 326: 좌표 없는 단지의 대장 도로명주소 — VWorld 지오코더에 물을 말(아직 안 물은 것) */
+  geo_ask: `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    SELECT a.keyword FROM gold.v_geocode_ask_complex a
+     WHERE NOT EXISTS (SELECT 1 FROM silver.vworld_geocode g WHERE g.keyword = a.keyword) ORDER BY a.keyword;`,
   /* 검색 API 가 9,000줄까지만 주는 큰 법정동(면목동 · 신림동 …) — 그 동의 본번마다 다시 묻는다. 본번 = 지금 지적 필지 ∪ 대장 지번 */
   juso_bonbun: `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
     WITH 동 AS (SELECT l.lawd_cd FROM meta.lawd_code l

@@ -606,6 +606,44 @@ function setBase(kind) {
     toast('항공사진은 VWorld 타일이 있어야 합니다. 현재 OpenStreetMap 입니다.', 6000);
 }
 
+/* 2026-10-23 사장님 "데스크탑은 마우스가 꾹 눌린 상태면 회전할 수 있게" —
+   지도를 **0.45초 움직이지 않고 누르고 있으면** 회전 모드: 그대로 끌면 지도 가운데를 축으로 돈다. 바로 끌면 예전처럼 이동.
+   ★ Leaflet 의 끌기는 document 에 mousemove 를 건다 — 회전 중에는 window(잡기 단계)에서 먼저 받아 멈춰 지도가 같이 밀리지 않게 한다.
+   ★ 손을 뗀 뒤의 click 은 한 번 삼킨다(마커 위에서 돌려도 그 단지가 열리지 않게). 단추 · 말풍선 위에서는 안 한다. */
+function 길게눌러돌리기() {
+  const el = map.getContainer();
+  let timer = null, start = null, rot = null;
+  const 끝 = () => { if (timer) { clearTimeout(timer); timer = null; } start = null; };
+  el.addEventListener('mousedown', e => {
+    if (e.button !== 0 || e.shiftKey || typeof map.setBearing !== 'function') return;
+    if (e.target.closest('.leaflet-control, .leaflet-popup')) return;   // 단추 · 말풍선 위는 그대로(마커 위는 돌린다 — 손을 뗀 뒤 click 은 삼킨다)
+    start = { x: e.clientX, y: e.clientY };
+    timer = setTimeout(() => {
+      timer = null;
+      const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      rot = { cx, cy, a0: Math.atan2(start.y - cy, start.x - cx), b0: map.getBearing() };
+      el.classList.add('rotating');
+    }, 450);
+  }, true);
+  window.addEventListener('mousemove', e => {
+    if (timer && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 3) 끝();   // 바로 끌면 이동
+    if (!rot) return;
+    e.stopPropagation(); e.preventDefault();
+    const a = Math.atan2(e.clientY - rot.cy, e.clientX - rot.cx);
+    let b = rot.b0 + (a - rot.a0) * 180 / Math.PI; b = ((b % 360) + 360) % 360;
+    map.setBearing(b);
+  }, true);
+  window.addEventListener('mouseup', () => {
+    끝();
+    if (rot) {
+      rot = null; el.classList.remove('rotating');
+      const 삼킴 = ev => { ev.stopPropagation(); ev.preventDefault(); };
+      el.addEventListener('click', 삼킴, { capture: true, once: true });
+      setTimeout(() => el.removeEventListener('click', 삼킴, { capture: true }), 300);
+    }
+  }, true);
+}
+
 /* ---------------- 지도 ---------------- */
 function initMap() {
   map = L.map('map', {
@@ -631,7 +669,7 @@ function initMap() {
        ★ zoomDelta 는 1 로 둔다 — 좌측 +/- 단추는 한 단계씩 가는 게 맞다. */
     zoomSnap: 0.5, zoomDelta: 1,
     /* 2026-10-23 사장님 "지도를 360도로 회전 가능하게" — leaflet-rotate(Leaflet 1.9 플러그인).
-       폰: 두 손가락 비틀기 · PC: Shift + 끌기(또는 Shift + 휠) · 나침반 단추를 누르면 북쪽이 위로. */
+       폰: 두 손가락 비틀기 · PC: 빈 곳을 꾹 누른 채 끌기(길게눌러돌리기) 또는 Shift + 끌기 · 나침반 단추를 누르면 북쪽이 위로. */
     rotate: true, bearing: 0, touchRotate: true, shiftKeyRotate: true,
     rotateControl: { closeOnZeroBearing: false, position: 'topleft' },
     /* ★ 아래에서 Leaflet 의 휠 확대를 **끄고 직접 돌린다.** 이 값은 남겨 두지만
@@ -646,6 +684,7 @@ function initMap() {
      그래서 Leaflet 것을 끄고 **규칙을 바꾼다: 한 번 굴리면 딱 한 단계.**
      연속해서 굴리면 쿨다운(220ms)마다 한 단계씩 — 예측 가능하고 절대 안 튄다.
      ★ 커서 위치를 중심으로 확대한다(setZoomAround) — 지도에서 그게 기본 기대다. */
+  길게눌러돌리기();
   map.scrollWheelZoom.disable();
   /* ★ 2차 수정 (사용자 재신고). 처음엔 **고정 쿨다운 220ms** 로 막았다 —
      "한 번 굴림" 과 "한 제스처에 10번" 은 둘 다 1회로 막혔는데도 실기기에서는
@@ -5319,7 +5358,7 @@ const 정책 = [
     '<b>분양권·입주권 → 단지</b>(목록에만 보이고 평형 요약 · 최고가 · 전세가율 · AI 검색 · 지역 순위에는 넣지 않음) ① 이 단지에 이어진 청약 공고의 지번(공고 · 그 공고의 K-apt · 이 단지 필지)에서 <b>첫 모집공고일 이후</b> 계약 — 입주권은 공고 <b>전 10년</b>까지(조합원 권리는 일반분양 전에 거래됨) ② 이 단지 필지에서 <b>준공 전 ~ 준공 뒤 10년</b> 계약, 같은 필지에 거래 10년 전 이후 준공된 다른 세대 단지가 없을 때 ③ 이 단지 K-apt 의 지번, 그 지번의 K-apt 가 이 단지뿐이고 준공 앞뒤 10년 안. 국토부에 권리로 신고된 것은 그대로 권리 거래로 보여 줍니다.',
     '<b>K-apt → 단지</b> ① 같은 법정동 + 같은 사용승인일인 단지가 양쪽에 하나씩 ② K-apt 도로명주소의 <b>공식 도로명코드+건물번호</b> = 단지 어느 동 대장의 도로명코드+건물번호, 또는 K-apt 의 공식 지번 = 단지 필지 — 그리고 세대수 5% 안 · 양쪽 하나씩.',
     '<b>청약 공고 → 단지</b>(앞 길이 먼저, 한 공고는 한 단지) ① 같은 법정동 · 입주예정월 ±4개월 안 사용승인 · 단지 세대 ≥ 공급 · 공고 지번 필지와 100m 안 — 후보 하나 ② 공고 지번 = 단지 필지 · 공고 뒤 준공한 세대 단지 하나 ③ 공고 지번 = K-apt 지번(그 지번 K-apt 하나): 그 K-apt 의 단지가 공고 뒤 준공이면 그 단지, 대장이 아직 없는 신축이면 그 K-apt(신축) — 공급 ≤ 세대 ④ <b>오피스텔 · 도시형 · 생활숙박</b>: 공고 지번 = 단지 필지 · 그 필지 단지 하나 · 사용승인 ≥ 공고일 − 3년 ⑤ <b>무순위 · 임의공급 · 불법행위 재공급</b>(준공 뒤 남은 집 · 취소분): 공고 지번 = 단지 필지 · 세대 단지 하나 · 사용승인 ≥ 공고일 − 5년 · 세대 ≥ 공급.<br><span class="muted">막은 예: 공급 ≤ 세대가 없으면 롯데캐슬 이스트폴(631) 공고가 같은 지번의 어울채행복주택(300)에 붙었다. 사용승인 하한이 없으면 오피스텔 공고가 그 자리 헐리기 전 1978·1985년 건물에 붙었다. 거리 없이 \'법정동 · 입주월 · 세대\' 만 맞는 후보는 쓰지 않는다(겹친 8건 중 7건이 다른 단지).</span>',
-    '<b>지도 자리</b> — 단지는 필지 경계의 중심. 필지가 지금 지적도에 없는 단지는 대장 도로명주소 → 공식 주소(정확히 하나) → 그 공식 지번 필지(같은 시군구)의 중심에 놓습니다. 폐쇄 대장은 필지 중심, 필지가 없으면 ① 토지이동이력의 \'N번과 합병되어 말소\' 인 N 필지 ② 같은 도로명주소의 지금 건물(자리만 빌리고 \'뒤를 이은 단지\' 로 보지 않음) ③ 공식 주소의 지번 필지. 어느 길로 놓았는지 상세에 적습니다.',
+    '<b>지도 자리</b> — 단지는 필지 경계의 중심. 필지가 지금 지적도에 없는 단지는 ① 대장 도로명주소 → 공식 주소(정확히 하나) → 그 공식 지번 필지(같은 시군구)의 중심 ② 그 지번도 지적도에 없으면 대장 도로명주소를 <b>VWorld 지오코더</b>에 물어, 돌려준 주소가 물은 주소와 <b>글자 그대로 같을 때만</b> 그 건물 점(마곡 엠밸리 9단지 · 우디안 · 파크샤인 등)에 놓습니다 — 자리만 쓰고 단지 필지로는 쓰지 않습니다. 폐쇄 대장은 필지 중심, 필지가 없으면 ① 토지이동이력의 \'N번과 합병되어 말소\' 인 N 필지 ② 같은 도로명주소의 지금 건물(자리만 빌리고 \'뒤를 이은 단지\' 로 보지 않음) ③ 공식 주소의 지번 필지. 어느 길로 놓았는지 상세에 적습니다.',
     '<b>대장이 아직 없는 새 단지</b>(재건축·재개발은 이전고시 뒤에 새 지번으로 대장이 생기는 경우가 많음): K-apt 에만 있으면 <b>신축</b>으로 지도·검색에 보이고, 동·호·면적은 공식 대장이 생기면 채워집니다. 추정으로 단지를 만들지 않습니다.',
     '<b>잇지 않는 것</b> — 사업 중 임시 지번(가지번) · 블록 번호(공식 대응표가 없음), 공식 주소의 지번이 지금 지적도에 없는 곳, 여러 단지를 한 번에 모집한 공고(행복주택 · 국민임대 차수 등). 이런 거래·공고는 법정동 · 폐쇄 대장 · 정비구역 상세에서 보입니다.',
   ] },
