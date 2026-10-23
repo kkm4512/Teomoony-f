@@ -3304,7 +3304,7 @@ function structureBlock(dongs, floors, hos, scope, hoTotal, plans, cid) {
       <button type="button" class="planbtn" data-ho-flr="${atBase ? '' : base}">${
         atBase ? '평면 접기'
                : `기준층 평면 보기<b>${base < 0 ? '지하' + (-base) : base}층 · ${fmt(bn)}호</b>`
-      }</button><span class="muted">격자의 층 번호를 눌러 다른 층도 볼 수 있습니다 · <b>호 칸을 누르면</b> 공시가격 회차와 <b>전세 계약 전 확인</b>이 열립니다</span></div>`;
+      }</button><span class="muted">격자의 층 번호를 눌러 다른 층도 볼 수 있습니다 · <b>호 칸을 누르면</b> 공시가격 회차와 그 호에 이어진 대장 · 실거래가 열립니다</span></div>`;
 
   const body = grid ? picker + apick + xpick + fpBlock + aMiss + aNone + grid + planBtn + plan
                     : elevationBlock(real, sel);
@@ -3471,15 +3471,16 @@ async function openHo(pk) {
           f.구획수 ? ` · ${fmt(f.구획수)}구획` : ''}`).join('<br>')
       }<span class="muted"> — 호가 아니라 층 전체입니다</span></div>` : ''}
     </div>
-    <div class="hm-chk" data-hm-chk><div class="hm-ch">전세 계약 전 확인</div><p class="muted">불러오는 중…</p></div></div>`;
-  전세확인(pk);
+    <div class="hm-chk" data-hm-chk><p class="muted">이 호에 이어진 대장 · 실거래 불러오는 중…</p></div></div>`;
+  호이어진자료(pk);
 }
 
-/* ---------------- 전세 계약 전 확인 (2026-10-23 사장님 "너의견대로 ㄱㄱ" — 차별점 1번) ----------------
-   ★ 호 상세 아래에 붙인다 — 공시가격 · 전용면적은 위에 이미 있다. 여기는 **용도 · 건물 · 같은 평형 거래 · 정비구역 · 못 보는 것**.
-   ★ 판정하지 않는다: 안전/위험 · 점수 · 보증 가입 가능 여부를 내지 않는다(기준이 바뀌고, 우리가 고르면 거짓 기준).
-     원본에 적힌 것과 같은 단지 · 같은 전용면적 묶음의 실거래만 — 못 보는 것은 공식 확인 경로를 적는다. */
-async function 전세확인(pk) {
+/* ---------------- 호에 이어진 자료 (2026-10-23) ----------------
+   ★ 처음엔 '전세 계약 전 확인' 이라는 따로 된 섹션이었다. 사장님: "우리는 부동산 데이터를 잘 매칭해서 보여주는 게 주 목표" ·
+     "동호배치도에서 특정 호 클릭하면 나오는 데이터에서 연계해서 보여주는 방향" — 조언 틀(기관 안내 · 전세 문구)을 빼고
+     **이 호에서 이어지는 자료**(호 용도 → 그 동 표제부 → 단지 정비구역 → 같은 단지 · 같은 평형 실거래 · 전세가율)로 호 상세에 잇는다.
+   ★ 판정하지 않는다. 원본과 이은 결과만. 실거래에는 동·호가 없다 — 같은 층만 표시. */
+async function 호이어진자료(pk) {
   const box = document.querySelector('#homodal [data-hm-chk]');
   if (!box) return;
   let d;
@@ -3487,18 +3488,18 @@ async function 전세확인(pk) {
     const r = await fetch(`/api/ho/${encodeURIComponent(pk)}/check`);
     if (!r.ok) throw new Error(r.status === 404 ? '이 호를 찾지 못했습니다' : '불러오지 못했습니다');
     d = await r.json();
-  } catch (e) { box.innerHTML = `<div class="hm-ch">전세 계약 전 확인</div><p class="note">${esc(e.message)}</p>`; return; }
+  } catch (e) { box.innerHTML = `<p class="note">${esc(e.message)}</p>`; return; }
   if (!document.body.contains(box)) return;
   const d8 = v => { const t = String(v || ''); return t.length === 8 ? `${t.slice(0, 4)}.${t.slice(4, 6)}.${t.slice(6, 8)}` : (t || '—'); };
   const 전유 = d.전유 || {}, 동 = d.동, 거 = d.거래 || {}, 셈 = 거.셈 || {}, 층 = d.ho && d.ho.층;
   const 용도 = 전유.용도들 || '';
   const 주택아님 = 용도 && !/주택|아파트/.test(용도);
   const 용도줄 = 용도
-    ? `${esc(용도)}${주택아님 ? `<div class="hm-warn">대장에 적힌 이 호의 용도가 <b>주택이 아닙니다</b>(원문 '${esc(용도)}') — 실제 쓰임과 다를 수 있습니다</div>` : ''}`
+    ? `${esc(용도)}${주택아님 ? ` <span class="pill">주택 아님</span>` : ''}`
     : gapCell('', 'SCOPE', '이 호의 전유부 용도를 아직 받아오지 않았습니다');
   const 해 = 동 && /^\d{8}$/.test(String(동.사용승인일 || '')) ? new Date().getFullYear() - Number(String(동.사용승인일).slice(0, 4)) : null;
   const 건물줄 = 동 ? [
-      ['주용도', `${esc(동.주용도 || '—')}${동.기타용도 && 동.기타용도 !== 동.주용도 ? ` <span class="muted">(${esc(동.기타용도)})</span>` : ''}`],
+      ['이 동 주용도', `${esc(동.주용도 || '—')}${동.기타용도 && 동.기타용도 !== 동.주용도 ? ` <span class="muted">(${esc(동.기타용도)})</span>` : ''}`],
       ['사용승인', `${d8(동.사용승인일)}${해 != null ? ` <span class="muted">· ${해 > 0 ? `${해}년 전` : '올해'}</span>` : ''}`],
       ['구조', esc(동.구조 || '—')],
       ['층', `지상 ${fmt(동.지상)}${Number(동.지하) ? ` · 지하 ${fmt(동.지하)}` : ''}`],
@@ -3526,21 +3527,10 @@ async function 전세확인(pk) {
            <span class="muted">최근 순수 전세 ${eok(율.전세금)}(${d8(율.전세일)}) ÷ 최근 중개 매매 ${eok(율.매매가)}(${d8(율.매매일)})${Number(율.개월차) >= 12 ? ` · <b>${fmt(율.개월차)}개월 떨어진 거래</b>라 같은 시점 값이 아닙니다` : ` · ${fmt(율.개월차)}개월 차`}</span></p>`
          : `<p class="muted">전세가율: 이 평형에 중개 매매와 순수 전세가 둘 다 있어야 냅니다 — 없습니다</p>`}`;
   const 정비 = (d.정비 || []).length
-    ? `<div class="hm-k2">정비구역</div><p>${d.정비.map(z => `${esc(z.zone_nm || '')} <span class="muted">${esc([z.biz_nm, z.propel_nm].filter(Boolean).join(' · '))} · 단지 필지의 ${Number(z.걸침).toFixed(1)}%</span>`).join('<br>')}</p>
-       <p class="muted">이 단지가 서울 정비사업 구역에 걸쳐 있습니다(정비사업 자료 원문 — 진행 단계는 그 자료 기준).</p>` : '';
-  const 링크 = [
-    ['등기사항증명서 — 소유자 · 근저당 · 압류 · 신탁', '대법원 인터넷등기소', 'https://www.iros.go.kr'],
-    ['건축물대장 원본 — 위반건축물 표시 포함', '정부24', 'https://www.gov.kr'],
-    ['전세보증 가입 가능 여부', '주택도시보증공사(HUG)', 'https://www.khug.or.kr'],
-  ].map(([what, who, url]) => `<li>${esc(what)} — <a href="${url}" target="_blank" rel="noopener">${esc(who)}</a></li>`).join('');
-  box.innerHTML = `<div class="hm-ch">전세 계약 전 확인 <span class="muted">공식 원본을 모은 것 — 판정이 아닙니다</span></div>
-    <div class="hm-f"><div class="hm-k">이 호 용도</div><div class="hm-v">${용도줄}</div>${건물줄}</div>
+    ? `<div class="hm-k">정비구역</div><div class="hm-v">${d.정비.map(z => `${esc(z.zone_nm || '')} <span class="muted">${esc([z.biz_nm, z.propel_nm].filter(Boolean).join(' · '))} · 단지 필지의 ${Number(z.걸침).toFixed(1)}%</span>`).join('<br>')}</div>` : '';
+  box.innerHTML = `<div class="hm-f hm-f2"><div class="hm-k">대장 용도</div><div class="hm-v">${용도줄}</div>${건물줄}${정비}</div>
     <div class="hm-k2">같은 평형 실거래</div>${거래칸}
-    ${정비}
-    <div class="hm-k2">여기서 못 보는 것 — 계약 전 공식 기관에서 확인</div>
-    <ul class="hm-links">${링크}
-      <li>임대인 미납 국세·지방세 · 전입세대 · 확정일자 현황 — 세무서 · 주민센터(열람 절차는 해당 기관 안내)</li></ul>
-    <p class="muted">전세보증 가입 기준은 바뀔 수 있어 여기서 계산하지 않습니다. 공시가격은 위 표(원본 회차 그대로)를 보세요. 모으는 기준: <a href="#policy" data-pol-go="전세확인" data-ho-close>정책</a></p>`;
+    <p class="muted">어떻게 이었나: <a href="#policy" data-pol-go="호자료" data-ho-close>정책</a></p>`;
 }
 
 /* 동 이름을 뽑는 **단 하나의 규칙**. 대장에 이름이 세 칸으로 흩어져 있고
@@ -5476,12 +5466,10 @@ const 정책 = [
     '노선 이름은 원본 노선 이름과 같거나, 원본 이름의 <b>마지막 말</b>이 같을 때 그 노선입니다(\'신림선\' = \'수도권 경량도시철도 신림선\'). 노선을 말하고 \'가까운\' 이라고 하면 역 가까운 순입니다.',
     'AI 검색 질문 문장은 기능 개선을 위해 로그인 아이디와 함께 보관합니다.',
   ] },
-  { 키: '전세확인', 제목: '전세 계약 전 확인 (호 상세)', 글: [
-    '단지 상세의 동 구성에서 <b>호 칸을 누르면</b> 그 호의 공시가격 회차 아래에 \'전세 계약 전 확인\' 이 열립니다. <b>공식 원본을 한곳에 모은 것이고 판정이 아닙니다</b> — 안전 · 위험 · 점수 · 전세보증 가입 가능 여부는 내지 않습니다(기준이 바뀌고, 우리가 기준을 고르면 그게 거짓 기준이 됩니다).',
-    '<b>이 호 용도</b>는 대장 전유부의 용도 원문입니다. 주택(아파트·다세대·연립 등)이 아니면 그렇다고 적습니다 — 실제 쓰임과 다를 수 있습니다. <b>건물</b>은 그 호가 든 동의 표제부(주용도 · 사용승인 · 구조 · 층 · 세대 · 승강기 · 주차) 원문입니다.',
+  { 키: '호자료', 제목: '호 상세 — 이어진 자료', 글: [
+    '단지 상세의 동 구성(동·호 배치도)에서 <b>호 칸을 누르면</b> 그 호의 공시가격 회차 · 면적 아래에 <b>그 호에서 이어지는 자료</b>를 같이 보입니다 — 원본과 이은 결과만이고 판정 · 점수는 내지 않습니다.',
+    '<b>대장 용도</b>는 그 호 전유부의 용도 원문입니다(주택이 아니면 \'주택 아님\' 표시). <b>이 동</b>은 그 호가 든 동의 표제부(주용도 · 사용승인 · 구조 · 층 · 세대 · 승강기 · 주차) 원문입니다. 단지가 서울 정비사업 구역에 필지의 1% 이상 걸쳐 있으면 구역 · 사업 · 진행 단계(정비사업 자료 원문)를 적습니다.',
     '<b>같은 평형 실거래</b>: 실거래에는 동·호가 없어서 <b>이 호의 거래인지 알 수 없습니다</b>. 같은 단지 · 같은 전용면적 묶음(㎡ 정수 — 단지 상세 평형 표와 같은 묶음)의 최근 매매 · 전세(월세 0) · 월세를 보이고, 층이 이 호와 같으면 표시합니다. 해제 · 직거래 · 갱신은 원문 표시 그대로. 전세가율은 단지 상세와 같은 정의(최근 순수 전세 1건 ÷ 최근 중개 매매 1건)이고 두 거래가 1년 넘게 떨어지면 그렇게 적습니다.',
-    '단지가 서울 정비사업 구역에 필지의 1% 이상 걸쳐 있으면 구역 이름 · 사업 · 진행 단계(정비사업 자료 원문)를 적습니다.',
-    '<b>여기서 못 보는 것</b>(등기부의 근저당 · 압류 · 신탁, 위반건축물 표시, 임대인 미납 세금 · 전입세대 · 확정일자)은 계약 전 공식 기관(인터넷등기소 · 정부24 · HUG · 세무서 · 주민센터)에서 확인하도록 경로를 적습니다.',
   ] },
   { 키: 'kapt', 제목: 'K-apt 공동주택관리정보', 글: [
     'K-apt 는 단지 코드를 대장과 공유하지 않아 <b>법정동 + 사용승인일</b>, 또는 <b>공식 도로명코드+건물번호 · 공식 지번 + 세대 5% 안</b>으로 잇습니다(양쪽 하나씩일 때만). 자세한 규칙은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',

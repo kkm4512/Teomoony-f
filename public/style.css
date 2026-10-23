@@ -1909,8 +1909,9 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 .nowrap { white-space: nowrap; }
 table.cned td.sm { line-height: 1.6; }
 
-/* 전세 계약 전 확인 (2026-10-23) — 호 상세 아래 */
-.hm-chk{margin-top:12px;padding-top:10px;border-top:2px solid var(--line-2)}
+/* 호에 이어진 자료 (2026-10-23) — 호 상세의 면적 칸에 이어 붙는다 */
+.hm-chk{margin-top:0}
+.hm-f2{margin-top:0;padding-top:3px;border-top:0}
 .hm-ch{font:500 13.5px var(--font);color:var(--ink);display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
 .hm-ch .muted{font-size:11px}
 .hm-k2{font:500 11.5px var(--font);color:var(--ink-2);margin:10px 0 3px}
