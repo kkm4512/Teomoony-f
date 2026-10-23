@@ -1687,7 +1687,7 @@ app.get('/api/complexes', async (req, res) => {
           SELECT complex_id, NULL FROM gold.complex_alias WHERE REPLACE(실거래이름, ' ', '') LIKE @q0
           /* 2026-10-23: 대장 이름 띄어쓰기 빼고 — 위 큰 쿼리에 넣으면 계획이 바뀌므로 여기(작은 쿼리) */
           UNION ALL
-          SELECT complex_id, NULL FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND merged_into IS NULL AND REPLACE(complex_nm, ' ', '') LIKE @q0) x
+          SELECT complex_id, NULL FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND merged_into IS NULL AND complex_nm_ns LIKE @q0) x   /* 327 */
         GROUP BY complex_id`);
       const 있음 = new Set(행들.map(x => x.complex_id));
       const 더 = kr.recordset.filter(x => !있음.has(x.complex_id)).slice(0, 20);
@@ -1905,10 +1905,7 @@ app.get('/api/suggest', async (req, res) => {
                /* 2026-10-22 사장님 "검색할 때 아무 표시가 없어 그냥 라이브 건축물 같아" — 이 단지 필지에 닫힌 대장이 있으면 센다 */
                폐쇄 = (SELECT COUNT(*) FROM gold.closed_site s WHERE s.pnu IN (SELECT cp.pnu FROM gold.complex_pnu cp WHERE cp.complex_id = c.complex_id))
           FROM (SELECT complex_id, complex_nm, rep_plat_plc, hhld_cnt_sum, dong_cnt, centroid_lat, centroid_lng
-                  FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND complex_nm LIKE @q AND merged_into IS NULL
-                UNION
-                SELECT complex_id, complex_nm, rep_plat_plc, hhld_cnt_sum, dong_cnt, centroid_lat, centroid_lng
-                  FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND REPLACE(complex_nm, ' ', '') LIKE @q0 AND merged_into IS NULL
+                  FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND complex_nm_ns LIKE @q0 AND merged_into IS NULL   /* 327: 띄어쓰기 뺀 이름(계산 칸 + 거른 색인) — '이름 LIKE @q' 를 다 덮으므로 그 갈래는 뺐다 */
                 UNION
                 SELECT complex_id, complex_nm, rep_plat_plc, hhld_cnt_sum, dong_cnt, centroid_lat, centroid_lng
                   FROM gold.complex WHERE complex_id = @qid AND merged_into IS NULL
