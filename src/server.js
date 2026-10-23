@@ -884,6 +884,23 @@ const 내보내기목록 = {
      WHERE e.is_current = 1 AND e.pnu IS NOT NULL AND (LEFT(e.pnu, 2) = '11' OR LEFT(e.pnu, 5) IN ('41171', '41173'))
        AND NOT EXISTS (SELECT 1 FROM silver.ned_aphus_done d WHERE d.pnu = e.pnu)
      ORDER BY e.pnu;`,
+  /* 2026-10-23 도로명주소 전체: 서울·안양 법정동(폐지 아님 · 리 아님) — 이름 그대로 juso 에 묻는다 */
+  juso_dongs: `SELECT l.lawd_cd, l.full_nm FROM meta.lawd_code l
+     WHERE l.is_abolished = 0 AND l.ri_nm IS NULL AND l.emd_nm IS NOT NULL
+       AND (l.lawd_cd LIKE '11%' OR LEFT(l.lawd_cd, 5) IN ('41171', '41173'))
+       AND NOT EXISTS (SELECT 1 FROM silver.juso_addr_done d WHERE d.lawd_cd = l.lawd_cd AND d.다받음 = 1)
+     ORDER BY l.lawd_cd;`,
+  /* 검색 API 가 9,000줄까지만 주는 큰 법정동(면목동 · 신림동 …) — 그 동의 본번마다 다시 묻는다. 본번 = 지금 지적 필지 ∪ 대장 지번 */
+  juso_bonbun: `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    WITH 동 AS (SELECT l.lawd_cd FROM meta.lawd_code l
+                WHERE l.is_abolished = 0 AND l.ri_nm IS NULL AND l.emd_nm IS NOT NULL
+                  AND (l.lawd_cd LIKE '11%' OR LEFT(l.lawd_cd, 5) IN ('41171', '41173'))
+                  AND NOT EXISTS (SELECT 1 FROM silver.juso_addr_done d WHERE d.lawd_cd = l.lawd_cd AND d.다받음 = 1)),
+    p AS (SELECT pnu FROM silver.cadastral_parcel WHERE is_current = 1 AND LEFT(pnu, 10) IN (SELECT lawd_cd FROM 동)
+          UNION SELECT pnu FROM silver.bld_title WHERE LEFT(pnu, 10) IN (SELECT lawd_cd FROM 동))
+    SELECT DISTINCT lawd = LEFT(pnu, 10), 산 = SUBSTRING(pnu, 11, 1), 본번 = CAST(SUBSTRING(pnu, 12, 4) AS INT)
+      FROM p WHERE pnu IS NOT NULL AND LEN(pnu) = 19
+     ORDER BY 1, 2, 3;`,
 };
 app.get('/api/_export', async (req, res) => {
   if (!집안에서(req)) return res.status(404).json({ error: 'not found' });
@@ -1549,6 +1566,7 @@ app.get('/api/complexes', async (req, res) => {
   try {
     const pool = await getPool();
     { const 뗀 = await 이름꼬리떼기(pool, q); if (뗀) { 꼬리뗌 = { 원래: q, 찾은말: 뗀 }; q = 뗀; } }
+    const q0 = `%${글자그대로(q).replace(/\s+/g, '')}%`;   /* 2026-10-23: 이름은 띄어쓰기를 빼고도 맞춘다(양쪽 다) — '올림픽파크 포레온' = '올림픽파크포레온' */
     const r = await pool.request()
       .input('q', sql.NVarChar(1000), q ? `%${글자그대로(q)}%` : null)
       .input('qid', sql.Int, /^\d+$/.test(q) ? Number(q) : null)
@@ -1633,12 +1651,12 @@ app.get('/api/complexes', async (req, res) => {
        단지 검색에는 절대 안 걸린다. 2,840세대짜리가 화면에서 통째로 빠져 있었다. */
     let newbuilds = [];
     if (q) {
-      const nb = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).query(`
+      const nb = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).input('q0', sql.NVarChar(1000), q0).query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT TOP 8 kapt_code, kapt_name, lawd_nm, pnu, 세대, 동수, 사용승인,
                거래, centroid_lat, centroid_lng, kapt_addr
         FROM gold.v_newbuild
-        WHERE kapt_name LIKE @q OR kapt_addr LIKE @q OR doro_juso LIKE @q
+        WHERE REPLACE(kapt_name, ' ', '') LIKE @q0 OR kapt_addr LIKE @q OR doro_juso LIKE @q
         ORDER BY 거래 DESC, 세대 DESC`);
       newbuilds = nb.recordset;
     }
@@ -1653,16 +1671,19 @@ app.get('/api/complexes', async (req, res) => {
          11-123 의 OR 와 같은 모양). 그래서 따로 작은 쿼리로 찾고 **여기서 합친다.** 정렬은 위와 같은 기준. */
     let 행들 = r.recordset;
     if (q) {
-      const kr = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).query(`
+      const kr = await pool.request().input('q0', sql.NVarChar(1000), q0).query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT complex_id, 걸린이름 = MIN(kapt_name) FROM (
-          SELECT complex_id, kapt_name FROM gold.complex_kapt WHERE kapt_name LIKE @q
+          SELECT complex_id, kapt_name FROM gold.complex_kapt WHERE REPLACE(kapt_name, ' ', '') LIKE @q0
           UNION ALL
           SELECT cp.complex_id, k.kapt_name FROM silver.kapt_complex k JOIN gold.complex_pnu cp ON cp.pnu = k.pnu
-           WHERE k.is_current = 1 AND k.kapt_name LIKE @q
+           WHERE k.is_current = 1 AND REPLACE(k.kapt_name, ' ', '') LIKE @q0
           /* ★ 285: 실거래 이름으로도('길음뉴타운8단지' → 대장 이름 '길음뉴타운') */
           UNION ALL
-          SELECT complex_id, NULL FROM gold.complex_alias WHERE 실거래이름 LIKE @q) x
+          SELECT complex_id, NULL FROM gold.complex_alias WHERE REPLACE(실거래이름, ' ', '') LIKE @q0
+          /* 2026-10-23: 대장 이름 띄어쓰기 빼고 — 위 큰 쿼리에 넣으면 계획이 바뀌므로 여기(작은 쿼리) */
+          UNION ALL
+          SELECT complex_id, NULL FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND merged_into IS NULL AND REPLACE(complex_nm, ' ', '') LIKE @q0) x
         GROUP BY complex_id`);
       const 있음 = new Set(행들.map(x => x.complex_id));
       const 더 = kr.recordset.filter(x => !있음.has(x.complex_id)).slice(0, 20);
@@ -1696,13 +1717,30 @@ app.get('/api/complexes', async (req, res) => {
     /* ★ 2026-10-22 사장님 "신길제2구역을 검색해도 단지 상세처럼" — 정비사업 구역 이름도 같이 찾는다(겹쳐 보기와 같은 표) */
     let redevs = [];
     if (q) {
-      const rz = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).query(`
+      const rz = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).input('q0', sql.NVarChar(1000), q0).query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT TOP 8 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2
           FROM silver.redev_zone
-         WHERE is_current = 1 AND geojson IS NOT NULL AND (zone_nm LIKE @q OR biz_nm LIKE @q)
+         WHERE is_current = 1 AND geojson IS NOT NULL AND (REPLACE(zone_nm, ' ', '') LIKE @q0 OR REPLACE(biz_nm, ' ', '') LIKE @q0)
          ORDER BY CASE WHEN zone_nm LIKE @q THEN 0 ELSE 1 END, area_m2 DESC`);
       redevs = rz.recordset;
+    }
+    /* 2026-10-23 사장님 "청약 공고 Enter 목록에도" — 단지에 **아직 안 이어진** 공고(이어진 것은 단지로 나온다). 자동완성 13 과 같은 기준 · 주택마다 최근 공고 1줄 */
+    let applyhomes = [];
+    if (q) {
+      const ar = await pool.request().input('q0', sql.NVarChar(1000), q0).query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT TOP 8 x.house_manage_no, x.house_nm, x.공고종류, x.rcrit_pblanc_de, x.hssply_adres, x.tot_suply, x.lat, x.lng
+          FROM (SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.hssply_adres, p.tot_suply,
+                       lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
+                       rn = ROW_NUMBER() OVER (PARTITION BY p.house_manage_no ORDER BY p.rcrit_pblanc_de DESC, p.pblanc_no DESC)
+                  FROM silver.applyhome_pblanc p
+                  LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
+                 WHERE REPLACE(p.house_nm, ' ', '') LIKE @q0
+                   AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x
+         WHERE x.rn = 1
+         ORDER BY x.rcrit_pblanc_de DESC`);
+      applyhomes = ar.recordset;
     }
     /* ★ 308 (2026-10-22 사장님 "용신동 → 용두동이니 용두동 결과가 나와야지"):
        검색어가 **지금은 없는 옛 행정동 이름과 딱 같으면**(서울·안양) 그 뒤를 이은 지금 행정동의 **법정동(코드)** 결과를 붙인다.
@@ -1764,7 +1802,7 @@ app.get('/api/complexes', async (req, res) => {
         if (더단지.length > 남는칸) 바뀜.forEach(b => { b.잘림 = true; });
       }
     }
-    res.json({ count: _행.length, 상한: limit, 잘림: 잘림 || !!(바뀜 && 바뀜.some(b => b.잘림)), items: _행, lawds, newbuilds, redevs, 바뀜, 꼬리뗌 });
+    res.json({ count: _행.length, 상한: limit, 잘림: 잘림 || !!(바뀜 && 바뀜.some(b => b.잘림)), items: _행, lawds, newbuilds, redevs, applyhomes, 바뀜, 꼬리뗌 });
   } catch (e) { fail(res, e, 'complexes'); }
 });
 
@@ -1797,6 +1835,8 @@ app.get('/api/suggest', async (req, res) => {
       .input('raw', sql.NVarChar(60), raw)
       .input('q', sql.NVarChar(200), `%${글자}%`)
       .input('p', sql.NVarChar(200), `${글자}%`)
+      /* 2026-10-23 사장님 "올림픽파크 포레온" — **이름은 띄어쓰기를 빼고도** 맞춘다(양쪽 다 뺀다). 주소 칸은 그대로 */
+      .input('q0', sql.NVarChar(200), `%${글자.replace(/\s+/g, '')}%`)
       /* 322: 폐쇄 대장 주소 검색 — 숫자가 있을 때만, 끝 두 말('가락동 479' · '송파대로 345')을 앞부분 일치로 */
       .input('짧은주소', sql.NVarChar(200), /\d/.test(raw)
           ? (() => { const w = 도로명맞춤(raw).replace(/번지/g, '').trim().split(/\s+/); return w.length >= 2 ? 글자그대로(w.slice(-2).join(' ')) : null; })()
@@ -1864,6 +1904,9 @@ app.get('/api/suggest', async (req, res) => {
                   FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND complex_nm LIKE @q AND merged_into IS NULL
                 UNION
                 SELECT complex_id, complex_nm, rep_plat_plc, hhld_cnt_sum, dong_cnt, centroid_lat, centroid_lng
+                  FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND REPLACE(complex_nm, ' ', '') LIKE @q0 AND merged_into IS NULL
+                UNION
+                SELECT complex_id, complex_nm, rep_plat_plc, hhld_cnt_sum, dong_cnt, centroid_lat, centroid_lng
                   FROM gold.complex WHERE complex_id = @qid AND merged_into IS NULL
                 /* ★ 2026-10-21: **K-apt 이름으로도** 찾는다(gold.complex_kapt 153행 · 싸다).
                    대장 이름 '래미안 장위 퍼스트하이' 와 K-apt 이름 '래미안퍼스트하이' 가 다르다 —
@@ -1871,19 +1914,19 @@ app.get('/api/suggest', async (req, res) => {
                 UNION
                 SELECT c2.complex_id, c2.complex_nm, c2.rep_plat_plc, c2.hhld_cnt_sum, c2.dong_cnt, c2.centroid_lat, c2.centroid_lng
                   FROM gold.complex_kapt ck JOIN gold.complex c2 ON c2.complex_id = ck.complex_id
-                 WHERE ck.kapt_name LIKE @q AND c2.merged_into IS NULL
+                 WHERE REPLACE(ck.kapt_name, ' ', '') LIKE @q0 AND c2.merged_into IS NULL
                 /* ★ K-apt 가 준 **지번(PNU)** 으로도 — 코드로 잇는 길이라 날짜 추정보다 확실하다(정책 1장).
                    셀립은평(K-apt) 지번이 '한화생명 불광동사옥'(대장, 201세대)의 부속지번이다. */
                 UNION
                 SELECT c3.complex_id, c3.complex_nm, c3.rep_plat_plc, c3.hhld_cnt_sum, c3.dong_cnt, c3.centroid_lat, c3.centroid_lng
                   FROM silver.kapt_complex k JOIN gold.complex_pnu cp ON cp.pnu = k.pnu
                   JOIN gold.complex c3 ON c3.complex_id = cp.complex_id
-                 WHERE k.is_current = 1 AND k.kapt_name LIKE @q AND c3.merged_into IS NULL
+                 WHERE k.is_current = 1 AND REPLACE(k.kapt_name, ' ', '') LIKE @q0 AND c3.merged_into IS NULL
                 /* ★ 285: 실거래 이름으로도 — '길음뉴타운8단지' · '경희궁자이(2단지)' */
                 UNION
                 SELECT c4.complex_id, c4.complex_nm, c4.rep_plat_plc, c4.hhld_cnt_sum, c4.dong_cnt, c4.centroid_lat, c4.centroid_lng
                   FROM gold.complex_alias al4 JOIN gold.complex c4 ON c4.complex_id = al4.complex_id
-                 WHERE al4.실거래이름 LIKE @q AND c4.merged_into IS NULL
+                 WHERE REPLACE(al4.실거래이름, ' ', '') LIKE @q0 AND c4.merged_into IS NULL
                 /* ★ 2026-10-22 사장님 "'서울 마포구 서교동 445-4' 제안할 게 없다는데 목록은 나와" — **주소(대표 지번·도로명)로도**.
                    숫자가 든 검색어일 때만(@주소) — 이름 검색마다 53만 행 주소 LIKE 를 돌리지 않는다. 부속지번은 목록 검색에만(무겁다). */
                 UNION
@@ -1900,13 +1943,13 @@ app.get('/api/suggest', async (req, res) => {
                   c.hhld_cnt_sum DESC, c.complex_id;
         /* 5 신축 (대장 없는 K-apt 단지) */
         SELECT TOP 3 n.kapt_code, n.kapt_name, n.lawd_nm, n.세대, n.centroid_lat, n.centroid_lng, 전체 = COUNT(*) OVER ()
-          FROM gold.v_newbuild n WHERE n.kapt_name LIKE @q
+          FROM gold.v_newbuild n WHERE REPLACE(n.kapt_name, ' ', '') LIKE @q0
          ORDER BY CASE WHEN n.kapt_name LIKE @p THEN 0 ELSE 1 END, n.세대 DESC;
         /* 6 재개발·정비사업 구역 */
         SELECT TOP 4 z.present_sn, z.zone_nm, z.biz_nm, z.propel_nm, z.centroid_lat, z.centroid_lng,
                minx = z.bbox_minx, miny = z.bbox_miny, maxx = z.bbox_maxx, maxy = z.bbox_maxy, 전체 = COUNT(*) OVER ()
           FROM silver.redev_zone z
-         WHERE z.is_current = 1 AND (z.zone_nm LIKE @q OR z.biz_nm LIKE @q)
+         WHERE z.is_current = 1 AND (REPLACE(z.zone_nm, ' ', '') LIKE @q0 OR REPLACE(z.biz_nm, ' ', '') LIKE @q0)
          ORDER BY CASE WHEN z.zone_nm LIKE @p THEN 0 ELSE 1 END, z.zone_nm;
         /* 7 지하철역 — 한 역에 노선이 여럿이면 한 줄로 */
         SELECT TOP 4 s.sttn_nm, 노선 = STRING_AGG(s.line_nm, N' · '), lat = AVG(s.lat), lon = AVG(s.lon),
@@ -1945,7 +1988,7 @@ app.get('/api/suggest', async (req, res) => {
         SELECT TOP 4 s.site_key, s.이름, s.폐쇄구분, s.shter_day, s.주용도, s.총괄세대, s.plat_plc, s.lat, s.lng, s.now_complex_id, s.동수,
                주소로 = CASE WHEN s.이름 LIKE @q THEN 0 ELSE 1 END, 전체 = COUNT(*) OVER ()
           FROM gold.closed_site s
-         WHERE s.이름 LIKE @q
+         WHERE REPLACE(s.이름, ' ', '') LIKE @q0
             OR (@짧은주소 IS NOT NULL AND (s.지번짧게 = @짧은주소 OR s.지번짧게 LIKE @짧은주소 + N'-%' OR s.도로짧게 = @짧은주소 OR s.도로짧게 LIKE @짧은주소 + N'-%'))
                /* 322: 짧은 주소 칸(색인) — '479' 는 479 · 479-1 … 만(4790 은 아님) */
          ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 WHEN s.이름 LIKE @q THEN 1 ELSE 2 END, s.총괄세대 DESC, s.동수 DESC, s.이름;
@@ -1956,7 +1999,7 @@ app.get('/api/suggest', async (req, res) => {
                        rn = ROW_NUMBER() OVER (PARTITION BY p.house_manage_no ORDER BY p.rcrit_pblanc_de DESC, p.pblanc_no DESC)
                   FROM silver.applyhome_pblanc p
                   LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
-                 WHERE p.house_nm LIKE @q
+                 WHERE REPLACE(p.house_nm, ' ', '') LIKE @q0
                    AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x
          WHERE x.rn = 1
          ORDER BY CASE WHEN x.house_nm LIKE @p THEN 0 ELSE 1 END, x.rcrit_pblanc_de DESC;
