@@ -5995,7 +5995,34 @@ app.get('/api/complexes/:id', async (req, res) => {
       SELECT 학구 = z.hakgudo_nm,
              공동 = CASE WHEN z.hakgudo_gb = '1' THEN 1 ELSE 0 END,
              교육지원청 = z.edu_nm, 기준일 = z.base_dt
-        FROM silver.school_zone z WHERE z.geom.STContains(@p) = 1`);
+        FROM silver.school_zone z WHERE z.geom.STContains(@p) = 1;
+      /* ★ 2026-10-24 사장님 "어떤 학군에 속해 어떤 학교로 갈 수 있는지" — 단지 중심점이 든 초등 통학구역 · 중학교 학교군 · 고등학교 학교군과
+           그 구역의 학교(학교학구도연계정보 — 학구ID ↔ 학교ID, **공식 대응표**). 학교ID 는 silver.school 과 같은 코드라 이름을 안 본다.
+           거리는 v_complex_school 과 같은 식(학교 geog ↔ 단지 중심점 직선). 공시는 gold.school_link(335) 로만. */
+      DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
+                               WHERE complex_id = @id AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL);
+      WITH z AS (
+        SELECT 급 = N'초등학교', 구역종류 = N'통학구역', 구역id = z.hakgudo_id, 구역 = z.hakgudo_nm, 공동 = CASE WHEN z.hakgudo_gb = '1' THEN 1 ELSE 0 END
+          FROM silver.school_zone z WHERE z.geom.STContains(@p) = 1
+        UNION ALL
+        SELECT CASE g.kind WHEN 'M' THEN N'중학교' ELSE N'고등학교' END, CASE g.kind WHEN 'M' THEN N'중학교 학교군' ELSE N'고등학교 학교군' END,
+               g.hakgudo_id, g.hakgudo_nm, CASE WHEN g.hakgudo_gb = '1' THEN 1 ELSE 0 END
+          FROM silver.school_group g WHERE g.geom.STContains(@p) = 1)
+      SELECT z.급, z.구역종류, z.구역id, z.구역, z.공동, 기준일 = k.base_dt,
+             k.school_id, 원문이름 = k.school_nm, 이름 = s.school_nm, 설립 = s.fond_type, 운영 = s.oper_sttus,
+             거리m = CASE WHEN s.geog IS NOT NULL AND @g IS NOT NULL THEN CAST(s.geog.STDistance(@g) AS INT) END,
+             이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
+             st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
+             알리미적재 = CASE WHEN EXISTS (SELECT 1 FROM silver.schoolinfo i2 JOIN gold.complex c ON c.complex_id = @id
+                                             WHERE LEFT(i2.adrcd_cd, 5) = c.sigungu_cd) THEN 1 ELSE 0 END
+        FROM z
+        LEFT JOIN silver.school_zone_link k ON k.hakgudo_id = z.구역id
+        LEFT JOIN silver.school s ON s.school_id = k.school_id AND s.is_current = 1
+        LEFT JOIN gold.school_link l ON l.school_id = k.school_id
+        OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
+                            교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
+                       FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
+       ORDER BY CASE z.급 WHEN N'초등학교' THEN 1 WHEN N'중학교' THEN 2 ELSE 3 END, z.구역, 거리m`);
 
     /* 주변 학교 (2026-10-19)
        ★ 상권 데이터에는 학교가 **0건**이다. 전혀 다른 출처다 -
@@ -6038,7 +6065,7 @@ app.get('/api/complexes/:id', async (req, res) => {
                    rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m),
                    k1 = SUM(CASE WHEN dist_m <= 1000 THEN 1 ELSE 0 END) OVER (PARTITION BY school_se)
               FROM v)
-      SELECT 학교급 = n.school_se, 이름 = n.school_nm, 설립 = n.fond_type, 분교 = n.bnhh_se, 거리m = CAST(n.dist_m AS INT),
+      SELECT n.school_id, 학교급 = n.school_se, 이름 = n.school_nm, 설립 = n.fond_type, 분교 = n.bnhh_se, 거리m = CAST(n.dist_m AS INT),
              이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
              st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
              남녀 = i.coedu, 홈 = i.hmpg,
@@ -6603,7 +6630,8 @@ app.get('/api/complexes/:id', async (req, res) => {
                  ...(((aca.recordsets && aca.recordsets[2]) || [])[0] || {}),
                },
                kinderLoaded: (kinderN.recordset[0] || {}).n || 0,
-               schoolZone: schoolZone.recordset,
+               schoolZone: schoolZone.recordsets[0] || [],
+               schoolGroups: schoolZone.recordsets[1] || [],
                schoolZoneLoaded: ((szScope.recordset[0] || {}).받았나) ? 1 : 0,
                vlrat: vlrat.recordset,
                permitDongs: permitDongs.recordset,

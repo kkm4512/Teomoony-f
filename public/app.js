@@ -3642,7 +3642,7 @@ const SRC = {
   poi:    { t: '상가(상권)정보', s: '소상공인시장진흥공단', note: '국세청·카드사 · 분기 갱신' },
   /* ★ 공공누리 4유형이라 **출처표시가 의무**다. 이 배지가 그 역할을 한다. */
   redev:  { t: '정비사업 구역', s: '서울 열린데이터광장 · 서울플랜+', note: '공공누리 4유형 · 반기 갱신' },
-  school: { t: '초중등학교위치', s: '교육부 · 한국교육시설안전원', note: '직선거리 · 배정 아님' },
+  school: { t: '초중등학교위치 · 학구도', s: '교육부 · 한국교육시설안전원 · 학교알리미', note: '거리는 직선 · 구역은 학구도' },
   /* 유치원알리미 공시. ★ 1년에 2회만 갱신된다 - note 에 적어 둔다 */
   kinder: { t: '유치원알리미', s: '교육부 · 한국교육학술정보원 (유치원 공시정보)',
             note: '연 2회 공시 · 직선거리' },
@@ -4081,7 +4081,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt) {
 function renderDetail(payload) {
   lastDetail = payload;
   const { complex: c, dongs, parcels, tradeStats, offsite, spec, permits, permitDongs, kapt, cost,
-          floors, hos, scope, 호총수, 전용률, 호공시, 공시적재, 거래목록, zones, redev, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, vlrat, busRoutes, busList, 좌표없음, kinders, kinderLoaded, jeonse, academy, schoolList } = payload;
+          floors, hos, scope, 호총수, 전용률, 호공시, 공시적재, 거래목록, zones, redev, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, vlrat, busRoutes, busList, 좌표없음, kinders, kinderLoaded, jeonse, academy, schoolList, schoolGroups } = payload;
   /* 실거래는 평형(전용면적) 단위로 묶어서 본다. 동/호 특정은 하지 않는다.
      (아파트 매매 말고는 동 정보가 API 에 아예 없다. ../Teomoony/CONTEXT.md 4절) */
   const stats = tradeStats || [];
@@ -4598,34 +4598,9 @@ function renderDetail(payload) {
             ? '이 단지 500m 안에 유치원이 없습니다'
             : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
 
-    ${sect('배정 초등학교', 'school')}
-    ${sz.length ? `
-      <div class="zrow2">
-        <span class="zt">배정 초등</span>
-        <b>${sz.map(z => esc(z.학구)).join(' / ')}</b>
-        ${sz.some(z => Number(z.공동)) ? '<span class="zb">공동통학구역</span>' : ''}
-      </div>
-      <p class="note sm">${esc((sz[0] && sz[0].교육지원청) || '')} · 기준일 ${esc((sz[0] && sz[0].기준일) || '')} — 단지 중심점 한 점으로 판정(큰 단지는 동마다 다를 수 있음)</p>` : `
-      <p class="note sm">${gapCell('', schoolZoneLoaded ? 'UNSURE' : 'SCOPE',
-        schoolZoneLoaded
-          ? '단지 중심점이 어느 통학구역에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다'
-          : '이 지역의 통학구역(학구도)을 아직 받지 않았습니다 — 원본이 빠진 게 아닙니다')}</p>`}
-    ${['초등학교', '중학교', '고등학교'].map(급 => {
-      const 요 = sch.find(x => x.학교급 === 급);
-      const 목 = (schoolList || []).filter(x => x.학교급 === 급);
-      const 짧 = 급.replace('학교', '');
-      if (!요) return `${sect(급, 'school')}<p class="note">${gapCell('', 'NA', `이 단지 2km 안에 ${짧}학교가 없습니다`)}</p>`;
-      return `${sect(급, 'school', ` ${fmt(요.r1000)}<span class="muted">· 1km</span>`)}
-        <div class="schrow">${목.map(x => `
-          <div class="scell" data-pt="school|${esc(급)}">
-            <span class="sg">${esc(x.설립 || '')}${x.분교 === '분교' ? ' 분교' : ''}</span>
-            <b>${esc(x.이름 || '—')}</b>
-            <span class="sd">${fmt(x.거리m)}m${x.남녀 && x.남녀 !== '남녀공학' ? ' · ' + esc(x.남녀 === '남' ? '남학교' : x.남녀 === '여' ? '여학교' : x.남녀) : ''}</span>
-            ${학교공시줄(x)}
-          </div>`).join('')}</div>
-        <p class="note sm">${Number(요.r1000) ? `1km 안 ${fmt(요.r1000)}곳` : `1km 안에 없어 가장 가까운 한 곳(${fmt(요.최단m)}m)`} · 2km 안 ${fmt(요.r2000)}곳 · 직선거리(배정 아님)</p>`;
-    }).join('')}
-    ${(schoolList || []).some(x => x.학생 != null) ? `<p class="note sm">학생 · 학급 · 교사 수는 <b>학교알리미 ${esc(String(Math.max(...(schoolList || []).filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</b>(학년별·학급별 학생수) 그대로입니다 — 학급당 학생 수 · 수업교원 1인당 학생 수도 공시값이며 우리가 나누지 않았습니다.
+    ${['초등학교', '중학교', '고등학교'].map(급 => 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
+        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)).join('')}
+    ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학생 · 학급 · 교사 수는 <b>학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</b>(학년별·학급별 학생수) 그대로입니다 — 학급당 학생 수 · 수업교원 1인당 학생 수도 공시값이며 우리가 나누지 않았습니다.
       학교는 코드 규칙(학교급 · 설립일 · 법정동)으로만 이었습니다.</p>` : ''}
 
     ${학원칸(academy)}
@@ -5236,7 +5211,8 @@ const 정책 = [
     '학교 거리는 직선거리라 <b>배정과 다릅니다</b>. 폐교·휴교는 빼고 운영 중인 학교만 셉니다.',
     '<b>학생 · 학급 · 교사 수</b>는 학교알리미(한국교육학술정보원) 공시 \'학년별·학급별 학생수\' 그대로입니다 — 학급당 학생 수 · 수업교원 1인당 학생 수도 공시값이고 우리가 나누지 않습니다. 공시는 1년에 한 번이라 화면에 공시연도를 적습니다.',
     '학교 위치(교육부 학교ID)와 학교알리미(정보공시 학교코드)는 <b>코드 체계가 달라</b> 대응표가 없습니다. 이름은 보지 않고 <b>학교급 · 설립일(위치표준의 설립일은 학교알리미의 설립일 또는 개교일과 같다) · 학교알리미 법정동 경계 안 · 양쪽 후보 하나</b>일 때만 잇습니다(서울 1,313곳 중 1,256곳). 같은 구 · 같은 설립일로 넓히면 다른 학교가 붙어서(중산고 ↔ 대진디자인고) 쓰지 않습니다. 못 이은 학교는 학생 수 칸이 비고 까닭을 적습니다.',
-    '<b>통학구역(학구도)</b>은 교육지원청이 정한 배정 구역입니다. 단지 중심점 한 점으로 판정해 큰 단지는 동마다 다를 수 있고, 중·고등학교는 아직 거리뿐입니다. 최종 확인은 교육지원청에 하셔야 합니다.',
+    '<b>통학구역 · 학교군(학구도)</b>: 단지 중심점이 든 <b>초등 통학구역 · 중학교 학교군 · 고등학교 학군</b>(한국교육시설안전원 경계)과 그 구역의 학교를 <b>학교학구도연계정보</b>(학구ID ↔ 학교ID 공식 대응표)로 보입니다 — 이름으로 잇지 않습니다. 교육 탭 목록에서 구역 학교에는 \'배정\'(초) · \'학교군\'(중) · \'학군\'(고) 표를 달고, 1km 안 학교와 한 목록으로 합칩니다(같은 학교를 두 번 안 보임). 중학교는 학교군 안 추첨이라 후보, 고등학교 학군은 일반고 배정 단위(특목·자율·특성화고는 따로 지원).',
+    '단지 중심점 한 점으로 판정해 큰 단지는 동마다 다를 수 있습니다. 최종 배정은 교육지원청이 정합니다. 학구도 7종은 매년 3월 · 9월에 새로 나옵니다(기준일을 화면에 적음).',
   ] },
   { 키: 'subway', 제목: '지하철 · 버스', 글: [
     '지하철은 1.5km 안 역만 보입니다.',
@@ -5689,6 +5665,51 @@ async function 분양채우기() {
     if (!지금 || 지금.dataset.ah !== 키) return;  // 그사이 다른 단지로 옮겼다
     지금.innerHTML = 분양칸(r.공고 || []) + 분양권칸(r);
   } catch { /* 덤 */ }
+}
+/* ★ 2026-10-24 교육 탭 학교급 한 칸 — 단지가 든 구역(초 통학구역 · 중 학교군 · 고 학군)과 그 구역 학교(학교학구도연계정보) + 1km 안 학교를
+   **한 목록**으로(같은 학교를 두 번 안 보인다 · school_id 로 합침). 구역 학교에는 '배정'/'학교군'/'학군' 표.
+   중·고는 구역 학교 중 1km 밖은 접어 둔다(학군에 스무 곳이 넘는다). 거리는 모두 v_complex_school 과 같은 직선거리. */
+function 학교급칸(급, 요, 목, 구, 학구받음) {
+  const 짧 = 급.replace('학교', '');
+  const 표말 = { 초등학교: '배정', 중학교: '학교군', 고등학교: '학군' }[급];
+  const 구역들 = [...new Map(구.map(x => [x.구역id, x])).values()];
+  const 구역학교 = 구.filter(x => x.school_id);
+  const 구역id = new Set(구역학교.map(x => x.school_id));
+  const 합 = new Map();
+  for (const x of 목) 합.set(x.school_id, { ...x, 구역: 구역id.has(x.school_id) });
+  for (const x of 구역학교) if (!합.has(x.school_id))
+    합.set(x.school_id, { school_id: x.school_id, 학교급: 급, 이름: x.이름 || x.원문이름, 설립: x.설립, 거리m: x.거리m, 이음: x.이음,
+      학생: x.학생, 학급: x.학급, 학급당: x.학급당, 교사: x.교사, 교사당: x.교사당, 공시연도: x.공시연도, 제외: x.제외, 제외사유: x.제외사유,
+      알리미적재: x.알리미적재, 구역: true, 위치없음: !x.이름, 운영: x.운영 });
+  const 다 = [...합.values()].sort((a, b) => (a.거리m ?? 1e9) - (b.거리m ?? 1e9));
+  const 펼 = 급 === '초등학교' ? 다 : 다.filter(x => !x.구역 || (x.거리m ?? 1e9) <= 1000 || x === 다.find(y => y.구역));
+  const 접 = 다.filter(x => !펼.includes(x));
+  const 칸 = x => `
+    <div class="scell" data-pt="school|${esc(급)}">
+      <span class="sg">${esc(x.설립 || '')}${x.분교 === '분교' ? ' 분교' : ''}</span>
+      <b>${esc(x.이름 || '—')}${x.구역 ? ` <span class="ztag">${표말}</span>` : ''}</b>
+      <span class="sd">${x.거리m != null ? fmt(x.거리m) + 'm' : '거리 모름'}${x.남녀 && x.남녀 !== '남녀공학' ? ' · ' + esc(x.남녀 === '남' ? '남학교' : x.남녀 === '여' ? '여학교' : x.남녀) : ''}</span>
+      ${x.위치없음 ? `<span class="sst">${gapCell('', 'UNSURE', '연계표에는 있는데 학교 위치 자료에 없습니다(폐교·이전 등) — 원문 이름만')}</span>` : 학교공시줄(x)}
+    </div>`;
+  const 구역줄 = 구역들.length ? 구역들.map(z => `
+      <div class="zrow2">
+        <span class="zt">${esc(z.구역종류)}</span>
+        <b>${esc(z.구역)}</b>${Number(z.공동) ? ' <span class="zb">공동</span>' : ''}
+        <span class="muted sm">· ${esc(짧)}학교 ${fmt(구.filter(y => y.구역id === z.구역id && y.school_id).length)}곳</span>
+      </div>`).join('') + `<p class="note sm">${급 === '초등학교'
+        ? '통학구역은 교육지원청이 정한 배정 구역입니다. 공동통학구역이면 표시된 학교 중에서 배정됩니다.'
+        : 급 === '중학교' ? '중학교는 학교군 안에서 추첨으로 배정됩니다 — 표시된 학교는 <b>후보</b>입니다.'
+        : '고등학교 학군은 일반고 배정 단위입니다. 특목·자율·특성화고는 학군과 따로 지원합니다(학군 표가 없는 학교).'}
+        단지 중심점 한 점으로 판정 · 최종 배정은 교육지원청 · 기준일 ${esc((구[0] || {}).기준일 || '')}</p>`
+    : `<p class="note sm">${gapCell('', 학구받음 ? 'UNSURE' : 'SCOPE', 학구받음
+        ? `단지 중심점이 어느 ${급 === '초등학교' ? '통학구역' : '학교군'}에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다`
+        : '이 지역의 학구도를 아직 받지 않았습니다')}</p>`;
+  if (!다.length) return `${sect(급, 'school')}${구역줄}<p class="note">${gapCell('', 'NA', `이 단지 2km 안에 ${짧}학교가 없습니다`)}</p>`;
+  return `${sect(급, 'school', 요 ? ` ${fmt(요.r1000)}<span class="muted">· 1km</span>` : '')}
+    ${구역줄}
+    <div class="schrow">${펼.map(칸).join('')}</div>
+    ${접.length ? `<details class="zfold"><summary>이 ${급 === '중학교' ? '학교군' : '학군'}의 나머지 ${fmt(접.length)}곳 (1km 밖)</summary><div class="schrow">${접.map(칸).join('')}</div></details>` : ''}
+    <p class="note sm">${요 ? (Number(요.r1000) ? `1km 안 ${fmt(요.r1000)}곳` : `1km 안에 없어 가장 가까운 한 곳`) + ` · 2km 안 ${fmt(요.r2000)}곳 · ` : ''}직선거리</p>`;
 }
 /* ★ 2026-10-23 학교알리미 공시 한 줄 — 공시값 그대로. 못 이은 까닭을 가른다(안 받음 SCOPE · 받았는데 못 이음 UNSURE · 공시 제외 NA) */
 function 학교공시줄(x) {
