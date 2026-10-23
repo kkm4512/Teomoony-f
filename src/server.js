@@ -4353,9 +4353,8 @@ app.get('/api/closed/site/:key', async (req, res) => {
         FROM (SELECT *, rn = ROW_NUMBER() OVER (PARTITION BY 때 ORDER BY deal_ymd DESC, trade_sk DESC) FROM #ot) x
        WHERE rn <= 40 ORDER BY 때, deal_ymd DESC;
       /* ===== 2026-10-23 사장님 "폐쇄 말소대장도 기존 단지상세처럼 동호나 그런 정보들을 동일하게" (323) =====
-         동 = 이 지번의 폐쇄 표제부 전부(묶음이 여럿이면 다 — 호가 어느 묶음 것인지 원문이 안 알려 준다) ·
-         호 = 폐쇄 전유부 · 전용면적 = 폐쇄 전유공용면적의 '전유' 합 · 층 = 폐쇄 층별개요.
-         ★ 호 → 동은 **같은 지번 안에서 동명칭으로** 맞춘다 — 폐쇄 대장 기본개요에는 지금 대장처럼 '상위 대장 번호'가 없다(probe_closed_ops 실측). */
+         동 = 이 지번의 폐쇄 표제부 전부 · 층 = 폐쇄 층별개요(표제부 번호로 이음 = 코드) · 호 = 폐쇄 전유부 · 전용면적 = 폐쇄 전유공용면적의 '전유' 합(호 번호로 이음).
+         ★ 호 → 동은 **잇지 않는다** — 폐쇄 기본개요 32칸에 '상위 대장 번호' 가 없다(probe_closed_ops2 · XML 원문 확인). 이름으로 잇지 않는다. */
       SELECT mgm_bldrgst_pk = t.mgm_shtreg_pk, t.dong_nm, t.bld_nm, is_recap = CAST(0 AS BIT), t.hhld_cnt, t.ho_cnt, t.main_purps_nm, t.tot_area,
              t.regstr_kind_nm, t.grnd_flr_cnt, t.ugrnd_flr_cnt, t.shter_day, 이묶음 = CASE WHEN ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') THEN 1 ELSE 0 END
         FROM gold.closed_site s JOIN silver.bld_closed_title t ON t.pnu = s.pnu
@@ -4364,18 +4363,12 @@ app.get('/api/closed/site/:key', async (req, res) => {
              층명 = f.flr_no_nm, 용도 = f.main_purps_nm, 면적 = f.area, 주부속 = f.main_atch_gb_nm
         FROM gold.closed_site s JOIN silver.bld_closed_flr f ON f.pnu = s.pnu
        WHERE s.site_key = @k ORDER BY f.dong_nm, 층 DESC;
-      SELECT TOP 20000 호PK = e.mgm_shtreg_pk, 동PK = ISNULL(d.pk, N'이름:' + ISNULL(e.dong_nm, N'')), 동 = e.dong_nm, 호_동명 = e.dong_nm,
+      /* 2026-10-23 사장님 "1번 ㄴㄴ 그럼 잇지말고" — 호를 동(표제부)에 **잇지 않는다**(폐쇄 기본개요에 상위 대장 번호가 없다).
+         호마다 원문 칸 그대로 + 전용면적(전유공용면적 · 같은 호 번호로 이음 = 코드) */
+      SELECT TOP 20000 호PK = e.mgm_shtreg_pk, 원문동명 = e.dong_nm,
              층 = CASE WHEN e.flr_gb_nm = N'지하' THEN -e.flr_no ELSE e.flr_no END, 호 = e.ho_nm,
-             라인 = CASE WHEN TRY_CONVERT(INT, REPLACE(e.ho_nm, N'호', '')) / 100 = e.flr_no THEN TRY_CONVERT(INT, REPLACE(e.ho_nm, N'호', '')) % 100 END,
-             호번호 = TRY_CONVERT(INT, REPLACE(e.ho_nm, N'호', '')),
              ea.전용면적, 평형 = CAST(FLOOR(ea.전용면적) AS INT)
         FROM gold.closed_site s JOIN silver.bld_closed_expos e ON e.pnu = s.pnu
-        OUTER APPLY (SELECT TOP 1 pk = t.mgm_shtreg_pk FROM silver.bld_closed_title t
-                      WHERE t.pnu = e.pnu AND (t.dong_nm = e.dong_nm
-                            /* 동 이름이 양쪽 다 없으면, 이 지번에 이름 없는 동이 하나뿐일 때만 그 동 */
-                            OR (ISNULL(e.dong_nm, N'') = N'' AND ISNULL(t.dong_nm, N'') = N''
-                                AND 1 = (SELECT COUNT(*) FROM silver.bld_closed_title t2 WHERE t2.pnu = e.pnu AND ISNULL(t2.dong_nm, N'') = N'')))
-                      ORDER BY CASE WHEN ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') THEN 0 ELSE 1 END, t.hhld_cnt DESC) d
         OUTER APPLY (SELECT 전용면적 = SUM(a.area) FROM silver.bld_closed_expos_area a
                       WHERE a.pnu = e.pnu AND a.mgm_shtreg_pk = e.mgm_shtreg_pk AND a.expos_pubuse_gb_nm = N'전유') ea
        WHERE s.site_key = @k ORDER BY e.dong_nm, 층 DESC, e.ho_nm;

@@ -6677,7 +6677,7 @@ function 옛거래칸(o, s, 때들 = ['전', '뒤']) {
 }
 /* 2026-10-23 사장님 "폐쇄 말소대장도 기존 단지상세처럼 동호나 그런 정보들을 동일하게" — 단지 상세와 같은 탭 · 같은 그림 함수(structureBlock · tradeList).
    ★ 탭: 대장정보 · 동·호 · 실거래 · 토지. 동·호 격자와 실거래 목록은 단지 상세와 **같은 함수**라 보이는 법이 같다(작업방식 10장).
-   ★ 호 → 동은 같은 지번 안의 동명칭으로 맞춘다(폐쇄 기본개요에 상위 대장 번호가 없다) — 화면에 적는다. */
+   ★ 호 → 동은 **잇지 않는다**(폐쇄 기본개요에 상위 대장 번호가 없다 · 사장님 "잇지말고") — 동·호 탭에 까닭을 적는다. */
 let 폐쇄탭 = 'info', 폐쇄거래탭 = '매매', 폐쇄마지막 = null;
 async function 폐쇄상세(key) {
   const 표 = 'cl:' + key;
@@ -6695,12 +6695,6 @@ async function 폐쇄상세(key) {
 function 폐쇄그리기() {
   const m = 폐쇄마지막; if (!m || selectedRedev !== m.표) return;
   const { r, box } = m, s = r.묶음, 대 = r.대장 || { 동: [], 층: [], 호: [], 받음: {} };
-  /* 동 목록 — 이름이 안 맞아 동에 못 붙은 호는 따로 한 동으로(지우지 않는다) */
-  const 동 = (대.동 || []).slice();
-  const 있는동 = new Set(동.map(d => String(d.mgm_bldrgst_pk)));
-  for (const h of 대.호 || []) if (!있는동.has(String(h.동PK))) {
-    있는동.add(String(h.동PK)); 동.push({ mgm_bldrgst_pk: h.동PK, dong_nm: h.동 || '(동 이름 없음)', is_recap: false });
-  }
   const 받음 = 대.받음 || {};
   const 다받음 = ['getSrExposInfo', 'getSrExposPubuseAreaInfo', 'getSrFlrOulnInfo'].every(k => 받음[k]);
   const 호수 = (대.호 || []).length;
@@ -6710,7 +6704,7 @@ function 폐쇄그리기() {
   if (!['매매', '전세', '월세'].some(k => k === 폐쇄거래탭 && 종수(k))) 폐쇄거래탭 = ['매매', '전세', '월세'].find(k => 종수(k)) || '매매';
   const 분양권수 = (Number(r.분양권수.건수) || 0) + (Number(r.분양권수.취소) || 0);
   const 뒤수 = (r.옛거래.셈 || []).filter(z => z.때 === '뒤').reduce((t, z) => t + (Number(z.매매) || 0) + (Number(z.전월세) || 0) + (Number(z.해제) || 0), 0);
-  const TABS = [['info', '대장정보'], ['dong', `동·호 <b>${fmt(호수 || 동.length)}</b>`],
+  const TABS = [['info', '대장정보'], ['dong', `동·호 <b>${fmt(호수 || (대.동 || []).length)}</b>`],
                 ['price', `실거래 <b>${fmt(거래수 + 분양권수 + 뒤수)}</b>`], ['land', '토지']];
   if (!TABS.some(t => t[0] === 폐쇄탭)) 폐쇄탭 = 'info';
   const 날 = d => d ? String(d).replace(/^(\d{4})(\d\d)(\d\d)$/, '$1.$2.$3') : '';
@@ -6720,19 +6714,25 @@ function 폐쇄그리기() {
     ${s.now_complex_id ? `<p class="sm">같은 필지의 지금 단지: <a href="/c/${s.now_complex_id}" data-goc="${s.now_complex_id}">${esc(s.now_nm || '단지')}</a>
       <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}`;
 
-  const paneD = (호수 || (대.층 || []).length)
-    ? `${structureBlock(동, 대.층 || [], 대.호 || [], {}, 호수, [], null)}
-       <p class="note sm">폐쇄 전유부 · 전유공용면적 · 층별개요 원문입니다(공공데이터포털 폐쇄말소대장).
-         호와 동은 <b>같은 지번 안에서 동명칭으로</b> 맞췄습니다 — 폐쇄 대장에는 지금 대장처럼 호마다 '어느 동 대장' 인지 적는 번호가 없습니다.
-         이 지번에 닫힌 묶음이 여럿이면 호는 모두 같이 보입니다(어느 묶음 것인지 원문이 알려 주지 않습니다).
-         ${(대.호 || []).some(h => h.전용면적 != null) ? '' : '전용면적(전유공용면적)은 아직 받는 중입니다.'}</p>
-       ${sect('동', 'closed', ` ${fmt((대.동 || []).length)}`)}
-       <table><thead><tr><th>동</th><th>용도</th><th class="n">세대</th><th class="n">연면적</th><th>닫힌 날</th></tr></thead><tbody>
-         ${(대.동 || []).map(d => `<tr${d.이묶음 ? '' : ' class="muted"'}><td>${esc(d.dong_nm || d.bld_nm || '—')}</td><td>${esc(d.main_purps_nm || '—')}</td>
-           <td class="n">${d.hhld_cnt ? fmt(d.hhld_cnt) : '—'}</td><td class="n">${d.tot_area ? fmt(Math.round(d.tot_area)) : '—'}</td><td>${esc(날(d.shter_day))}</td></tr>`).join('')}
-       </tbody></table>`
-    : `<p class="note">${다받음 ? gapCell('', 'NA', '이 지번의 폐쇄 대장에는 전유부(호)·층별개요가 없습니다 — 호로 나뉘지 않은 건물(일반 대장)입니다')
-                                 : gapCell('', 'SCOPE', '이 지번의 폐쇄 전유부·층별개요를 아직 받는 중입니다(집합 대장 지번부터 차례로)')}</p>`;
+  /* 2026-10-23 사장님 "1번 ㄴㄴ 그럼 잇지말고, 왜 동호가 없는지 간략히 설명해" — 호를 동에 **잇지 않는다**. 동은 동대로(층은 표제부 번호로) · 호는 호대로(전용면적은 호 번호로) */
+  const 평 = new Map(); for (const h of 대.호 || []) if (h.평형 != null) 평.set(h.평형, (평.get(h.평형) || 0) + 1);
+  const 층범위 = pk => { const f = (대.층 || []).filter(x => String(x.mgm_bldrgst_pk) === String(pk)).map(x => Number(x.층)).filter(Number.isFinite);
+    if (!f.length) return '—'; const lo = Math.min(...f), hi = Math.max(...f); return `${lo < 0 ? '지하 ' + (-lo) : lo}${hi !== lo ? ' ~ ' + hi : ''}층`; };
+  const paneD = `<p class="note"><b>동·호 배치(격자)는 그리지 않습니다.</b> 폐쇄 대장에는 지금 대장과 달리 <b>호가 어느 동 대장에 속하는지 적는 번호</b>(상위 대장 번호)가 없어,
+       호를 동에 확실히 이을 수 없습니다(이름으로 잇지 않습니다). 동과 호를 따로 보여 줍니다.</p>
+    ${sect('동', 'closed', ` ${fmt((대.동 || []).length)}`)}
+    <table><thead><tr><th>동</th><th>용도</th><th class="n">세대</th><th>층</th><th class="n">연면적</th><th>닫힌 날</th></tr></thead><tbody>
+      ${(대.동 || []).map(d => `<tr${d.이묶음 ? '' : ' class="muted"'}><td>${esc(d.dong_nm || d.bld_nm || '—')}</td><td>${esc(d.main_purps_nm || '—')}</td>
+        <td class="n">${d.hhld_cnt ? fmt(d.hhld_cnt) : '—'}</td><td>${(대.층 || []).length ? 층범위(d.mgm_bldrgst_pk) : (d.grnd_flr_cnt ? `지상 ${d.grnd_flr_cnt}층` : '—')}</td>
+        <td class="n">${d.tot_area ? fmt(Math.round(d.tot_area)) : '—'}</td><td>${esc(날(d.shter_day))}</td></tr>`).join('') || '<tr><td colspan="6">—</td></tr>'}
+    </tbody></table>
+    ${sect('호 (전유부)', 'closed', ` ${fmt(호수)}`)}
+    ${호수 ? `<p class="sm">전유부 <b>${fmt(호수)}호</b>${평.size ? ` · 전용면적(전유공용면적)으로 본 평형:` : ''}</p>
+      ${평.size ? `<div class="apick">${[...평.entries()].sort((a, b) => a[0] - b[0]).map(([k, n]) => `<span class="achip">${fmt(k)}㎡<b>${fmt(n)}</b></span>`).join('')}</div>`
+                : `<p class="note sm">${다받음 ? '전유공용면적에 전용면적이 없습니다.' : '전용면적(전유공용면적)은 아직 받는 중입니다.'}</p>`}`
+      : `<p class="note">${다받음 ? gapCell('', 'NA', '이 지번의 폐쇄 대장에는 전유부(호)가 없습니다 — 호로 나뉘지 않은 건물(일반 대장)입니다')
+                               : gapCell('', 'SCOPE', '이 지번의 폐쇄 전유부를 아직 받는 중입니다(집합 대장 지번부터 차례로)')}</p>`}
+    <p class="note sm">공공데이터포털 폐쇄말소대장 원문 — 층은 표제부 번호로, 전용면적은 호 번호로 이었습니다(코드).</p>`;
 
   const 거래탭UI = 거래수 ? `<div class="apick tpick">${['매매', '전세', '월세'].map(k =>
       `<button type="button" class="achip" data-ctrade="${k}" aria-selected="${폐쇄거래탭 === k}">${k}<b>${fmt(종수(k))}</b></button>`).join('')}</div>` : '';
