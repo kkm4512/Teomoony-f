@@ -4411,9 +4411,9 @@ app.get('/api/closed/site/:key', async (req, res) => {
          호마다 원문 칸 그대로 + 전용면적(전유공용면적 · 같은 호 번호로 이음 = 코드) */
       SELECT TOP 20000 호PK = e.mgm_shtreg_pk, 원문동명 = e.dong_nm,
              층 = CASE WHEN e.flr_gb_nm = N'지하' THEN -e.flr_no ELSE e.flr_no END, 호 = e.ho_nm,
-             ea.전용면적, 평형 = CAST(FLOOR(ea.전용면적) AS INT)
+             ea.전용면적, 평형 = CAST(FLOOR(ea.전용면적) AS INT), ea.용도
         FROM gold.closed_site s JOIN silver.bld_closed_expos e ON e.pnu = s.pnu
-        OUTER APPLY (SELECT 전용면적 = SUM(a.area) FROM silver.bld_closed_expos_area a
+        OUTER APPLY (SELECT 전용면적 = SUM(a.area), 용도 = MIN(a.main_purps_nm) FROM silver.bld_closed_expos_area a
                       WHERE a.pnu = e.pnu AND a.mgm_shtreg_pk = e.mgm_shtreg_pk AND a.expos_pubuse_gb_nm = N'전유') ea
        WHERE s.site_key = @k ORDER BY e.dong_nm, 층 DESC, e.ho_nm;
       /* 실거래 탭 — 단지 상세와 같은 칸(tradeList 가 읽는 모양). 옛 건물(닫히기 전) 것만 · 종류마다 120 */
@@ -4431,7 +4431,15 @@ app.get('/api/closed/site/:key', async (req, res) => {
                                              ORDER BY deal_ymd DESC, trade_sk DESC)
                 FROM #ot WHERE 때 = N'전') x
        WHERE rn <= 120 ORDER BY 전월세, 월세냐, 날짜 DESC;
-      SELECT op, 건수, 받은때 FROM silver.bld_closed_detail_done d JOIN gold.closed_site s ON s.pnu = d.pnu WHERE s.site_key = @k;`);
+      SELECT op, 건수, 받은때 FROM silver.bld_closed_detail_done d JOIN gold.closed_site s ON s.pnu = d.pnu WHERE s.site_key = @k;
+      /* 2026-10-23 사장님 "123 너가 ㄱㄱ" — 이 지번의 공동주택가격(VWorld NED, 국토부 공시) 연도별: 공시된 호 수 · 원문 값의 최저~최고(평균·중위는 안 낸다).
+         ★ NED 는 **지번** 단위라 같은 지번의 지금 건물 값도 온다(국화연립 2002 폐쇄 자리 → 2006~ '국화아파트') — **대장이 닫힌 해까지만** 이 옛 건물 것으로 본다. */
+      SELECT p.기준연도, p.기준월, 호 = COUNT(*), 최저 = MIN(p.공시가격), 최고 = MAX(p.공시가격), 이름 = MIN(p.공동주택명), 이름수 = COUNT(DISTINCT p.공동주택명)
+        FROM gold.closed_site s JOIN silver.ned_aphus_price p ON p.pnu = s.pnu WHERE s.site_key = @k AND LEN(s.shter_day) = 8 AND p.기준연도 <= LEFT(s.shter_day, 4)
+       GROUP BY p.기준연도, p.기준월 ORDER BY p.기준연도, p.기준월;
+      SELECT 동 = p.동명, 호 = COUNT(DISTINCT p.호명) FROM gold.closed_site s JOIN silver.ned_aphus_price p ON p.pnu = s.pnu WHERE s.site_key = @k AND LEN(s.shter_day) = 8 AND p.기준연도 <= LEFT(s.shter_day, 4)
+       GROUP BY p.동명 ORDER BY TRY_CAST(REPLACE(REPLACE(p.동명, N'동', N''), N' ', N'') AS INT), p.동명;
+      SELECT d.건수, d.받은시각 FROM gold.closed_site s JOIN silver.ned_aphus_done d ON d.pnu = s.pnu WHERE s.site_key = @k;`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
     const g = (r.recordsets[2] || [])[0];
@@ -4442,8 +4450,25 @@ app.get('/api/closed/site/:key', async (req, res) => {
                옛거래: { 셈: r.recordsets[6] || [], 줄: r.recordsets[7] || [] },
                대장: { 동: r.recordsets[8] || [], 층: r.recordsets[9] || [], 호: r.recordsets[10] || [],
                        받음: Object.fromEntries((r.recordsets[12] || []).map(x => [x.op, { 건수: x.건수, 받은때: x.받은때 }])) },
-               거래: r.recordsets[11] || [] });
+               거래: r.recordsets[11] || [],
+               공시: { 연도: r.recordsets[13] || [], 동: r.recordsets[14] || [], 받음: (r.recordsets[15] || [])[0] || null } });
   } catch (e) { fail(res, e, 'closed-site'); }
+});
+/* 2026-10-23: 폐쇄 자리의 공동주택가격 — 한 동(NED 원문 동명)의 호마다 연도별 원문 값. 동명은 NED 원문 그대로(대장 동과 잇지 않는다) */
+app.get('/api/closed/site/:key/ned', async (req, res) => {
+  const k = String(req.params.key || '');
+  if (!/^\d{19}-\d{1,8}$/.test(k)) return res.status(400).json({ error: 'bad key' });
+  const 동 = String(req.query.dong == null ? '' : req.query.dong).slice(0, 100);
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('k', sql.VarChar(30), k).input('d', sql.NVarChar(100), 동).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 6000 p.호명, p.층, p.전용면적, p.기준연도, p.기준월, p.공시가격
+        FROM gold.closed_site s JOIN silver.ned_aphus_price p ON p.pnu = s.pnu AND p.동명 = @d
+       WHERE s.site_key = @k AND LEN(s.shter_day) = 8 AND p.기준연도 <= LEFT(s.shter_day, 4)
+       ORDER BY TRY_CAST(p.층 AS INT), p.호명, p.기준연도, p.기준월;`);
+    res.json({ 동, 줄: r.recordset });
+  } catch (e) { fail(res, e, 'closed-ned'); }
 });
 app.get('/api/complexes/:id/closed', async (req, res) => {
   const id = Number(req.params.id);

@@ -6747,7 +6747,17 @@ function 옛거래칸(o, s, 때들 = ['전', '뒤']) {
 /* 2026-10-23 사장님 "폐쇄 말소대장도 기존 단지상세처럼 동호나 그런 정보들을 동일하게" — 단지 상세와 같은 탭 · 같은 그림 함수(structureBlock · tradeList).
    ★ 탭: 대장정보 · 동·호 · 실거래 · 토지. 동·호 격자와 실거래 목록은 단지 상세와 **같은 함수**라 보이는 법이 같다(작업방식 10장).
    ★ 호 → 동은 **잇지 않는다**(폐쇄 기본개요에 상위 대장 번호가 없다 · 사장님 "잇지말고") — 동·호 탭에 까닭을 적는다. */
-let 폐쇄탭 = 'info', 폐쇄거래탭 = '매매', 폐쇄마지막 = null;
+let 폐쇄탭 = 'info', 폐쇄거래탭 = '매매', 폐쇄마지막 = null, 폐쇄동다 = false, 폐쇄공시동 = null, 폐쇄공시줄 = null;
+/* 폐쇄 자리 공시가격 — 한 동의 호마다 연도별 원문 값(호 · 층 · 전용 · 해마다) */
+function 공시호표(줄, 억원) {
+  const 호 = new Map();
+  for (const x of 줄) { const k = x.호명 + '|' + (x.층 || ''); if (!호.has(k)) 호.set(k, { 호: x.호명, 층: x.층, 전용: x.전용면적, 값: [] }); 호.get(k).값.push(x); }
+  if (!호.size) return '<p class="note sm">이 동의 공시가격 줄이 없습니다.</p>';
+  return `<table class="cned"><thead><tr><th>호</th><th>층</th><th class="n">전용</th><th>연도별 공시가격 (원문)</th></tr></thead><tbody>
+    ${[...호.values()].map(h => `<tr><td>${esc(h.호 || '—')}</td><td>${esc(h.층 || '—')}</td><td class="n">${h.전용 != null ? Number(h.전용).toFixed(2) : '—'}</td>
+      <td class="sm">${h.값.map(v => `<span class="nowrap">${esc(v.기준연도)}${v.기준월 && v.기준월 !== '01' ? '.' + esc(v.기준월) : ''} <b>${억원(v.공시가격)}</b></span>`).join(' · ')}</td></tr>`).join('')}
+  </tbody></table>`;
+}
 async function 폐쇄상세(key) {
   const 표 = 'cl:' + key;
   보기전환('map');
@@ -6756,7 +6766,7 @@ async function 폐쇄상세(key) {
   try { r = await fetch(`/api/closed/site/${encodeURIComponent(key)}`).then(x => x.json()); if (r.error) throw new Error(r.error); }
   catch (e) { if (selectedRedev === 표) box.innerHTML = `<p class="note">${gapCell('', 'UNSURE', '닫힌 대장을 불러오지 못했습니다 — ' + (e.message || e))}</p>`; return; }
   if (selectedRedev !== 표) return;
-  if (!폐쇄마지막 || 폐쇄마지막.key !== key) { 폐쇄탭 = 'info'; hoDong = null; hoArea = null; hoAreaX = null; hoFloor = null; 거래Shown = 10; }
+  if (!폐쇄마지막 || 폐쇄마지막.key !== key) { 폐쇄탭 = 'info'; 폐쇄동다 = false; 폐쇄공시동 = null; 폐쇄공시줄 = null; hoDong = null; hoArea = null; hoAreaX = null; hoFloor = null; 거래Shown = 10; }
   폐쇄마지막 = { key, r, 표, box };
   닫힌자리그리기(r, 표);
   폐쇄그리기();
@@ -6784,20 +6794,29 @@ function 폐쇄그리기() {
       <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}`;
 
   /* 2026-10-23 사장님 "1번 ㄴㄴ 그럼 잇지말고, 왜 동호가 없는지 간략히 설명해" — 호를 동에 **잇지 않는다**. 동은 동대로(층은 표제부 번호로) · 호는 호대로(전용면적은 호 번호로) */
-  const 평 = new Map(); for (const h of 대.호 || []) if (h.평형 != null) 평.set(h.평형, (평.get(h.평형) || 0) + 1);
+  /* 2026-10-23: 평형은 **주거 호**(전유 용도에 주택·아파트가 든 것)만 — 상가 칸(4㎡ · 5㎡ …)이 섞이지 않게. 나머지는 용도별 수만 */
+  const 주거호 = h => /주택|아파트/.test(h.용도 || '');
+  const 평 = new Map(); for (const h of 대.호 || []) if (h.평형 != null && 주거호(h)) 평.set(h.평형, (평.get(h.평형) || 0) + 1);
+  const 그밖 = new Map(); for (const h of 대.호 || []) if (!주거호(h)) { const k = h.용도 || '용도 없음'; 그밖.set(k, (그밖.get(k) || 0) + 1); }
+  /* 동 줄 순서: 세대 있는 동 먼저 · 이름 속 숫자 순(1동 · 2동 · … · 10동) — 글자 순이면 100동 · 10동 · 1동 이 섞였다 */
+  const 숫 = d => { const m = String(d.dong_nm || d.bld_nm || '').match(/(\d+)/); return m ? Number(m[1]) : 1e9; };
+  const 동줄 = [...(대.동 || [])].sort((a, b) => ((b.hhld_cnt > 0) - (a.hhld_cnt > 0)) || (숫(a) - 숫(b))
+    || String(a.dong_nm || a.bld_nm || '').localeCompare(String(b.dong_nm || b.bld_nm || ''), 'ko'));
   const 층범위 = pk => { const f = (대.층 || []).filter(x => String(x.mgm_bldrgst_pk) === String(pk)).map(x => Number(x.층)).filter(Number.isFinite);
     if (!f.length) return '—'; const lo = Math.min(...f), hi = Math.max(...f); return `${lo < 0 ? '지하 ' + (-lo) : lo}${hi !== lo ? ' ~ ' + hi : ''}층`; };
   const paneD = `<p class="note"><b>동·호 배치(격자)는 그리지 않습니다.</b> 폐쇄 대장에는 지금 대장과 달리 <b>호가 어느 동 대장에 속하는지 적는 번호</b>(상위 대장 번호)가 없어,
        호를 동에 확실히 이을 수 없습니다(이름으로 잇지 않습니다). 동과 호를 따로 보여 줍니다.</p>
     ${sect('동', 'closed', ` ${fmt((대.동 || []).length)}`)}
     <table><thead><tr><th>동</th><th>용도</th><th class="n">세대</th><th>층</th><th class="n">연면적</th><th>닫힌 날</th></tr></thead><tbody>
-      ${(대.동 || []).map(d => `<tr${d.이묶음 ? '' : ' class="muted"'}><td>${esc(d.dong_nm || d.bld_nm || '—')}</td><td>${esc(d.main_purps_nm || '—')}</td>
+      ${동줄.map((d, i) => `<tr${d.이묶음 ? '' : ' class="muted"'}${i >= 30 && !폐쇄동다 ? ' hidden' : ''}><td>${esc(d.dong_nm || d.bld_nm || '—')}</td><td>${esc(d.main_purps_nm || '—')}</td>
         <td class="n">${d.hhld_cnt ? fmt(d.hhld_cnt) : '—'}</td><td>${(대.층 || []).length ? 층범위(d.mgm_bldrgst_pk) : (d.grnd_flr_cnt ? `지상 ${d.grnd_flr_cnt}층` : '—')}</td>
         <td class="n">${d.tot_area ? fmt(Math.round(d.tot_area)) : '—'}</td><td>${esc(날(d.shter_day))}</td></tr>`).join('') || '<tr><td colspan="6">—</td></tr>'}
     </tbody></table>
+    ${동줄.length > 30 && !폐쇄동다 ? `<button type="button" class="more" data-cdong-all="1">동 ${fmt(동줄.length - 30)}개 더 보기</button>` : ''}
     ${sect('호 (전유부)', 'closed', ` ${fmt(호수)}`)}
-    ${호수 ? `<p class="sm">전유부 <b>${fmt(호수)}호</b>${평.size ? ` · 전용면적(전유공용면적)으로 본 평형:` : ''}</p>
-      ${평.size ? `<div class="apick">${[...평.entries()].sort((a, b) => a[0] - b[0]).map(([k, n]) => `<span class="achip">${fmt(k)}㎡<b>${fmt(n)}</b></span>`).join('')}</div>`
+    ${호수 ? `<p class="sm">전유부 <b>${fmt(호수)}호</b>${평.size ? ` · 주거 호의 전용면적(전유공용면적)으로 본 평형:` : ''}</p>
+      ${평.size ? `<div class="apick">${[...평.entries()].sort((a, b) => a[0] - b[0]).map(([k, n]) => `<span class="achip">${fmt(k)}㎡<b>${fmt(n)}</b></span>`).join('')}</div>
+        ${그밖.size ? `<p class="note sm">주거 아닌 호(평형에서 뺌): ${[...그밖.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${esc(k)} ${fmt(n)}`).join(' · ')}</p>` : ''}`
                 : `<p class="note sm">${다받음 ? '전유공용면적에 전용면적이 없습니다.' : '전용면적(전유공용면적)은 아직 받는 중입니다.'}</p>`}`
       : `<p class="note">${다받음 ? gapCell('', 'NA', '이 지번의 폐쇄 대장에는 전유부(호)가 없습니다 — 호로 나뉘지 않은 건물(일반 대장)입니다')
                                : gapCell('', 'SCOPE', '이 지번의 폐쇄 전유부를 아직 받는 중입니다(집합 대장 지번부터 차례로)')}</p>`}
@@ -6805,6 +6824,20 @@ function 폐쇄그리기() {
 
   const 거래탭UI = 거래수 ? `<div class="apick tpick">${['매매', '전세', '월세'].map(k =>
       `<button type="button" class="achip" data-ctrade="${k}" aria-selected="${폐쇄거래탭 === k}">${k}<b>${fmt(종수(k))}</b></button>`).join('')}</div>` : '';
+  /* 2026-10-23 사장님 "123 너가 ㄱㄱ" — 이 지번의 공동주택가격(VWorld NED). 연도별: 공시된 호 수 · 최저~최고(원문 값). 평균·중위는 안 낸다(정책).
+     동을 누르면 그 동(NED 원문 동명)의 호마다 연도별 값. ★ 대장의 동과 잇지 않는다 — 이름이 같아 보여도 다른 자료다. */
+  const 공 = r.공시 || { 연도: [], 동: [], 받음: null };
+  const 억원 = v => { if (v == null) return '—'; const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4); return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
+  const 공시칸 = 공.연도.length ? `${sect('공시가격 (공동주택가격)', '주택가격', ` ${fmt(공.연도.length)}회`)}
+    <p class="note sm">국토교통부 공시 — VWorld 공동주택가격 원문. 과세 기준 값이라 실거래가가 아닙니다. <b>대장이 닫힌 해(${esc(String(s.shter_day || '').slice(0, 4))})까지</b>의 공시만 — 공시는 지번 단위라 그 뒤 값은 같은 지번에 새로 지은 건물 것입니다. 연도마다 공시된 호 수가 달라 평균은 내지 않고, 원문 값의 최저~최고만 적습니다.${공.연도.some(y => y.이름수 > 1) ? '' : ` 원문 공동주택명: ${esc(공.연도[0].이름 || '—')}`}</p>
+    <table><thead><tr><th>기준</th><th class="n">공시된 호</th><th class="n">최저</th><th class="n">최고</th></tr></thead><tbody>
+      ${공.연도.map(y => `<tr><td>${esc(y.기준연도)}${y.기준월 && y.기준월 !== '01' ? '.' + esc(y.기준월) : ''}</td><td class="n">${fmt(y.호)}</td><td class="n">${억원(y.최저)}</td><td class="n">${억원(y.최고)}</td></tr>`).join('')}
+    </tbody></table>
+    ${공.동.length ? `<div class="lt2">동을 고르면 호마다 연도별 값 <span class="muted">(NED 원문 동명)</span></div>
+      <div class="apick">${공.동.map(d => `<button type="button" class="achip" data-cned="${esc(d.동)}" aria-selected="${폐쇄공시동 === d.동}">${esc(d.동 || '(동명 없음)')}<b>${fmt(d.호)}</b></button>`).join('')}</div>
+      <div id="cnedbox">${폐쇄공시동 != null && 폐쇄공시줄 && 폐쇄공시줄.동 === 폐쇄공시동 ? 공시호표(폐쇄공시줄.줄, 억원) : ''}</div>` : ''}`
+    : (공.받음 ? `<p class="note sm">${gapCell('', 'EMPTY', '이 지번에 대장이 닫히기 전 해의 공동주택가격 공시가 없습니다(VWorld 원문 · 공시는 2006년부터)')}</p>`
+               : `<p class="note sm">${gapCell('', 'SCOPE', '이 지번의 공동주택가격(VWorld)을 아직 받는 중입니다')}</p>`);
   const paneP = `${거래수 ? `<p class="note sm">이 필지(지번)로 신고된 거래 중 <b>대장이 닫힌 ${esc(날(s.shter_day))} 이전</b> 계약 — 헐리기 전 건물의 거래입니다. 지금 단지에는 붙이지 않았습니다.
         ${(r.옛거래.셈 || []).filter(z => z.때 === '전').map(z => z.이름 ? `실거래 신고의 이름: ${esc(z.이름)} <span class="muted">(참고로만)</span>` : '').join('')}</p>` : ''}
     ${거래탭UI}
@@ -6812,7 +6845,8 @@ function 폐쇄그리기() {
     ${옛거래칸(r.옛거래, s, ['뒤'])}
     ${(r.분양권 || []).length ? sect('이 자리 사업의 분양권·입주권', 'rtms', ` ${fmt(분양권수)}`)
       + 분양권칸({ ...r, 공고: [], 분양권말: `이 필지(지번)에서 <b>이 대장이 닫힌 ${esc(날(s.shter_day))} 이후</b>에 맺은 계약입니다 — 옛 건물은 이미 없으니 이 자리에 새로 짓는 사업의 권리입니다. 실거래 신고의 단지명: ${esc([...new Set(r.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} (참고로만 보입니다 — 이름으로 잇지 않습니다)` }) : ''}
-    ${거래수 || (r.분양권 || []).length || (r.옛거래.셈 || []).length ? '' : `<p class="note">${gapCell('', 'NA', '이 지번으로 신고된 실거래 중 단지에 안 붙은 것이 없습니다')}</p>`}`;
+    ${거래수 || (r.분양권 || []).length || (r.옛거래.셈 || []).length ? '' : `<p class="note">${gapCell('', 'NA', '이 지번으로 신고된 실거래 중 단지에 안 붙은 것이 없습니다')}</p>`}
+    ${공시칸}`;
 
   const paneL = `${r.이력 ? `<div class="lt2">이 필지의 토지 이동 이력 <span class="muted">(VWorld 토지이동이력 원문 · ${esc(String(r.이력.받은시각 || '').slice(0, 10))} 받음)</span></div>
       ${r.이력.줄.length ? `<ul class="lu">${r.이력.줄.slice(0, 12).map(z => `<li><b>${esc(z.이동일 ? z.이동일.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.이동사유 || '')}</span>
@@ -6828,6 +6862,12 @@ function 폐쇄그리기() {
 
   const 다시 = () => 폐쇄그리기();
   box.querySelectorAll('[data-ctab]').forEach(b => b.addEventListener('click', () => { 폐쇄탭 = b.dataset.ctab; 다시(); }));
+  box.querySelectorAll('[data-cdong-all]').forEach(b => b.addEventListener('click', () => { 폐쇄동다 = true; 다시(); }));
+  box.querySelectorAll('[data-cned]').forEach(b => b.addEventListener('click', async () => {
+    const 동 = b.dataset.cned; 폐쇄공시동 = 동; 폐쇄공시줄 = null; 다시();
+    try { const j = await fetch(`/api/closed/site/${encodeURIComponent(m.key)}/ned?dong=${encodeURIComponent(동)}`).then(x => x.json());
+      if (폐쇄공시동 === 동) { 폐쇄공시줄 = { 동, 줄: j.줄 || [] }; 다시(); } } catch (e) { toast('공시가격을 못 불러왔습니다', 4000); }
+  }));
   box.querySelectorAll('[data-ctrade]').forEach(b => b.addEventListener('click', () => { 폐쇄거래탭 = b.dataset.ctrade; 거래Shown = 10; 다시(); }));
   box.querySelectorAll('[data-trade-more]').forEach(b => b.addEventListener('click', () => { 거래Shown += 10; 다시(); }));
   box.querySelectorAll('[data-ho-dong]').forEach(b => b.addEventListener('click', () => { hoDong = b.dataset.hoDong; 다시(); }));

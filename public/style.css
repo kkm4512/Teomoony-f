@@ -1904,3 +1904,7 @@ a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-hei
 
 /* 2026-10-23 지도 길게 눌러 돌리기 */
 #map.rotating, #map.rotating * { cursor: alias !important; }
+
+/* 2026-10-23 폐쇄 자리 공시가격 */
+.nowrap { white-space: nowrap; }
+table.cned td.sm { line-height: 1.6; }
