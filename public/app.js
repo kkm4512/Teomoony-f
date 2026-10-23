@@ -5692,10 +5692,12 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
       ${x.위치없음 ? `<span class="sst">${gapCell('', 'UNSURE', '연계표에는 있는데 학교 위치 자료에 없습니다(폐교·이전 등) — 원문 이름만')}</span>` : 학교공시줄(x)}
     </div>`;
   const 구역줄 = 구역들.length ? 구역들.map(z => `
-      <div class="zrow2">
+      <div class="zrow2 hzone" role="button" tabindex="0" data-hzone="${({ '통학구역': 'E', '중학교 학교군': 'M', '고등학교 학교군': 'H' })[z.구역종류] || 'E'}|${esc(z.구역id)}"
+           title="눌러서 지도에 경계 보기">
         <span class="zt">${esc(z.구역종류)}</span>
         <b>${esc(z.구역)}</b>${Number(z.공동) ? ' <span class="zb">공동</span>' : ''}
         <span class="muted sm">· ${esc(짧)}학교 ${fmt(구.filter(y => y.구역id === z.구역id && y.school_id).length)}곳</span>
+        <span class="hzgo">지도에 보기</span>
       </div>`).join('') + `<p class="note sm">${급 === '초등학교'
         ? '통학구역은 교육지원청이 정한 배정 구역입니다. 공동통학구역이면 표시된 학교 중에서 배정됩니다.'
         : 급 === '중학교' ? '중학교는 학교군 안에서 추첨으로 배정됩니다 — 표시된 학교는 <b>후보</b>입니다.'
@@ -6839,8 +6841,45 @@ let 구역층 = null, 구역지금 = null;
 function 구역지우기() {
   if (구역층) { try { map.removeLayer(구역층); } catch (e) {} }
   구역층 = null; 구역지금 = null;
-  document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on, #detail [data-clsite].on').forEach(el => el.classList.remove('on'));
+  document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on, #detail [data-clsite].on, #detail [data-hzone].on').forEach(el => el.classList.remove('on'));
 }
+/* ★ 2026-10-24 사장님 "학구도를 클릭하면 지도에 표시" — 교육 탭 통학구역 · 학교군 줄 → 그 경계 + 그 구역 학교 점.
+   정비구역 · 토지이용과 같은 층(한 번에 하나 · 다시 누르면 지움). 초록 — 정비(주황) · 토지이용(보라)과 갈리게. */
+async function 학구보이기(el) {
+  const [k, id] = String(el.dataset.hzone || '').split('|');
+  const 키 = `hz:${k}:${id}`;
+  if (구역지금 === 키) { 구역지우기(); return; }
+  구역지우기();
+  try {
+    const x = await fetch(`/api/schoolzone/${encodeURIComponent(k)}/${encodeURIComponent(id)}`);
+    const f = await x.json();
+    if (!x.ok || f.error) { toast(f.error || '경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 3000); return; }
+    const 면 = L.geoJSON(f, { interactive: false, style: { color: '#15803d', weight: 4, fillColor: '#22c55e', fillOpacity: 0.22 } });
+    const 점 = (f.학교 || []).map(s => L.circleMarker([Number(s.lat), Number(s.lon)], { radius: 6, weight: 2, color: '#15803d', fillColor: '#fff', fillOpacity: 1 })
+      .bindTooltip(esc(s.이름 || ''), { permanent: true, direction: 'top', className: 'hztip', offset: [0, -6] }));
+    구역층 = L.featureGroup([면, ...점]).addTo(map);
+    구역지금 = 키; el.classList.add('on');
+    const b = 면.getBounds();
+    const top = (document.querySelector('.ptop') || {}).offsetHeight || 0;
+    const sh = 폰() ? ((document.querySelector('#psheet') || {}).offsetHeight || 0) : 0;
+    if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half');
+    const 맞춤 = () => map.fitBounds(b, { paddingTopLeft: [24, (폰() ? top : 0) + 24], paddingBottomRight: [24, sh + 24], maxZoom: 17 });
+    setTimeout(맞춤, 폰() ? 280 : 0);
+    /* 단지를 막 연 직후에는 단지 맞춤(외곽선 도착)이 뒤에 와서 덮는다 — 아직 이 구역을 보고 있고 경계가 화면에 다 안 들어 있으면 한 번 더 */
+    setTimeout(() => { if (구역지금 === 키 && !map.getBounds().contains(b)) 맞춤(); }, 1200);
+    const p = f.properties || {};
+    toast(`${esc(p.이름 || '')} — ${esc(p.종류 || '')}${Number(p.공동) ? ' · 공동' : ''} · 학교 ${fmt((f.학교 || []).length)}곳 (학구도 기준일 ${esc(p.기준일 || '')})`, 3000);
+  } catch (e) { toast('경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 2500); }
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest && e.target.closest('#detail [data-hzone]');
+  if (el) 학구보이기(el);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest && e.target.closest('#detail [data-hzone]');
+  if (el) { e.preventDefault(); 학구보이기(el); }
+});
 /* 토지이용계획 줄 → 구역 경계 (2026-10-22). 정비구역과 같은 층 · 같은 토글(한 번에 하나) */
 async function 토지구역보이기(el) {
   const [code, nm] = String(el.dataset.lushape || '').split('|');

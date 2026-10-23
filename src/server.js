@@ -4155,6 +4155,63 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
 
 /* ---------- 정비사업 구역 하나의 경계 (2026-10-22 사장님: "토지 탭의 재개발을 누르면 그 폴리곤") ----------
    겹쳐 보기(/api/redev)와 **같은 표 · 같은 칸**이다. 단지 상세의 '정비사업 구역' 줄을 누르면 이걸 받아 그린다. */
+/* ★ 2026-10-24 사장님 "학구도를 클릭하면 지도에 표시" — 초등 통학구역(E · silver.school_zone) · 중학교 학교군(M) · 고등학교 학군(H) 경계 한 개.
+   경계는 원본(한국교육시설안전원) 그대로 — 화면 그리기용으로만 Reduce(약 1m)로 점을 줄인다. 그 구역 학교(연계정보)의 점도 같이 준다. */
+function wktPolys(w) {
+  /* STAsText 결과 → GeoJSON 좌표. POLYGON · MULTIPOLYGON · GEOMETRYCOLLECTION 안의 면만 꺼낸다(선·점은 버린다). */
+  const out = [];
+  const parse = (str, i) => {          // str[i] === '(' → [노드, 다음 위치]
+    const kids = []; let buf = ''; i++;
+    while (i < str.length) {
+      const ch = str[i];
+      if (ch === '(') { const [k, j] = parse(str, i); kids.push(k); i = j; continue; }
+      if (ch === ')') { if (buf.trim()) kids.push(buf); return [kids.length === 1 && typeof kids[0] === 'string' ? kids[0] : kids, i + 1]; }
+      buf += ch; i++;
+    }
+    return [kids, i];
+  };
+  const ring = t => t.split(',').map(p => p.trim().split(/\s+/).map(Number)).filter(p => p.length >= 2 && p.every(Number.isFinite));
+  const re = /(MULTIPOLYGON|POLYGON)\s*\(/g; let m;
+  while ((m = re.exec(w))) {
+    const [node, end] = parse(w, m.index + m[0].length - 1);
+    const polys = m[1] === 'POLYGON' ? [node] : node;
+    for (const pg of polys) {
+      const rings = (Array.isArray(pg) ? pg : [pg]).map(r => ring(Array.isArray(r) ? r.join(',') : r)).filter(r => r.length >= 4);
+      if (rings.length) out.push(rings);
+    }
+    re.lastIndex = end;
+  }
+  return out;
+}
+app.get('/api/schoolzone/:kind/:id', async (req, res) => {
+  const kind = String(req.params.kind || '').toUpperCase();
+  const id = String(req.params.id || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20);
+  if (!['E', 'M', 'H'].includes(kind) || !id) return res.status(400).json({ error: 'kind=E|M|H · id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.VarChar(20), id).input('k', sql.Char(1), kind).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF @k = 'E'
+        SELECT TOP 1 이름 = hakgudo_nm, 공동 = CASE WHEN hakgudo_gb = '1' THEN 1 ELSE 0 END, 교육지원청 = edu_nm, 기준일 = base_dt,
+               wkt = geom.Reduce(0.00001).STAsText() FROM silver.school_zone WHERE hakgudo_id = @id;
+      ELSE
+        SELECT TOP 1 이름 = hakgudo_nm, 공동 = CASE WHEN hakgudo_gb = '1' THEN 1 ELSE 0 END, 교육지원청 = edu_nm, 기준일 = base_dt,
+               wkt = geom.Reduce(0.00001).STAsText() FROM silver.school_group WHERE kind = @k AND hakgudo_id = @id;
+      SELECT 이름 = COALESCE(s.school_nm, k.school_nm), s.lat, s.lon, 학교급 = k.school_lvl
+        FROM silver.school_zone_link k LEFT JOIN silver.school s ON s.school_id = k.school_id AND s.is_current = 1
+       WHERE k.hakgudo_id = @id;`);
+    const z = r.recordsets[0][0];
+    if (!z) return res.status(404).json({ error: '그 구역이 없습니다' });
+    const polys = wktPolys(z.wkt || '');
+    if (!polys.length) return res.status(404).json({ error: '경계를 읽지 못했습니다' });
+    const { wkt, ...p } = z;
+    res.json({ type: 'Feature', properties: { ...p, 종류: { E: '초등 통학구역', M: '중학교 학교군', H: '고등학교 학군' }[kind],
+                 출처: '한국교육시설안전원 학구도' },
+               geometry: polys.length === 1 ? { type: 'Polygon', coordinates: polys[0] } : { type: 'MultiPolygon', coordinates: polys },
+               학교: (r.recordsets[1] || []).filter(x => x.lat != null) });
+  } catch (e) { fail(res, e, 'schoolzone'); }
+});
+
 app.get('/api/redev/:sn', async (req, res) => {
   const sn = String(req.params.sn || '').slice(0, 40);
   if (!sn) return res.status(400).json({ error: 'bad sn' });
