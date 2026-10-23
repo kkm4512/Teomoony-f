@@ -2156,7 +2156,9 @@ const 군말 = new Set(['보여줘', '보여줘요', '알려줘', '찾아줘', '
   '줘', '해줘', '목록', '리스트', '어디', '뭐야', '실거래', '실거래가', '거래',
   '단지', '곳', '것', '걸', '거', '좀', '그', '저', '요', '제일', '가장',
   /* 312: 조건 말 뒤에 붙는 꾸밈 — '2015년 이후 지은' 의 '지은' 은 조건이 아니다 */
-  '지은', '지어진', '준공', '사용승인', '입주', '근처', '주변', '있는', '걸친']);
+  '지은', '지어진', '준공', '사용승인', '입주', '근처', '주변', '있는', '걸친',
+  /* 2026-10-23 QA: 조건 앞뒤에 붙는 말 — 거짓 '못 알아들음' 이 떴다 */
+  '전용', '시세', '가격', '정비']);
 
 /* 거래 종목 — ★ 2026-10-19 첫 시험에서 **상가가 1위로 올라왔다.**
    "은평구 실거래 제일 높은" 에 효민아크로뷰 C&C미술학원 30.97억(42세대)이
@@ -2479,6 +2481,19 @@ async function lookupRegion(pool, cands) {
     sggRows = sggRows.filter(r => !sggRows.some(o =>
       o !== r && o.sgg_nm && r.sgg_nm && o.sgg_nm !== r.sgg_nm
       && o.sgg_nm.startsWith(r.sgg_nm)));
+    /* 2026-10-23 QA: 넓은 말과 좁은 말을 같이 쓰면('안양 동안구') 좁은 쪽 — 말마다 맞은 구를 모아 **겹치는 구**만. 안 겹치면(강남구 서초구) 그대로 둘 다 */
+    {
+      const 말별 = new Map();
+      for (const c of cands) {
+        const hit = sggRows.filter(r => r.sgg_nm && r.sgg_nm.includes(c.v)).map(r => r.sgg_cd);
+        if (hit.length) 말별.set(c.t, new Set([...(말별.get(c.t) || []), ...hit]));
+      }
+      if (말별.size >= 2) {
+        let 겹 = null;
+        for (const st of 말별.values()) 겹 = 겹 ? new Set([...겹].filter(x => st.has(x))) : new Set(st);
+        if (겹 && 겹.size) sggRows = sggRows.filter(r => 겹.has(r.sgg_cd));
+      }
+    }
     /* 2026-10-23 QA: 구와 동을 같이 말했으면('서초구 반포동' · '안양 평촌동') 그 구 **안의** 동만 — 둘 다 맞은 말로 친다 */
     let 구안동 = emdExact;
     if (emdExact.length && sggRows.length) {
@@ -2829,11 +2844,19 @@ function 조건읽기(q0) {
     const k = m[4].startsWith('평') ? 평 : 1; let a = Number(m[1]), b = Number(m[3]); if (a > b) [a, b] = [b, a];
     면(a * k, (b + 1) * k, `전용 ${a}~${b}${k === 1 ? '㎡' : '평'}`);
   }
-  else if ((m = 잡(/(\d{1,2})0\s*평\s*대/))) { const a = Number(m[1]) * 10; 면(a * 평, (a + 10) * 평, `전용 ${a}평대`); }
+  else if ((m = 잡(/(\d{1,2})0\s*평\s*대\s*(이상|넘는|넘은|초과|이하|미만|아래)?/))) {
+    /* 2026-10-23 QA: '50평대 이상' 이 50평대(50~59)로만 잡히고 '이상' 은 못 알아들음이었다 */
+    const a = Number(m[1]) * 10, w = m[2] || '';
+    if (/이상|넘|초과/.test(w)) 면(a * 평, null, `전용 ${a}평 이상`);
+    else if (/미만/.test(w)) 면(null, a * 평, `전용 ${a}평 미만`);
+    else if (/이하|아래/.test(w)) 면(null, (a + 10) * 평, `전용 ${a}평대 이하`);
+    else 면(a * 평, (a + 10) * 평, `전용 ${a}평대`);
+  }
   else if ((m = 잡(/(?<![\d.])(\d+(?:\.\d+)?)\s*(평(?!\s*당)|㎡(?!\s*당)|m2|m²|제곱미터|타입)\s*(이상|넘는|넘은|초과|이하|미만|아래|보다\s*큰|보다\s*작은)?/i))) {
     const n = Number(m[1]); const k = m[2].startsWith('평') ? 평 : 1; const 단 = k === 1 ? '㎡' : '평'; const w = m[3] || '';
     if (n > 0 && n < (k === 1 ? 1000 : 300)) {
-      if (/이상|넘|초과|큰/.test(w)) 면(n * k, null, `전용 ${n}${단} 이상`);
+      if (/초과|넘|큰/.test(w)) 면(n * k + 0.01, null, `전용 ${n}${단} 초과`);   // 2026-10-23 QA: '85㎡ 초과' 가 '이상' 으로 85.00 을 넣었다
+      else if (/이상/.test(w)) 면(n * k, null, `전용 ${n}${단} 이상`);
       else if (/미만|작은/.test(w)) 면(null, n * k, `전용 ${n}${단} 미만`);
       else if (/이하|아래/.test(w)) 면(null, n * k + 0.01, `전용 ${n}${단} 이하`);
       else 면(n * k, (n + 1) * k, `전용 ${n}${단}대`);
@@ -2907,6 +2930,14 @@ function 조건읽기(q0) {
     if (학.m > 2000) 알림.push({ 종류: 'SCOPE', 말: `학교 거리는 **2km 까지만** 셉니다(단지 상세의 학교 칸과 같은 범위) — 이번엔 쓰지 않았습니다` });
     else 조건.학교 = { se, m: 학.m, 말: `${se} ${학.m.toLocaleString()}m 안 (직선거리 · 배정 아님)` };
   }
+  /* 2026-10-23 QA: 기준이 없는 말 — 조용히 무시하면 '서울 최고가 20곳' 이 그 말의 답처럼 보인다 */
+  for (const [re, 말] of [
+    [/한강\s*뷰|한강\s*조망|리버\s*뷰|오션\s*뷰|조망\s*좋은|뷰\s*좋은/, "조망(뷰)은 원본 자료에 없습니다"],
+    [/학군/, "'학군' 은 정해진 기준이 없고 원본 자료에도 없습니다 — '중학교 500m 안' 처럼 학교 거리로 적어 주세요"],
+    [/조용한|쾌적한|살기\s*좋은|분위기\s*좋은/, "주관적인 말이라 조건으로 바꿀 수 없습니다"],
+    [/숲세권|공세권|몰세권|슬세권|학세권|편세권/, "정해진 거리가 없습니다 — 거리로 적어 주세요(역 · 학교만 셉니다)"]])
+    if ((m = 잡(re))) 알림.push({ 종류: 'HINT', 말: `'${m[0].trim()}' — ${말}. 이번엔 쓰지 않았습니다` });
+  if (!학 && (m = 잡(/(초등학교|중학교|고등학교|학교)\s*(가까운|근처|앞|옆)/))) 알림.push({ 종류: 'HINT', 말: `'${m[0].trim()}' 은 거리가 없습니다 — '${m[1] === '학교' ? '초등학교' : m[1]} 300m 안' 처럼 거리로 적어 주세요(학교 가까운 순 정렬은 없습니다). 이번엔 쓰지 않았습니다` });
   if ((m = 잡(/초품아/))) 알림.push({ 종류: 'HINT', 말: `'초품아' 는 정해진 기준이 없고, 배정은 거리가 아니라 학구도로 정해집니다 — '초등학교 300m 안' 처럼 거리로 적어 주세요. 이번엔 쓰지 않았습니다` });
 
   /* ---- 정비구역 (서울 정비사업 자료) ---- */
@@ -3042,6 +3073,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
   try {
     const pool = await getPool();
     const 쓴말 = new Set();           // 조건으로 쓰인 토큰
+    const 알림앞 = [];                 // 2026-10-23: 앞단계에서 생긴 안내(가격 '안팎' 등) — 아래 알림에 합친다
     const toks = 토큰들(q);
     /* ---- 0) 조건 (312): 평형·연식·세대·역·학교·정비·용도 — 잡은 글은 정렬·종목 찾기에서 뺀다 ---- */
     const 조읽 = 조건읽기(q);
@@ -3112,13 +3144,14 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     /* ---- 3.5) 지역 순위 (2026-10-22) — '제일 비싼 지역 · 어느 구가 · 동네' ----
        가격 정렬(비싼/싼/평당)과 지역을 묻는 말이 같이 있을 때만. 동 하나를 말했으면 순위가 뜻이 없어 단지 검색으로 간다. */
     const m지역 = q.match(지역의도);
-    if (m지역 && ['amount', 'amount_asc', 'unit'].includes(정렬.key) && !정렬추정 && !지역.some(x => x.수준 === 'emd')) {
+    /* 2026-10-23 QA: '서울 구별 아파트 순위' 처럼 가격 말 없이 '순위 · 랭킹' 만 있어도 지역 순위(기본 높은 순) */
+    if (m지역 && ((['amount', 'amount_asc', 'unit'].includes(정렬.key) && !정렬추정) || /순위|랭킹/.test(q)) && !지역.some(x => x.수준 === 'emd')) {
       const 단위 = /동네|동별|어느\s*동|동\s*(순위|랭킹|비교)|(^|\s)동(들|은|는|이|가)?(\s|$)/.test(q) ? '동'
                  : /구별|어느\s*구|구\s*(순위|랭킹|비교)|(^|\s)구(들|은|는|이|가)?(\s|$)/.test(q) ? '구'
                  : (지역.some(x => x.수준 === 'sgg') ? '동' : '구');
       /* 방향은 문장에서 직접 — '평당가 제일 싼' 은 정렬이 '평당(높은 순)' 으로 먼저 잡혀 방향을 잃는다. '비싼' 안의 '싼' 은 빼고 본다 */
       const 방향 = /(^|[^비])(싼|싸게)|저렴|낮은|저가/.test(q) ? 'asc' : 'desc';
-      for (const t of toks) if (지역의도.test(t)) 쓴말.add(t);
+      for (const t of toks) if (지역의도.test(t) || /순위|랭킹|평당가?/.test(t)) 쓴말.add(t);
       const 남은말 = toks.filter(t => ![...쓴말].some(u => t.includes(u) || u.includes(t)))
         .filter(t => !(군말.has(t) || 군말.has(t.replace(조사, ''))) && t.length >= 2);
       const 결과 = await 지역순위(pool, { 지역, 단위, 방향, 개수: mN ? 개수 : 25 });
@@ -3142,6 +3175,12 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     const mL = q.match(/(\d+(?:\.\d+)?)\s*억\s*(이상인|이상|넘는|넘은|넘|초과|위)/);
     if (mU) { 상한 = Number(mU[1]) * 1e8; 필터.push(`최고 실거래가 ${mU[1]}억 이하`); 쓴말.add(mU[0]); }
     if (mL) { 하한 = Number(mL[1]) * 1e8; 필터.push(`최고 실거래가 ${mL[1]}억 이상`); 쓴말.add(mL[0]); }
+    /* 2026-10-23 QA: 'N억에서 M억 사이' · 'N~M억' — 전엔 AI 가 채워 줬지만 못 알아들음에 남았다 */
+    const mR = !mU && !mL && q.match(/(\d+(?:\.\d+)?)\s*억?\s*(?:에서|~|∼|-|부터)\s*(\d+(?:\.\d+)?)\s*억\s*(?:사이|까지|이내)?/);
+    if (mR) { let a = Number(mR[1]), b = Number(mR[2]); if (a > b) [a, b] = [b, a]; 하한 = a * 1e8; 상한 = b * 1e8;
+      필터.push(`최고 실거래가 ${a}억 이상`, `최고 실거래가 ${b}억 이하`); 토큰들(mR[0]).forEach(t => 쓴말.add(t)); }
+    const mA = q.match(/(\d+(?:\.\d+)?)\s*억\s*(안팎|정도|쯤|내외|전후|대)/);
+    if (mA && !mU && !mL && !mR) { 알림앞.push({ 종류: 'HINT', 말: `'${mA[0]}' 은 범위가 정해지지 않아 쓰지 않았습니다 — '${Math.max(0, Number(mA[1]) - 1)}억에서 ${Number(mA[1]) + 1}억 사이' 처럼 적어 주세요` }); 토큰들(mA[0]).forEach(t => 쓴말.add(t)); }
 
     /* ---- 5) 못 알아들은 말 ---- */
     let 못알아들음 = toks.filter(t => {
@@ -3250,15 +3289,32 @@ app.get('/api/ask', requireAuth, async (req, res) => {
     let 이름조건 = '1 = 1';
     if (단지이름) {
       const 이름 = String(단지이름).slice(0, 80);
-      const nr = await pool.request()
-        .input('nm', sql.NVarChar(400), '%' + 글자그대로(이름) + '%')
-        .input('nm0', sql.NVarChar(400), '%' + 글자그대로(이름).replace(/\s+/g, '') + '%').query(`
-        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-        SELECT TOP 300 complex_id FROM (
-          SELECT complex_id FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND complex_nm_ns LIKE @nm0 AND merged_into IS NULL
-          UNION SELECT complex_id FROM gold.complex_alias WHERE REPLACE(실거래이름, ' ', '') LIKE @nm0
-          UNION SELECT complex_id FROM gold.complex_kapt WHERE REPLACE(kapt_name, ' ', '') LIKE @nm0) x`);
-      const ids = nr.recordset.map(x => Number(x.complex_id)).filter(Number.isInteger);
+      /* 2026-10-23 QA(100문항): 이름 꼴 바꿔 보기 — '목동신시가지 7단지' 는 실거래 이름이 '목동신시가지7' · '잠실 엘스' 는 AI 가 '엘스' 만 줘서
+         서초구 '엘스' 빌라까지 나왔다 → 이름 **바로 앞의 못 알아들은 말**을 붙인 것('잠실엘스')을 먼저 해 보고, 있으면 그것만. */
+      const 뺌 = t => 글자그대로(t).replace(/\s+/g, '');
+      const 꼴 = new Set([뺌(이름)]);
+      꼴.add(뺌(이름).replace(/(\d+)단지$/, '$1')); 꼴.add(뺌(이름).replace(/아파트$/, ''));
+      const 이름찾기 = async (꼴들) => {
+        const rq = pool.request(); const ws = [...꼴들].filter(x => x.length >= 2).slice(0, 4);
+        ws.forEach((w, i) => rq.input('w' + i, sql.NVarChar(400), '%' + w + '%'));
+        const or = col => ws.map((_, i) => `${col} LIKE @w${i}`).join(' OR ');
+        if (!ws.length) return [];
+        const nr = await rq.query(`
+          SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+          SELECT TOP 300 complex_id FROM (
+            SELECT complex_id FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND merged_into IS NULL AND (${or('complex_nm_ns')})
+            UNION SELECT complex_id FROM gold.complex_alias WHERE ${or("REPLACE(실거래이름, ' ', '')")}
+            UNION SELECT complex_id FROM gold.complex_kapt WHERE ${or("REPLACE(kapt_name, ' ', '')")}) x`);
+        return nr.recordset.map(x => Number(x.complex_id)).filter(Number.isInteger);
+      };
+      let ids = null;
+      const ti = toks.findIndex(t => t.includes(이름) || 이름.includes(t));
+      const 앞 = ti > 0 ? toks[ti - 1] : null;
+      if (앞 && 못알아들음.includes(앞) && !이름.startsWith(앞)) {
+        const 붙 = await 이름찾기(new Set([뺌(앞 + 이름)]));
+        if (붙.length) { ids = 붙; 못알아들음 = 못알아들음.filter(t => t !== 앞); ai보탬.push(`이름 '${앞}${이름}'`); }
+      }
+      if (!ids) ids = await 이름찾기(꼴);
       이름조건 = ids.length ? `c.complex_id IN (${ids.join(',')})` : '1 = 0';
     }
     let 지역조건 = '1 = 1';
@@ -3364,7 +3420,21 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       }
     }
 
-    const 알림 = [...미리알림];
+    /* 2026-10-23 QA(100문항): 신축·구축 순도 **후보를 먼저** — '5억 이하 서울 아파트 신축' 이 29초(서울 단지마다 최고가를 찾은 뒤 줄 세움).
+       종목이 있으면 그 종목의 최고가 요약표(288)로 가격까지 거른다(같은 값). 종목이 없고 가격 조건이 있으면 안 한다(주거 매매 기준이 요약표와 다르다). 면적 조건이 있어도 안 한다. */
+    if (날짜정렬 && !후보 && !조건.면적 && (종목 || (상한 == null && 하한 == null))) {
+      rq2.input('candD', sql.Int, 개수 * 5 + 50).input('kgD', sql.VarChar(4), 종목 ? 종목.key : null);
+      후보 = `AND c.complex_id IN (
+        SELECT TOP (@candD) c.complex_id FROM gold.complex c
+         WHERE c.is_active = 1 AND ${지역조건} AND ${이름조건}
+           AND c.oldest_use_apr LIKE '[12][0-9][0-9][0-9][01][0-9][0-3][0-9]'
+           ${세대만 ? 'AND c.hhld_cnt_sum > 0' : ''}
+           AND (@kgD IS NULL OR EXISTS (SELECT 1 FROM gold.complex_trade_max k WHERE k.complex_id = c.complex_id AND k.종류 = @kgD
+                                          AND (@hi IS NULL OR k.max_amt <= @hi) AND (@lo IS NULL OR k.max_amt >= @lo)))
+           ${조건조각}
+         ORDER BY c.oldest_use_apr ${정렬.key === 'newest' ? 'DESC' : 'ASC'})`;
+    }
+    const 알림 = [...미리알림, ...알림앞];
     /* 2026-10-23 QA: 정렬을 말하지 않으면 기본이 '최고 실거래가 순' 이라 **매매가 없는 단지가 조용히 빠졌다**
        ('강남구 역 500m 안 1000세대 이상 2015년 이후' 에서 상록 스타힐스 1,703세대(공공임대) 469m 가 빠짐). 빠진 수를 센다. */
     /* 종목을 말했으면 세지 않는다 — 종목은 실거래로만 알므로 거래 없는 단지는 그 종목인지부터 모른다(성동구 '아파트' 에 6,428곳이 잡혔다) */
@@ -3437,12 +3507,20 @@ app.get('/api/ask', requireAuth, async (req, res) => {
        우리는 전국이 아니라 몇 개 구만 적재했다. 이름이 없는 게 아니라
        그 동네를 아직 안 받은 것일 수 있다 - 정책 1장. */
     if (!r.recordset.length && 단지이름) {
+      /* 2026-10-23 QA: 대장이 아직 없는 신축(K-apt)이면 그렇다고 — '디에이치퍼스티어아이파크' 를 '적재 안 한 곳일 수 있다' 고 답했다(지도·검색 제안엔 신축으로 있다) */
+      const nb = await pool.request().input('n0', sql.NVarChar(400), '%' + 글자그대로(String(단지이름)).replace(/\s+/g, '') + '%')
+        .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+                SELECT TOP 3 kapt_name, lawd_nm, 세대 FROM gold.v_newbuild WHERE REPLACE(kapt_name, ' ', '') LIKE @n0 ORDER BY 세대 DESC`);
+      if (nb.recordset.length) {
+        알림.push({ 종류: 'HINT', 말: `'${단지이름}' 은 건축물대장이 아직 없는 **신축**(K-apt)입니다 — ${nb.recordset.map(x => `${x.kapt_name}(${x.lawd_nm || ''} · ${Number(x.세대 || 0).toLocaleString()}세대)`).join(', ')}. 지도의 신축 핀과 검색 제안에서 볼 수 있고, 대장이 없어 조건(평형 · 사용승인 등)으로는 아직 찾을 수 없습니다` });
+      } else {
       const 구수 = await pool.request().query(
         `SELECT n = COUNT(DISTINCT sigungu_cd) FROM gold.complex WHERE is_active = 1`);
       const n = Number((구수.recordset[0] || {}).n || 0);
       알림.push({ 종류: 'SCOPE',
         말: `'${단지이름}' 이라는 이름의 단지를 찾지 못했습니다 — 지금 적재된 ` +
             `${n}개 시군구 안에 없다는 뜻이고, **없는 게 아니라 안 받았을 수 있습니다**` });
+      }
     }
     /* ★ 동을 물었으면 **동 단위로 세야 한다**(2026-10-19). 전에는 0건일 때
        시군구만 세고 "조건에 맞는 단지가 없습니다"(NA) 라고 했다. 그런데
@@ -3490,7 +3568,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         });
       }
     }
-    if (!r.recordset.length && 지역.some(x => x.sgg_cd)) {
+    if (!r.recordset.length && 지역.some(x => x.sgg_cd) && !단지이름) {   // 이름으로 찾았으면 위에서 말했다(NA 를 또 붙이지 않는다)
       const sgg = [...new Set(지역.map(x => x.sgg_cd).filter(Boolean))];
       const rq3 = pool.request();
       sgg.forEach((v, i) => rq3.input('s' + i, sql.Char(5), v));
