@@ -1993,16 +1993,30 @@ app.get('/api/suggest', async (req, res) => {
                /* 322: 짧은 주소 칸(색인) — '479' 는 479 · 479-1 … 만(4790 은 아님) */
          ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 WHEN s.이름 LIKE @q THEN 1 ELSE 2 END, s.총괄세대 DESC, s.동수 DESC, s.이름;
         /* 13 청약 공고 — 단지에 **아직 안 이어진** 것만(이어진 것은 단지로 찾는다). 주택(관리번호)마다 한 줄, 가장 최근 공고 */
-        SELECT TOP 4 x.house_manage_no, x.house_nm, x.공고종류, x.rcrit_pblanc_de, x.hssply_adres, x.lat, x.lng, 전체 = COUNT(*) OVER ()
-          FROM (SELECT p.house_manage_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.hssply_adres,
-                       lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
-                       rn = ROW_NUMBER() OVER (PARTITION BY p.house_manage_no ORDER BY p.rcrit_pblanc_de DESC, p.pblanc_no DESC)
-                  FROM silver.applyhome_pblanc p
-                  LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
-                 WHERE REPLACE(p.house_nm, ' ', '') LIKE @q0
-                   AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x
-         WHERE x.rn = 1
-         ORDER BY CASE WHEN x.house_nm LIKE @p THEN 0 ELSE 1 END, x.rcrit_pblanc_de DESC;
+        /* ★ 2026-10-23: **공고 지번(pnu)마다 한 줄** — 같은 지번의 일반·무순위·임의공급(관리번호 따로)을 한 줄로. 지번 없는 공고는 관리번호마다.
+             이름 = 그 지번의 **첫 공고** 이름(보통 일반분양 · '(2차)' 같은 꼬리 없음). 자리·종류·공고 수는 그 지번의 안 이어진 공고 전부로 */
+        SELECT TOP 4 y.house_manage_no, y.house_nm, y.공고종류, k.종류들, y.공고수, y.rcrit_pblanc_de, y.hssply_adres, y.lat, y.lng, 전체 = COUNT(*) OVER ()
+          FROM (SELECT z.*, 맞음 = MAX(z.이름맞음) OVER (PARTITION BY z.g), 앞 = MAX(z.앞맞음) OVER (PARTITION BY z.g),
+                       공고수 = COUNT(*) OVER (PARTITION BY z.g),
+                       첫 = ROW_NUMBER() OVER (PARTITION BY z.g ORDER BY z.rcrit_pblanc_de, z.pblanc_no),
+                       끝 = ROW_NUMBER() OVER (PARTITION BY z.g ORDER BY z.rcrit_pblanc_de DESC, z.pblanc_no DESC)
+                  FROM (SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.hssply_adres,
+                               g = COALESCE(p.pnu, 'H' + p.house_manage_no),
+                               lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2,
+                               이름맞음 = CASE WHEN REPLACE(p.house_nm, ' ', '') LIKE @q0 THEN 1 ELSE 0 END,
+                               앞맞음 = CASE WHEN p.house_nm LIKE @p THEN 1 ELSE 0 END
+                          FROM silver.applyhome_pblanc p
+                          LEFT JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
+                         WHERE COALESCE(p.pnu, 'H' + p.house_manage_no) IN
+                               (SELECT COALESCE(q.pnu, 'H' + q.house_manage_no) FROM silver.applyhome_pblanc q
+                                 WHERE REPLACE(q.house_nm, ' ', '') LIKE @q0
+                                   AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = q.house_manage_no))
+                           AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) z) y
+          JOIN (SELECT g2.g, 종류들 = STRING_AGG(g2.공고종류, ',') FROM
+                  (SELECT DISTINCT g = COALESCE(p.pnu, 'H' + p.house_manage_no), p.공고종류 FROM silver.applyhome_pblanc p
+                    WHERE NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) g2 GROUP BY g2.g) k ON k.g = y.g
+         WHERE y.첫 = 1 AND y.맞음 = 1
+         ORDER BY y.앞 DESC, y.rcrit_pblanc_de DESC;
         /* 14 바뀐 행정동 (2026-10-22, 308) — 지금은 없는 옛 행정동 이름으로 찾으면 **지금 동**으로 안내.
            ★ 옛→새는 공식 연계정보에서 같은 법정동을 나눠 가진 쌍(이름으로 잇지 않는다). 짝이 여럿이면 모두 적는다.
            ★ 같은 구에 같은 이름의 지금 행정동이 있으면(강북 번1동처럼 코드만 다시 매긴 것) 빼다 — 위 '행정동' 묶음에 이미 나온다. */
@@ -2064,8 +2078,10 @@ app.get('/api/suggest', async (req, res) => {
                   now: x.now_complex_id || null } })) },
       { 종류: '청약 공고', 전체: 전체(rs[12] || []), 항목: (rs[12] || []).map(x => ({
           이름: x.house_nm,
-          보조: [{ APT: '분양', URBTY: '오피스텔·도시형', REMNDR: '무순위·재공급', PBLPVT: '공공지원민간임대', OPT: '임의공급' }[x.공고종류] || x.공고종류,
-                 x.rcrit_pblanc_de ? `공고 ${String(x.rcrit_pblanc_de).replace(/[^0-9]/g, '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3')}` : null, x.hssply_adres].filter(Boolean).join(' · '),
+          보조: [[...new Set(String(x.종류들 || x.공고종류 || '').split(',').filter(Boolean))]
+                   .map(k => ({ APT: '분양', URBTY: '오피스텔·도시형', REMNDR: '무순위·재공급', PBLPVT: '공공지원민간임대', OPT: '임의공급' }[k] || k)).join(' · '),
+                 Number(x.공고수) > 1 ? `공고 ${x.공고수}건` : null,
+                 x.rcrit_pblanc_de ? `${Number(x.공고수) > 1 ? '첫 공고' : '공고'} ${String(x.rcrit_pblanc_de).replace(/[^0-9]/g, '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3')}` : null, x.hssply_adres].filter(Boolean).join(' · '),
           표: x.lat == null ? '단지 미연결 · 자리 없음' : '단지 미연결',
           동작: { 종류: '공고', house: x.house_manage_no, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng) } })) },
       { 종류: '신축', 전체: 전체(rs[4]), 항목: rs[4].map(x => ({
@@ -4202,7 +4218,13 @@ app.get('/api/applyhome', async (req, res) => {
       SELECT DISTINCT x.house_manage_no, x.pblanc_no INTO #ahkey FROM (
         SELECT l.house_manage_no, l.pblanc_no FROM gold.applyhome_link l
          WHERE (@cid IS NOT NULL AND l.complex_id = @cid) OR (@k IS NOT NULL AND l.kapt_code = @k)
-        UNION SELECT p.house_manage_no, p.pblanc_no FROM silver.applyhome_pblanc p WHERE @hm IS NOT NULL AND p.house_manage_no = @hm) x;
+        UNION SELECT p.house_manage_no, p.pblanc_no FROM silver.applyhome_pblanc p WHERE @hm IS NOT NULL AND p.house_manage_no = @hm
+        /* ★ 2026-10-23 22:17 사장님 "서로 똑같은건데 다른거같아서" — 단지에 안 이어진 공고는 **같은 공고 지번(pnu)** 의 안 이어진 공고를 한데 보인다.
+             청약홈은 무순위·재공급·임의공급마다 관리번호를 새로 붙여(장위 푸르지오 마크원: 일반 06.19 · 무순위 08.05 · 무순위 08.27) 따로 떠 보였다.
+             묶는 근거는 지번뿐(이름 안 봄). 입주예정월은 키로 못 쓴다 — 같은 사업 무순위가 다른 달을 적는 일이 흔하다(991: 에비뉴 청계 II 2023.05→2025.09). */
+        UNION SELECT s.house_manage_no, s.pblanc_no FROM silver.applyhome_pblanc s
+          JOIN (SELECT DISTINCT pnu FROM silver.applyhome_pblanc WHERE @hm IS NOT NULL AND house_manage_no = @hm AND pnu IS NOT NULL) h ON h.pnu = s.pnu
+         WHERE NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = s.house_manage_no)) x;
       SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.hssply_adres, p.house_secd_nm, p.house_dtl_secd_nm, p.rent_secd_nm,
              p.tot_suply, p.rcrit_pblanc_de, p.rcept_bgnde, p.przwner_de, p.mvn_prearnge_ym, p.cnstrct_entrps_nm, p.pblanc_url,
              p.공고종류, l.근거, l.거리m
@@ -4277,11 +4299,21 @@ app.get('/api/applyhome', async (req, res) => {
              입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END),
              필지로 = SUM(CASE WHEN v.근거 LIKE N'같은 필지%' THEN 1 ELSE 0 END),
              공고전 = SUM(CASE WHEN v.근거 LIKE N'%공고 전%' THEN 1 ELSE 0 END)
-        FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`);
-    const [공고, 주택형, 분양권, 분양권수] = r.recordsets;
+        FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;
+      /* 같은 공고 지번의 공고 가운데 **이미 단지에 이어진** 것 — 어느 단지인지(링크 표 그대로). 관리번호로 열 때만 */
+      /* 단지(대장)가 있으면 단지, 대장 없는 신축(K-apt 만)이면 K-apt — 링크 표에 적힌 그대로 */
+      SELECT DISTINCT l.complex_id, kapt_code = CASE WHEN l.complex_id IS NULL THEN l.kapt_code END,
+             이름 = COALESCE(c.complex_nm, k.kapt_name)
+        FROM silver.applyhome_pblanc s
+        JOIN (SELECT DISTINCT pnu FROM silver.applyhome_pblanc WHERE @hm IS NOT NULL AND house_manage_no = @hm AND pnu IS NOT NULL) h ON h.pnu = s.pnu
+        JOIN gold.applyhome_link l ON l.house_manage_no = s.house_manage_no AND l.pblanc_no = s.pblanc_no
+        LEFT JOIN gold.complex c ON c.complex_id = l.complex_id
+        LEFT JOIN silver.kapt_complex k ON k.kapt_code = l.kapt_code AND k.is_current = 1
+       WHERE l.complex_id IS NOT NULL OR l.kapt_code IS NOT NULL;`);
+    const [공고, 주택형, 분양권, 분양권수, 이어진곳] = r.recordsets;
     res.json({ 출처: '청약홈 분양정보(한국부동산원)', 공고: 공고.map(p => ({ ...p,
       주택형: 주택형.filter(m => m.house_manage_no === p.house_manage_no && m.pblanc_no === p.pblanc_no) })),
-      분양권: 분양권 || [], 분양권수: (분양권수 || [])[0] || {} });
+      분양권: 분양권 || [], 분양권수: (분양권수 || [])[0] || {}, 같은지번이어짐: house ? (이어진곳 || []) : [] });
   } catch (e) { fail(res, e, 'applyhome'); }
 });
 
@@ -4395,7 +4427,7 @@ app.get('/api/applyhome/pins', async (req, res) => {
       .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3]).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       WITH p AS (
-        SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.house_dtl_secd_nm, p.tot_suply, p.rcrit_pblanc_de, p.mvn_prearnge_ym,
+        SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.house_dtl_secd_nm, p.tot_suply, p.rcrit_pblanc_de, p.mvn_prearnge_ym, p.pnu,
                lat = (cp.bbox_miny + cp.bbox_maxy) / 2, lng = (cp.bbox_minx + cp.bbox_maxx) / 2
           FROM silver.applyhome_pblanc p
           JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1

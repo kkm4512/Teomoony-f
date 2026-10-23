@@ -5149,6 +5149,7 @@ const 정책 = [
     '<b>K-apt → 단지</b> ① 같은 법정동 + 같은 사용승인일인 단지가 양쪽에 하나씩 ② K-apt 도로명주소의 <b>공식 도로명코드+건물번호</b> = 단지 어느 동 대장의 도로명코드+건물번호, 또는 K-apt 의 공식 지번 = 단지 필지 — 그리고 세대수 5% 안 · 양쪽 하나씩. ③ 아래 \'대장 조각 묶기\' ②로 묶은 단지는 그 근거가 된 K-apt 와 잇습니다.',
     '<b>대장 조각 묶기</b>(단지는 대장 총괄표제부마다 하나라, 오래된 대단지는 필지마다 조각이 됩니다 — 흡수한 조각은 지우지 않고 \'묶임\' 으로 남기며 옮긴 필지 · 동 · 거래를 모두 기록합니다) ① 같은 필지(산 · 0번지는 근거로 안 씀)를 쓰는 주거 조각끼리, 두 조각에 붙은 아파트 실거래의 국토부 단지번호(aptSeq)가 합쳐서 <b>정확히 하나</b>일 때 ② <b>K-apt 단지 하나 = 대장 조각 여럿</b>: 아직 안 이어진 K-apt 의 공식 지번에 세대 단지가 하나이고 사용승인일이 같으며, 같은 법정동 · <b>같은 날 승인</b>된 주거 조각 중 다른 단지번호가 없는 것을 <b>전부</b> 모아(골라 맞추지 않음) <b>세대 합이 K-apt 세대수와 정확히 같을 때</b>만 — 한 조각이 두 K-apt 묶음에 같이 들면 묶지 않습니다(예: 상계주공7단지 2,634세대 = 691번지 476 + 692번지 2,158). 반대로 대장 단지 하나에 K-apt 가 둘인 곳(상계주공15·16단지 = 624번지 4,492)은 아직 잇지 않습니다.',
     '<b>청약 공고 → 단지</b>(앞 길이 먼저, 한 공고는 한 단지) ① 같은 법정동 · 입주예정월 ±4개월 안 사용승인 · 단지 세대 ≥ 공급 · 공고 지번 필지와 100m 안 — 후보 하나 ② 공고 지번 = 단지 필지 · 공고 뒤 준공한 세대 단지 하나 ③ 공고 지번 = K-apt 지번(그 지번 K-apt 하나): 그 K-apt 의 단지가 공고 뒤 준공이면 그 단지, 대장이 아직 없는 신축이면 그 K-apt(신축) — 공급 ≤ 세대 ④ <b>오피스텔 · 도시형 · 생활숙박</b>: 공고 지번 = 단지 필지 · 그 필지 단지 하나 · 사용승인 ≥ 공고일 − 3년 ⑤ <b>무순위 · 임의공급 · 불법행위 재공급</b>(준공 뒤 남은 집 · 취소분): 공고 지번 = 단지 필지 · 세대 단지 하나 · 사용승인 ≥ 공고일 − 5년 · 세대 ≥ 공급.<br><span class="muted">막은 예: 공급 ≤ 세대가 없으면 롯데캐슬 이스트폴(631) 공고가 같은 지번의 어울채행복주택(300)에 붙었다. 사용승인 하한이 없으면 오피스텔 공고가 그 자리 헐리기 전 1978·1985년 건물에 붙었다. 거리 없이 \'법정동 · 입주월 · 세대\' 만 맞는 후보는 쓰지 않는다(겹친 8건 중 7건이 다른 단지).</span>',
+    '<b>단지 밖 청약 공고</b>(아직 단지에 안 이어진 것): <b>같은 공고 지번이면 한 항목</b> — 검색 제안 한 줄 · 지도 표 하나 · 상세 하나에 그 지번의 일반·무순위·재공급·임의공급을 공고일 순으로. 청약홈이 공고마다 관리번호를 따로 붙여 같은 집이 여러 개로 떠 보였다. 묶는 근거는 지번뿐(이름 안 봄) · 입주예정월은 같은 사업 무순위가 달리 적는 일이 흔해 키로 안 쓴다. 같은 지번의 다른 공고가 이미 단지에 이어졌으면 그 단지를 적는다(이 공고를 그 단지에 잇지는 않는다).',
     '<b>지도 자리</b> — 단지는 필지 경계의 중심. 필지가 지금 지적도에 없는 단지는 ① 대장 도로명주소 → 공식 주소(정확히 하나) → 그 공식 지번 필지(같은 시군구)의 중심 ② 그 지번도 지적도에 없으면 대장 도로명주소를 <b>VWorld 지오코더</b>에 물어, 돌려준 주소가 물은 주소와 <b>글자 그대로 같을 때만</b> 그 건물 점(마곡 엠밸리 9단지 · 우디안 · 파크샤인 등)에 놓습니다 — 자리만 쓰고 단지 필지로는 쓰지 않습니다. 폐쇄 대장은 필지 중심, 필지가 없으면 ① 토지이동이력의 \'N번과 합병되어 말소\' 인 N 필지 ② 같은 도로명주소의 지금 건물(자리만 빌리고 \'뒤를 이은 단지\' 로 보지 않음) ③ 공식 주소의 지번 필지. 어느 길로 놓았는지 상세에 적습니다.',
     '<b>대장이 아직 없는 새 단지</b>(재건축·재개발은 이전고시 뒤에 새 지번으로 대장이 생기는 경우가 많음): K-apt 에만 있으면 <b>신축</b>으로 지도·검색에 보이고, 동·호·면적은 공식 대장이 생기면 채워집니다. 추정으로 단지를 만들지 않습니다.',
     '<b>잇지 않는 것</b> — 사업 중 임시 지번(가지번) · 블록 번호(공식 대응표가 없음), 공식 주소의 지번이 지금 지적도에 없는 곳, 여러 단지를 한 번에 모집한 공고(행복주택 · 국민임대 차수 등). 이런 거래·공고는 법정동 · 폐쇄 대장 · 정비구역 상세에서 보입니다.',
@@ -5678,17 +5679,27 @@ async function 분양채우기() {
     지금.innerHTML = 분양칸(r.공고 || []) + 분양권칸(r);
   } catch { /* 덤 */ }
 }
-function 분양칸(공고) {
+function 분양칸(공고, 머리에적음 = false) {   // 머리에적음: 공고 상세처럼 '안 이어짐' 을 위에서 이미 말한 경우
   if (!공고.length) return '';
   const 날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v ? String(v) : '—'); };   /* 13:31 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 */
   const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
   /* 단지에 안 이어진 공고(지도 핀)는 '추정 연결' 표가 맞지 않는다 — 출처 표만 단다 */
+  /* ★ 2026-10-23 "똑같은 건데 달라 보여" — 공고가 여럿이면 줄 머리는 **종류 · 공고일**, 이름은 첫 공고 이름과 다를 때만(예: '(2차)', '오피스텔 IM594').
+     '무순위·재공급 · 무순위' 처럼 같은 말이 두 번 나오지 않게 원문 구분이 종류 말에 이미 있으면 뺀다. */
+  const 첫이름 = (공고[공고.length - 1] || {}).house_nm || '';
+  const 여럿 = 공고.length > 1;
+  const 안이어짐만 = !공고.some(p => p.근거);
   return `${sect('분양', 공고.some(p => p.근거) ? 'applyhome' : 'applyhome0', ` ${fmt(공고.length)}`)}
     ${공고.map(p => {
       const 형 = p.주택형 || [];
+      const 종 = p.공고종류 === 'APT' ? (여럿 ? '분양' : null) : p.공고종류 ? 공고종류말[p.공고종류] : null;
+      const 구분 = [종, p.house_secd_nm && !(종 || '').includes(p.house_secd_nm) && p.house_secd_nm !== 'APT' ? p.house_secd_nm : null,
+                   p.house_dtl_secd_nm, p.rent_secd_nm].filter(Boolean);
       return `<div class="ahrow">
-        <div class="ah1"><b>${esc(p.house_nm || '')}</b>
-          <span class="muted">${esc([p.공고종류 && p.공고종류 !== 'APT' ? 공고종류말[p.공고종류] : null, p.house_secd_nm, p.house_dtl_secd_nm, p.rent_secd_nm].filter(Boolean).join(' · '))}</span></div>
+        <div class="ah1">${여럿
+          ? `<b>${esc(구분[0] || '공고')} · ${esc(날(p.rcrit_pblanc_de))}</b>
+             <span class="muted">${esc([...구분.slice(1), p.house_nm && p.house_nm !== 첫이름 ? p.house_nm : null].filter(Boolean).join(' · '))}</span>`
+          : `<b>${esc(p.house_nm || '')}</b> <span class="muted">${esc(구분.join(' · '))}</span>`}</div>
         <!-- 2026-10-22 사장님 "가로 말고 세로로" — 공고 정보를 한 줄씩 -->
         <dl class="ahkv">${[
           ['모집공고', 날(p.rcrit_pblanc_de)],
@@ -5712,11 +5723,11 @@ function 분양칸(공고) {
             형.some(z => z.가점최저 != null) ? `<td class="n">${m.가점최저 != null ? `${Number(m.가점최저)}~${Number(m.가점최고)}` : '—'}</td>` : ''}</tr>`).join('')}
           </tbody></table>
           ${형.some(m => m.경쟁 != null) ? `` : ''}` : ''}
-        <p class="note sm">${p.근거 ? `추정 연결 — ${esc(p.근거)}${p.거리m != null ? ` · 공고 지번과 ${fmt(p.거리m)}m` : ''}. 이름으로 잇지 않았습니다.`
-            : '아직 단지(건축물대장 · K-apt)에 이어지지 않은 공고입니다 — 공고 지번 자리에 보입니다.'}
-          공급세대는 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.${p.공고종류 === 'PBLPVT' ? ' 공공지원민간임대는 분양이 아니라 임대라 금액 칸을 비웠습니다(조건은 공고문).' : ''}</p>
+        ${p.근거 ? `<p class="note sm">추정 연결 — ${esc(p.근거)}${p.거리m != null ? ` · 공고 지번과 ${fmt(p.거리m)}m` : ''}. 이름으로 잇지 않았습니다.</p>` : ''}
+        ${p.공고종류 === 'PBLPVT' ? '<p class="note sm">공공지원민간임대는 분양이 아니라 임대라 금액 칸을 비웠습니다(조건은 공고문).</p>' : ''}
       </div>`;
-    }).join('')}`;
+    }).join('')}
+    <p class="note sm">${안이어짐만 && !머리에적음 ? `아직 단지(건축물대장 · K-apt)에 이어지지 않은 공고${여럿 ? '들' : ''}입니다 — 공고 지번 자리에 보입니다. ` : ''}공급세대는 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.</p>`;
 }
 
 /* 생활 편의 묶음 머리 (294, 2026-10-21) — 서버 ord 번호 구간으로 나눈다. 번호는 server.js _q_poiLife 한 곳에서만 정한다. */
@@ -6011,11 +6022,11 @@ async function 분양핀불러오기() {
      장위 푸르지오 마크원처럼 일반공급 · 무순위 · 임의공급이 관리번호가 따로라 핀이 겹겹이 떴다. 묶는 근거는 지번(필지 중심점)이지 이름이 아니다. */
   const 자리 = new Map();
   for (const p of (r.핀 || [])) {
-    const k = `${Number(p.lat).toFixed(6)},${Number(p.lng).toFixed(6)}`;
+    const k = p.pnu || `${Number(p.lat).toFixed(6)},${Number(p.lng).toFixed(6)}`;
     const g = 자리.get(k) || { lat: p.lat, lng: p.lng, 집: new Map(), 종류: new Set(), n: 0, 입주: null, 이름: null };
     if (!g.집.has(p.house_manage_no)) g.집.set(p.house_manage_no, { 이름: p.house_nm, 공고일: p.rcrit_pblanc_de });
     g.종류.add(p.공고종류); g.n++;
-    if (!g.이름) g.이름 = p.house_nm;                       // 핀은 공고일 최근 순으로 온다 — 첫 이름이 가장 최근 공고
+    g.이름 = p.house_nm;                                    // 핀은 공고일 최근 순 — 마지막에 남는 이름이 첫 공고
     if (p.mvn_prearnge_ym && (!g.입주 || p.mvn_prearnge_ym > g.입주)) g.입주 = p.mvn_prearnge_ym;
     자리.set(k, g);
   }
@@ -6024,27 +6035,24 @@ async function 분양핀불러오기() {
     const 입주 = g.입주 ? `${g.입주.slice(0, 4)}.${g.입주.slice(4, 6)}` : null;
     const 앞 = g.입주 && g.입주 >= 지금월;
     const 꼬리 = [...g.종류].map(k => 공고종류짧게[k] || k).join('·');
-    const 이름들 = new Set([...g.집.values()].map(x => x.이름));
     const mk = L.marker([g.lat, g.lng], {
       icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
-        html: `<div class="ahmark${앞 ? ' soon' : ''}"><b>${esc(꼬리)}</b><span>${esc(shortNm(g.이름) || '')}${이름들.size > 1 ? ` 외 ${이름들.size - 1}` : ''}</span>${
+        html: `<div class="ahmark${앞 ? ' soon' : ''}"><b>${esc(꼬리)}</b><span>${esc(shortNm(g.이름) || '')}</span>${
                g.n > 1 ? `<em>공고 ${fmt(g.n)}</em>` : ''}${입주 ? `<i>${앞 ? '입주예정' : '입주'} ${esc(입주)}</i>` : ''}</div>` }),
       zIndexOffset: 300, riseOnHover: true,
-      title: `${[...이름들].join(' · ')} · 청약홈 공고 ${g.n}건 · 단지에 아직 안 이어짐`,
+      title: `${g.이름} · 청약홈 공고 ${g.n}건 · 단지에 아직 안 이어짐`,
     });
-    mk.on('click', () => 분양핀열기([...g.집.keys()], [g.lat, g.lng]));
+    mk.on('click', () => 분양핀열기([...g.집.keys()][0], [g.lat, g.lng]));   // 서버가 같은 지번 공고를 다 준다
     mk.addTo(분양핀층);
   }
 }
-async function 분양핀열기(houses, ll) {
-  const hs = (Array.isArray(houses) ? houses : [houses]).slice(0, 6);   // 같은 자리 공고 묶음(최근 순) — 여섯 주택까지
+async function 분양핀열기(house, ll) {
   const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
     .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
   try {
-    const rs = await Promise.all(hs.map(h => fetch(`/api/applyhome?house=${encodeURIComponent(h)}`).then(x => x.json())));
-    const bad = rs.find(r => r.error); if (bad) throw new Error(bad.error);
-    pop.setContent(`<div class="ahpopin">${rs.map(r => `${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}`).join('')}${
-      Array.isArray(houses) && houses.length > hs.length ? `<p class="srcline">이 자리 주택 ${fmt(houses.length)}곳 중 최근 ${fmt(hs.length)}곳</p>` : ''}</div>`);
+    const r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json());   // 같은 공고 지번의 안 이어진 공고까지
+    if (r.error) throw new Error(r.error);
+    pop.setContent(`<div class="ahpopin">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`);
   } catch (e) { pop.setContent(`<p class="note">공고를 불러오지 못했습니다 — ${esc(e.message || String(e))}</p>`); }
 }
 document.addEventListener('click', e => {
@@ -6361,6 +6369,8 @@ async function 폐쇄핀열기(key, ll) {
 document.addEventListener('click', e => {
   const a = e.target.closest('[data-goc]');
   if (a) { e.preventDefault(); map.closePopup(); select(Number(a.dataset.goc)); return; }
+  const nb = e.target.closest('[data-gonew]');
+  if (nb) { e.preventDefault(); map.closePopup(); selectNewbuild(nb.dataset.gonew, false); return; }
   const b = e.target.closest('#clpins');
   if (!b) return;
   폐쇄핀켜짐 = !폐쇄핀켜짐;
@@ -6395,20 +6405,14 @@ async function 동공고그리기(lawd) {
   }
   for (const hs of 필지묶음.values()) {
     const h = hs[0], ll = [Number(h.lat), Number(h.lng)];
+    const 첫 = hs[hs.length - 1];                              // 첫 공고(보통 일반분양) 이름
     const 꼬리 = [...new Set(hs.map(x => 공고종류짧게[x.공고종류] || '공고'))].join('·');
     const 공고수 = hs.reduce((a, x) => a + (Number(x.공고수) || 1), 0);
-    const 이름들 = [...new Set(hs.map(x => x.house_nm || ''))].sort((p, q) => p.length - q.length);
-    const 이름 = 이름들.every(n => n.startsWith(이름들[0])) ? 이름들[0] : `${h.house_nm} 외 ${이름들.length - 1}`;   // '마크원' · '마크원(2차)' → '마크원'
     const mk = L.marker(ll, { zIndexOffset: 300, riseOnHover: true,
-      title: `${이름들.join(' · ')} · 청약 공고 ${공고수}건 · 단지에 아직 안 이어짐`,
+      title: `${첫.house_nm} · 청약 공고 ${공고수}건 · 단지에 아직 안 이어짐`,
       icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
-        html: `<div class="ahmark"><b>${esc(꼬리)}</b><span>${esc(shortNm(이름) || '')}</span>${hs.length > 1 ? `<em>공고 ${fmt(공고수)}</em>` : ''}</div>` }) });
-    if (hs.length === 1) mk.on('click', () => 공고상세(h.house_manage_no, ll[0], ll[1]));
-    else mk.on('click', () => L.popup({ maxWidth: 320, minWidth: 240, className: 'ahpop', autoPanPadding: [20, 60] }).setLatLng(ll)
-      .setContent(`<div class="ahpopin"><div class="lt2">이 지번의 청약 공고 ${fmt(공고수)}</div>
-        <p class="note sm">같은 공고 지번(${esc(h.hssply_adres || h.pnu || '')})에 나온 공고들입니다(관리번호가 달라 따로 받은 것). 고르면 공고 상세가 열립니다.</p>
-        <ul class="lu">${hs.map(x => `<li data-ahopen="${esc(x.house_manage_no)}" role="button" tabindex="0"><b>${esc(x.house_nm || '')}</b>
-          <span class="muted"> ${esc(공고종류말[x.공고종류] || x.공고종류 || '')} · 공고 ${esc(공고날(x.rcrit_pblanc_de))}${Number(x.공고수) > 1 ? ` · ${fmt(x.공고수)}건` : ''}</span></li>`).join('')}</ul></div>`).openOn(map));
+        html: `<div class="ahmark"><b>${esc(꼬리)}</b><span>${esc(shortNm(첫.house_nm) || '')}</span>${공고수 > 1 ? `<em>공고 ${fmt(공고수)}</em>` : ''}</div>` }) });
+    mk.on('click', () => 공고상세(h.house_manage_no, ll[0], ll[1]));   // 상세가 같은 지번 공고를 다 보인다
     mk.addTo(g);
   }
   /* 13:49 '근처' — 공고 지번 필지가 지금 없어 같은 본번 필지들의 가운데에(점선 · '근처' 글씨) */
@@ -6496,7 +6500,7 @@ async function 공고상세(house, lat, lng) {
   구역지우기();
   if (lat != null) {
     구역층 = L.featureGroup([L.marker([lat, lng], { interactive: false, icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
-      html: `<div class="ahmark${근처 ? ' near' : ''}"><b>${근처 ? '근처' : '공고'}</b><span>${esc(shortNm(((r.공고 || [])[0] || {}).house_nm) || '')}</span></div>` }) })]).addTo(map);
+      html: `<div class="ahmark${근처 ? ' near' : ''}"><b>${근처 ? '근처' : '공고'}</b><span>${esc(shortNm(((r.공고 || []).slice(-1)[0] || {}).house_nm) || '')}</span></div>` }) })]).addTo(map);   // 첫 공고 이름
     구역지금 = 표; 지도맞추기([lat, lng], 17);
   }
   const 지번말 = w && w.pnu ? `${w.pnu.slice(10, 11) === '2' ? '산 ' : ''}${Number(w.pnu.slice(11, 15))}${Number(w.pnu.slice(15, 19)) ? '-' + Number(w.pnu.slice(15, 19)) : ''}` : null;
@@ -6505,14 +6509,22 @@ async function 공고상세(house, lat, lng) {
       : (w.이력 || []).length ? `<ul class="lu">${w.이력.slice(0, 4).map(z => `<li><b>${esc(z.일자 ? z.일자.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.사유 || '')}</span>
           <span class="muted">${esc([z.지목, z.면적 ? z.면적 + '㎡' : null].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
       : '<p class="note sm">이 지번으로 된 토지 이동 이력이 없습니다(블록 번호이거나 지번이 아닌 표기일 수 있음).</p>'}` : '';
+  const 공고들 = r.공고 || [];                                  // 서버가 공고일 최근 순 — 끝이 첫 공고
+  const 집수 = new Set(공고들.map(p => p.house_manage_no)).size;
+  const 이어짐 = r.같은지번이어짐 || [];
   box.innerHTML = `<span class="pill">청약 공고</span> <span class="pill cl">단지 미연결</span>
-    <h2>${esc(((r.공고 || [])[0] || {}).house_nm || '청약 공고')}</h2>
-    <p class="note sm">이 공고는 아직 <b>단지에 이어지지 않았습니다</b>(이름으로 잇지 않는다 — 지번·입주월·세대·거리로만).
+    <h2>${esc((공고들[공고들.length - 1] || {}).house_nm || '청약 공고')}</h2>
+    ${집수 > 1 ? `<p class="note sm">같은 공고 지번의 공고 <b>${fmt(공고들.length)}건</b>을 한데 보입니다 — 청약홈이 무순위·재공급·임의공급마다
+      관리번호를 따로 붙여 이름이 같아도 공고가 따로 있습니다. 묶은 근거는 공고 지번뿐입니다.</p>` : ''}
+    ${이어짐.length ? `<p class="note sm">같은 공고 지번의 다른 공고는 이미 ${이어짐.map(c => c.complex_id ? `<a href="/c/${c.complex_id}" data-goc="${c.complex_id}">${esc(c.이름 || '단지')}</a>`
+        : `<a href="#" data-gonew="${esc(c.kapt_code)}">${esc(c.이름 || 'K-apt 단지')}</a> <span class="muted">(대장 없는 신축 · K-apt)</span>`).join(' · ')}
+      에 이어져 있습니다(그 단지 상세의 분양 칸). ${집수 > 1 ? '이 공고들은' : '이 공고는'} 아직 안 이어졌습니다.</p>` : ''}
+    <p class="note sm">${집수 > 1 ? '이 공고들은' : '이 공고는'} 아직 <b>단지에 이어지지 않았습니다</b>(이름으로 잇지 않는다 — 지번·입주월·세대·거리로만).
       ${lat == null ? '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'
         : 근처 ? `공고 지번 필지가 <b>지금 지적도에 없어</b>(사업으로 합필·분필 중이거나 끝남) 같은 본번 필지 ${fmt(w.근처필지)}개의 가운데에 <b>'근처'</b> 로 놓았습니다 — 정확한 자리가 아닙니다.`
         : '지도의 표는 <b>공고 지번</b> 자리입니다.'}</p>
     ${이력칸}
-    <div class="ahbox">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`;
+    <div class="ahbox">${분양칸(공고들, true)}${공고들.length ? 분양권칸(r) : ''}</div>`;
 }
 /* 12:44 사장님 "따로 버튼 안 눌러도 X 누른 것처럼" — 단지 상세를 열면 그 단지 필지 중 닫힌 대장이 있는 필지에 **저절로** ✕ + 회색 점선.
    ★ 구역층(정비·토지이용 토글)과 따로 둔다 — 그걸 켜고 꺼도 이 표시는 남는다. 단지를 닫거나 바꾸면 지운다.
