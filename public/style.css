@@ -1923,3 +1923,5 @@ table.cned td.sm { line-height: 1.6; }
 .hist-d{font:400 11px var(--mono);color:var(--ink-3);padding-top:1px}
 .hist-w{color:var(--ink-2)}
 .hist-s{display:block;font:400 10px var(--mono);color:var(--ink-4);margin-top:1px}
+.zdl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:4px 0 2px;font-size:12px}
+.zdl dt{font:400 11px var(--mono);color:var(--ink-4)}

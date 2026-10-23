@@ -5550,10 +5550,13 @@ app.get('/api/complexes/:id', async (req, res) => {
            ★ 그래도 상한은 남긴다. 상한 없는 쿼리는 언젠가 터지고, 그때는
              '느리다' 로만 보인다. 대신 **잘리면 화면이 말하게** 한다 —
              아래 호총수와 비교한다. 지금은 여유가 4배다. */
+      /* ★ 2026-10-23 저녁: _q_exar 와 같은 까닭으로 호 목록을 먼저 임시표로 — 뷰를 APPLY 바깥에 두면 계획이 무너졌다(병렬 12 · 50초) */
+      IF OBJECT_ID('tempdb..#hh') IS NOT NULL DROP TABLE #hh;
+      SELECT TOP 20000 호PK, 동PK, 동, 호_동명, 층, 호, 라인, 호번호 INTO #hh FROM gold.v_complex_ho WHERE complex_id = @id OPTION (MAXDOP 1, RECOMPILE);
       SELECT TOP 20000 h.호PK, h.동PK, h.동, h.호_동명, h.층, h.호, h.라인, h.호번호,
              p.공시가격, p.기준일, p.단지분위, p.라인분위, 공시출처 = p.출처,
              ea.전용면적, ea.평형
-        FROM gold.v_complex_ho h
+        FROM #hh h
         /* ★ complex_id 를 **조인 조건에도** 준다 (2026-10-18). 없어도 결과는
            같지만, 있고 없고가 1,130ms vs 47ms 다 (24배, 두 단지에서 재현).
            v_complex_ho_price 는 윈도 함수로 분위를 매기는데 그 PARTITION BY 가
@@ -5573,12 +5576,11 @@ app.get('/api/complexes/:id', async (req, res) => {
            APPLY 는 호마다 자연키 색인(uq_bld_expos_area_current)을 탄다. */
         OUTER APPLY (SELECT 전용면적 = SUM(a2.area),
                             평형     = CAST(FLOOR(SUM(a2.area)) AS INT)
-                       FROM silver.bld_expos_pubuse_area a2
+                       FROM silver.bld_expos_pubuse_area a2 WITH (FORCESEEK)
                       WHERE a2.mgm_bldrgst_pk = h.호PK
                         AND a2.is_current = 1
                         AND a2.expos_pubuse_gb_cd = '1') ea
-       WHERE h.complex_id = @id
-       ORDER BY h.동, h.층 DESC, h.라인, h.호`);
+       ORDER BY h.동, h.층 DESC, h.라인, h.호 OPTION (MAXDOP 1, RECOMPILE);`);
 
     /* 상한에 걸렸는지 가리려고 **진짜 호수**를 따로 센다.
        `받은 행 == 상한` 으로 추측하면 딱 상한인 단지를 잘렸다고 오해한다.
@@ -5613,20 +5615,24 @@ app.get('/api/complexes/:id', async (req, res) => {
        ★ APPLY 다. 파생 테이블(... GROUP BY mgm_bldrgst_pk)로 쓰면 요청마다 면적표
          **전체**를 집계한다 - _q_hos 에서 그걸로 1.9초 상수를 얹었던 자리다.
          APPLY 는 호마다 자연키 색인을 탄다. */
+    /* ★ 2026-10-23 저녁: 단지 상세가 사이트 전체에서 30초를 넘겼다 — 이 쿼리가 서버 연결(node)에서만 3천만 페이지를 읽었다(같은 글을 따로 돌리면 0.8초).
+       뷰 v_complex_ho 를 APPLY 바깥에 둔 계획이 무너진 것 — **호 목록을 먼저 임시표로** 뽑고 APPLY 한다(실측 0.56초, 관악드림타운 3,625호). */
     const _q_exar = () => pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('tempdb..#hx') IS NOT NULL DROP TABLE #hx;
+      SELECT DISTINCT 호PK INTO #hx FROM gold.v_complex_ho WHERE complex_id = @id AND 호PK IS NOT NULL OPTION (MAXDOP 1, RECOMPILE);   /* 병렬 계획이 50초 — 한 줄로(실측 0.56초) */
       SELECT 잰호        = SUM(CASE WHEN x.전유 > 0 AND x.공용 > 0 THEN 1 ELSE 0 END),
              면적행있는호 = COUNT(*),
              전유합      = SUM(CASE WHEN x.전유 > 0 AND x.공용 > 0 THEN x.전유 END),
              공용합      = SUM(CASE WHEN x.전유 > 0 AND x.공용 > 0 THEN x.공용 END)
-        FROM gold.v_complex_ho h
+        FROM #hx h
        CROSS APPLY (
          SELECT 전유 = SUM(CASE WHEN a.expos_pubuse_gb_cd = '1' THEN a.area END),
                 공용 = SUM(CASE WHEN a.expos_pubuse_gb_cd = '2' THEN a.area END)
-           FROM silver.bld_expos_pubuse_area a
+           FROM silver.bld_expos_pubuse_area a WITH (FORCESEEK)   /* 임시표 행 수를 크게 잡으면 1,400만 행 표를 통째로 훑었다(2,300만 페이지) — 호마다 색인으로 */
           WHERE a.mgm_bldrgst_pk = h.호PK
             AND a.is_current = 1) x
-       WHERE h.complex_id = @id
-         AND (x.전유 > 0 OR x.공용 > 0)`);
+       WHERE (x.전유 > 0 OR x.공용 > 0) OPTION (MAXDOP 1, RECOMPILE);`);
 
     /* ---------- 건축인허가 ----------
        PNU 로 떨어진다. **집계하지 않고 건별로 나열한다** — 허가만 받고 안 짓거나,
