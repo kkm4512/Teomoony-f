@@ -7458,13 +7458,15 @@ app.get('/robots.txt', (req, res) => {
   res.type('text/plain; charset=utf-8').send(
     'User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://teomoony.com/sitemap.xml\n');
 });
+/* 2026-10-24 사장님 "그냥 '터무니' 라고 쳤을 때 나오게" — 이름 뜻 · 원칙 · 출처를 적은 정적 소개 문서(JS 없이 읽힘) */
+app.get(['/about', '/about/'], (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'about.html')));
 app.get('/sitemap.xml', async (req, res, next) => {
   try {
     const pool = await getPool();
     const r = await pool.request().input('m', sql.Int, 사이트맵_최소세대).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT TOP 50000 complex_id FROM gold.v_complex_map WHERE hhld_cnt_sum >= @m ORDER BY hhld_cnt_sum DESC, complex_id`);
-    const 줄 = ['<url><loc>https://teomoony.com/</loc></url>']
+    const 줄 = ['<url><loc>https://teomoony.com/</loc></url>', '<url><loc>https://teomoony.com/about</loc></url>']
       .concat(r.recordset.map(x => `<url><loc>https://teomoony.com/c/${x.complex_id}</loc></url>`));
     res.type('application/xml; charset=utf-8')
        .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${줄.join('\n')}\n</urlset>\n`);

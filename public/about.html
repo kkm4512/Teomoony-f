@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>터무니란 — 터무니(teomoony) 소개 · 공공데이터 아파트 단지 조회</title>
+<!-- 2026-10-24 사장님 "그냥 '터무니' 라고 쳤을 때 구글 · 네이버에 나오게" — '터무니' 한 단어에 걸릴 글이 사이트 안에 있어야 한다.
+     ★ JS 없이 읽히는 정적 문서(검색 로봇이 그대로 읽는다). 과장하지 않는다 — 있는 것만 적는다. -->
+<meta name="description" content="터무니(teomoony.com)는 국가가 공개한 데이터로 아파트·연립 단지를 건축물대장부터 실거래, 토지, 관리비, 학교·교통까지 한 화면에 보여주는 비상업 서비스입니다. '터무니'라는 이름의 뜻과 원칙, 데이터 출처를 소개합니다.">
+<link rel="canonical" href="https://teomoony.com/about">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="터무니">
+<meta property="og:title" content="터무니란 — 공공데이터로 보는 아파트 단지">
+<meta property="og:description" content="건축물대장 · 실거래 · 토지 · 관리비를 원본 그대로, 한 화면에서. 터무니의 이름과 원칙, 데이터 출처.">
+<meta property="og:url" content="https://teomoony.com/about">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:image" content="https://teomoony.com/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#b4612a">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="96x96" href="/icon-96.png">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[
+ {"@type":"AboutPage","@id":"https://teomoony.com/about#page","url":"https://teomoony.com/about","name":"터무니란","inLanguage":"ko-KR",
+  "isPartOf":{"@id":"https://teomoony.com/#website"},"about":{"@id":"https://teomoony.com/#org"}},
+ {"@type":"WebSite","@id":"https://teomoony.com/#website","name":"터무니","alternateName":["Teomoony","teomoony"],"url":"https://teomoony.com/","inLanguage":"ko-KR"},
+ {"@type":"Organization","@id":"https://teomoony.com/#org","name":"터무니","alternateName":"Teomoony","url":"https://teomoony.com/","logo":"https://teomoony.com/icon-512.png",
+  "sameAs":["https://github.com/kkm4512/Teomoony-f","https://github.com/kkm4512/Teomoony-b"]}]}</script>
+<style>
+:root{--paper:#eceae3;--surface:#fff;--ink:#1f2328;--ink-2:#4e565e;--ink-3:#7c858d;--line:#dedacf;--band:#23282c;--band-ink:#f3f1eb;--mark:#b4612a;--mark-soft:#f0e2d6}
+@media (prefers-color-scheme:dark){:root{--paper:#181b1e;--surface:#202428;--ink:#edeae3;--ink-2:#b2b8bd;--ink-3:#868d93;--line:#33383d;--mark:#d98a55;--mark-soft:#3a2a1f}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;word-break:keep-all}
+a{color:var(--mark)}
+header{background:var(--band);color:var(--band-ink)}
+header .w{display:flex;align-items:center;gap:16px;padding:12px 16px}
+header .logo{color:var(--band-ink);text-decoration:none;font-weight:800;font-size:20px;letter-spacing:-.02em}
+header nav{margin-left:auto;display:flex;gap:14px;font-size:14px}
+header nav a{color:#c9ced2;text-decoration:none}
+header nav a:hover{color:var(--band-ink)}
+.w{max-width:760px;margin:0 auto}
+main .w{padding:36px 16px 56px}
+h1{font-size:30px;line-height:1.3;letter-spacing:-.02em;margin:0 0 6px}
+.lead{color:var(--ink-2);font-size:17px;margin:0 0 28px}
+h2{font-size:20px;letter-spacing:-.01em;margin:40px 0 10px;padding-top:6px;border-top:1px solid var(--line)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+.word{font-size:22px;font-weight:800;margin:0}
+.word small{font-size:14px;font-weight:500;color:var(--ink-3);margin-left:6px}
+.card ol{margin:8px 0 0;padding-left:22px}
+.note{color:var(--ink-3);font-size:13.5px}
+ul.src{padding-left:20px}
+ul.src li{margin:3px 0}
+ul.rules{list-style:none;padding:0;margin:0}
+ul.rules li{padding:10px 0;border-bottom:1px solid var(--line)}
+ul.rules li:last-child{border-bottom:0}
+ul.rules b{display:block}
+.go{display:inline-block;margin-top:8px;padding:10px 18px;border-radius:99px;background:var(--mark);color:#fff;text-decoration:none;font-weight:700}
+footer{border-top:1px solid var(--line);color:var(--ink-3);font-size:13.5px}
+footer .w{padding:20px 16px 40px}
+@media (max-width:640px){h1{font-size:25px}main .w{padding-top:26px}}
+</style>
+</head>
+<body>
+<header><div class="w">
+  <a class="logo" href="/">터무니</a>
+  <nav><a href="/#map">지도</a><a href="/about" aria-current="page">터무니란</a><a href="https://github.com/kkm4512/Teomoony-f">GitHub</a></nav>
+</div></header>
+<main><div class="w">
+  <h1>터무니란</h1>
+  <p class="lead"><b>터무니</b>(teomoony.com)는 국가가 공개한 데이터를 모아, 아파트·연립 단지 하나를 <b>건축물대장부터 주변까지</b> 한 화면에서 보여주는 비상업 서비스입니다.</p>
+  <a class="go" href="/#map">터무니 지도 열기 →</a>
+
+  <h2>이름 — 터무니</h2>
+  <div class="card">
+    <p class="word">터무니 <small>명사</small></p>
+    <ol>
+      <li>터를 잡은 자취.</li>
+      <li>정당한 근거나 이유. 흔히 '터무니없다'처럼 '없다'와 함께 쓴다.</li>
+    </ol>
+  </div>
+  <p>터무니는 이 두 뜻을 그대로 하려는 서비스입니다. 한 단지가 앉은 <b>터</b>에 무엇이 있었고 지금 무엇이 있는지 — 옛 건물의 대장, 필지가 나뉘고 합쳐진 이력, 거래, 인허가 — 그 <b>자취</b>를 모읍니다. 그리고 화면의 숫자마다 어느 공공데이터에서 왔는지 <b>근거</b>를 함께 둡니다. 근거 없는 값은 보여주지 않습니다.</p>
+
+  <h2>무엇을 보여주나</h2>
+  <ul>
+    <li><b>건축물대장</b> — 단지 제원(세대 · 동 · 층 · 연면적 · 용적률), 동·호, 사용승인, 위반건축물 표시</li>
+    <li><b>실거래</b> — 국토교통부 매매 · 전월세 · 분양권 신고가, 평형별 추이</li>
+    <li><b>토지</b> — 필지, 공시지가, 용도지역, 토지이동 이력, 정비사업 구역</li>
+    <li><b>관리비</b> — K-apt(공동주택관리정보) 공용관리비, 같은 동네 단지와 비교</li>
+    <li><b>주변</b> — 학교(학교알리미) · 유치원 · 학원 · 지하철 · 버스 · 병원 · 상권</li>
+    <li><b>이 땅의 역사</b> — 옛 건물 · 옛 거래 · 인허가 · 청약 공고를 날짜순으로</li>
+  </ul>
+  <p class="note">서울과 경기 안양부터 차례로 채우고 있고, 받은 지역은 지도 화면에 적어 둡니다.</p>
+
+  <h2>원칙</h2>
+  <ul class="rules">
+    <li><b>원본 그대로</b>값을 지어내거나 고치지 않습니다. 원본이 틀려 보여도 고치지 않고 그렇다고 적습니다.</li>
+    <li><b>모르는 것은 비워 둡니다</b>빈칸에는 왜 비었는지(아직 안 받음 · 해당 없음 · 확인 불가 · 원본에 없음)를 적습니다. 조용히 틀린 값보다 빈칸이 낫습니다.</li>
+    <li><b>이름으로 잇지 않습니다</b>자료끼리는 필지번호(PNU) · 대장 관리번호 같은 코드로만 잇고, 후보가 하나일 때만 잇습니다.</li>
+    <li><b>중복 없이</b>같은 값을 두 곳에 다시 적지 않습니다. 한 값은 한 자리에만 있습니다.</li>
+    <li><b>비상업</b>광고 · 유료 기능이 없습니다. 일부 원천(공공누리 제4유형)이 상업적 이용을 금지합니다.</li>
+  </ul>
+
+  <h2>데이터 출처</h2>
+  <ul class="src">
+    <li>국토교통부 — 건축물대장 · 건축인허가(건축HUB), 아파트 · 연립 · 분양권 실거래가, 공동주택 관리정보(K-apt)</li>
+    <li>국토교통부 · 국가공간정보센터 — 연속지적도, 토지특성 · 토지이동 · 개별공시지가, GIS건물통합정보(VWorld)</li>
+    <li>한국부동산원 — 청약홈 분양정보</li>
+    <li>교육부 · 시도교육청 — 학교알리미, 학원 · 교습소(NEIS), 학구도</li>
+    <li>소상공인시장진흥공단 — 상가(상권) 정보 · 건강보험심사평가원 — 병원 · 약국</li>
+    <li>서울특별시 — 정비사업 · 도시계획(서울 열린데이터광장)</li>
+  </ul>
+  <p class="note">원천마다 받은 시점과 범위는 지도 화면의 '정책 · 데이터 기준'에 적어 둡니다. 소스 코드는 GitHub에 공개되어 있습니다 — <a href="https://github.com/kkm4512/Teomoony-f">화면 · 서버</a> · <a href="https://github.com/kkm4512/Teomoony-b">적재 · DB</a>.</p>
+
+  <h2>문의</h2>
+  <p>잘못된 값을 보셨거나 궁금한 점이 있으면 <a href="mailto:nayoun440@naver.com">nayoun440@naver.com</a> 으로 알려주세요.</p>
+</div></main>
+<footer><div class="w">터무니 · teomoony.com — 국가가 공개한 데이터를 모아 보여주는 비상업 서비스</div></footer>
+</body>
+</html>
