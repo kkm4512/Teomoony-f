@@ -1915,3 +1915,12 @@ table.cned td.sm { line-height: 1.6; }
 .udaypick{flex-wrap:nowrap;overflow-x:auto;margin:6px 0 4px;padding-bottom:2px}
 .udaypick .achip{flex:0 0 auto}
 .uhours .ud span{font-size:10px}
+
+/* 2026-10-24 사장님(폰): 상세를 볼 땐 검색 틀이 접혀 다시 검색할 길이 없었다 → 시트 오른쪽 위에 '검색' 단추(누르면 상세 닫고 검색칸에 초점) */
+.sheetsearch{display:none}
+@media (max-width:640px){
+  /* 손잡이 줄을 높여 단추를 그 줄에 둔다 — 목록 머리의 '펴기' 와 겹치지 않게 */
+  .app[data-view="map"][data-detail] .sheetgrip{min-height:40px}
+  .app[data-view="map"][data-detail] .sheetsearch{display:inline-flex;align-items:center;gap:4px;position:absolute;top:5px;right:10px;z-index:2;
+    padding:5px 11px;border:1px solid var(--line-2);border-radius:99px;background:var(--surface);color:var(--ink);font-family:inherit;font-weight:500;font-size:12.5px;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+}

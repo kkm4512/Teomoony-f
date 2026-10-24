@@ -451,7 +451,7 @@ function 날짜(v, 없음 = '—') {
   let t = String(v).trim();
   if (/^\d{4}-\d{2}-\d{2}[T ]/.test(t)) t = t.slice(0, 10);            // 시각은 버린다(날짜만)
   const d = t.replace(/[^0-9]/g, '');
-  if (/^\d{4}[-./]?\d{1,2}[-./]?\d{1,2}$/.test(t) && d.length < 8) {   // 2026-9-1 같은 한 자리
+  if (/^\d{4}[-./]\d{1,2}[-./]\d{1,2}$/.test(t) && d.length < 8) {   // 2026-9-1 같은 한 자리
     const [y, m, dd] = t.split(/[-./]/); return `${y}.${String(m).padStart(2, '0')}.${String(dd).padStart(2, '0')}`;
   }
   if (d.length >= 8) return `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}`;
@@ -2407,6 +2407,15 @@ document.addEventListener('click', (e) => {
   const panel = document.querySelector('.panel');
   목록수동 = true;
   목록접기(!panel.classList.contains('list-collapsed'));
+});
+
+/* 2026-10-24 사장님(폰) "검색해서 단지상세가 나왔을 때 다시 검색하는 UI 를 띄울 방법이 없다" — 시트 위 '검색' 단추 */
+document.addEventListener('click', e => {
+  if (!e.target.closest('#sheetsearch')) return;
+  closeDetail();
+  시트('half');
+  const q = $('#q');
+  if (q) { q.focus(); try { q.select(); } catch (er) {} }
 });
 
 function closeDetail() {

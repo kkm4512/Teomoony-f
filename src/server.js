@@ -735,7 +735,33 @@ app.get('/api/health', async (req, res) => {
    ★ 잠금을 걸지 않고 읽는다(READ UNCOMMITTED). 여기 수는 **보여주는 용도**이고
      approx 로 같이 내린다 — 조인 키나 판단 근거로는 쓰지 않는다. */
   const full = req.query.full === '1';
+  /* ★ 2026-10-24 20:08 사장님(폰) "검색 속도가 느리다" — 첫 화면이 '상태 불러오는 중 16초'. 위 주석은 '캐시한다' 고 했는데 **캐시가 없었다**
+     (페이지를 열 때마다 COUNT 를 다시 셌다 · 적재 중엔 3.5~16초). 이제 2분 묵은 값을 바로 주고, 묵었으면 뒤에서 다시 센다(기다리게 하지 않는다). */
+  const 칸 = full ? 'full' : 'core';
+  const 묵음 = _건강캐시[칸];
+  if (묵음 && Date.now() - 묵음.t < 120000) return res.json(묵음.v);
+  if (묵음 && !_건강세는중[칸]) {
+    res.json(묵음.v);
+    _건강세는중[칸] = true;
+    건강세기(full).then(v => { _건강캐시[칸] = { t: Date.now(), v }; }).catch(() => {}).finally(() => { _건강세는중[칸] = false; });
+    return;
+  }
+  if (묵음) return res.json(묵음.v);
   try {
+    const v = await 건강세기(full);
+    _건강캐시[칸] = { t: Date.now(), v };
+    res.json(v);
+  } catch (e) { fail(res, e, 'health'); }
+});
+const _건강캐시 = {}, _건강세는중 = {};
+/* 서버가 막 떴을 때 첫 손님이 21초(전체 수 · 적재 중 실측)를 기다리지 않게 미리 센다 */
+setTimeout(() => {
+  for (const full of [false, true]) {
+    const 칸 = full ? 'full' : 'core'; _건강세는중[칸] = true;
+    건강세기(full).then(v => { _건강캐시[칸] = { t: Date.now(), v }; }).catch(() => {}).finally(() => { _건강세는중[칸] = false; });
+  }
+}, 3000);
+async function 건강세기(full) {
     const pool = await getPool();
     const v = await (async () => {
       const 핵심 = `
@@ -801,9 +827,8 @@ app.get('/api/health', async (req, res) => {
       몸._잰시각 = new Date().toISOString();   /* ★ 언제 센 값인지 같이 내린다 */
       return 몸;
     })();
-    res.json(v);
-  } catch (e) { fail(res, e, 'health'); }
-});
+    return v;
+}
 
 /* ---------- 진단: off 를 다시 쓰면 빨라지나 (2026-10-20) ----------
    ★ gold.v_trade_offsite 는 complex_id 가 OUTER APPLY 에서 **나오므로**
@@ -1654,7 +1679,26 @@ async function 이름꼬리떼기(pool, q) {
   return null;
 }
 
-app.get('/api/complexes', async (req, res) => {
+/* 2026-10-24 20:08 사장님(폰) "검색 속도가 느리다" — 적재 중 '은평' 12초 · '래미안' 3초(실측). 같은 검색어는 3분 동안 저장해 둔 답을 준다.
+   ★ 빈 검색어(전체 목록)는 그대로 캐시하지 않는다(2026-10-20 결정 — 적재 중 묵은 목록). 상세 캐시(10분)보다 짧게. */
+const _검색캐시 = new Map();
+function 검색캐시(req, res, next) {
+  const q = String(req.query.q || '').trim();
+  if (!q || req.query._t) return next();
+  const 키 = req.originalUrl;
+  const x = _검색캐시.get(키);
+  if (x && Date.now() - x.t < 180000) { res.set('X-Cache', 'hit'); return res.json(x.body); }
+  const 원래 = res.json.bind(res);
+  res.json = body => {
+    if (res.statusCode === 200 && body && !body.error) {
+      _검색캐시.set(키, { t: Date.now(), body });
+      if (_검색캐시.size > 400) _검색캐시.delete(_검색캐시.keys().next().value);
+    }
+    return 원래(body);
+  };
+  next();
+}
+app.get('/api/complexes', 검색캐시, async (req, res) => {
   let q = 도로명맞춤((req.query.q || '').trim().slice(0, 200));   /* ★ 감싸면 3배가 되므로 먼저 막는다 · 20:11 도로명 띄어쓰기 맞춤 */
   const limit = 상한(req.query.limit, 50, 300);
   const onlyRecap = req.query.recap === '1';
