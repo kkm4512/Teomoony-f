@@ -53,19 +53,33 @@ async function 지금판() {
   if (Date.now() - 판본때 > 20000) {
     판본때 = Date.now();
     try { const r = await pg().query("SELECT coalesce(max(publish_id), 0) AS v FROM svc.publish WHERE status = 'ok'"); 판 = Number(r.rows[0].v); } catch (e) {}
-    if (판 && 판 !== 채운판) { 채운판 = 판; 미리채움(판).catch(() => {}); }
+    if (판 && 판 !== 채운판 && !채우는중 && Date.now() - 채움실패때 > 300000) {
+      채우는중 = true;
+      미리채움(판).then(() => { 채운판 = 판; }, e => { if (e.message === 'Redis 연결 없음') return;   // 막 켜져 아직 붙는 중 — 20초 뒤 다시
+                                     채움실패때 = Date.now(); console.log(`[svc] Redis 미리 채움 실패 — ${e.message} (5분 뒤 다시)`); })
+                  .finally(() => { 채우는중 = false; });
+    }
   }
   return 판;
 }
 const 대단지기준 = 500;
+let 채우는중 = false, 채움실패때 = 0;
+/* 미리 채움: 번호만 먼저 고르고 본문은 100곳씩 — 한 번에 수십 MB 를 끌어오면 statement_timeout(3초)에 걸린다(10-25 실측: 1,204곳 · 43MB 가 한 번도 안 채워짐) */
 async function 미리채움(v) {
-  const c = rd(); if (!c) return;
-  const r = await pg().query(`SELECT j.complex_id, j.body_gz FROM svc.complex_json j JOIN svc.complex_list l ON l.complex_id = j.complex_id
-                               WHERE j.kind = 'detail' AND j.status = 200 AND l.merged_into IS NULL AND l.hhld >= $1 AND left(l.sgg_cd, 2) IN ('11', '28', '41')`, [대단지기준]);
-  const m = c.multi();
-  for (const x of r.rows) m.set(`t:${v}:detail:${x.complex_id}`, x.body_gz, { EX: 7200 });
-  await m.exec();
-  console.log(`[svc] Redis 미리 채움 — 판 ${v} · 수도권 ${대단지기준}세대+ 상세 ${r.rows.length}곳`);
+  const c = rd(); if (!c) throw new Error('Redis 연결 없음');
+  const a = Date.now();
+  const ids = (await pg().query(`SELECT l.complex_id FROM svc.complex_list l
+                                  WHERE l.merged_into IS NULL AND l.hhld >= $1 AND left(l.sgg_cd, 2) IN ('11', '28', '41')
+                                  ORDER BY l.hhld DESC`, [대단지기준])).rows.map(x => x.complex_id);
+  let n = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const r = await pg().query(`SELECT complex_id, body_gz FROM svc.complex_json WHERE kind = 'detail' AND status = 200 AND complex_id = ANY($1)`, [ids.slice(i, i + 100)]);
+    if (!r.rows.length) continue;
+    const m = c.multi();
+    for (const x of r.rows) m.set(`t:${v}:detail:${x.complex_id}`, x.body_gz, { EX: 7200 });
+    await m.exec(); n += r.rows.length;
+  }
+  console.log(`[svc] Redis 미리 채움 — 판 ${v} · 수도권 ${대단지기준}세대+ ${ids.length}곳 중 상세 ${n}곳 · ${Date.now() - a}ms`);
 }
 
 /* 차단기: 연속 실패 5번이면 30초 동안 서비스DB 를 건너뛴다(화면은 적재DB 경로로) */
