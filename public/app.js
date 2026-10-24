@@ -4863,7 +4863,11 @@ async function boot() {
   let t;
   $('#q').addEventListener('input', () => {
     if (askMode) { $('#clear').hidden = !$('#q').value.trim(); return; }   /* 말로 찾기는 Enter 로만 */
-    clearTimeout(t); t = setTimeout(search, 220);
+    /* ★ 2026-10-24 11:07 사장님 "검색 제안 목록도 뜨고 단지 목록도 떠서 둘 — 하나만" — 치는 동안은 **제안 목록 하나만**.
+       아래 단지 목록(시트)은 Enter(검색 키)를 누를 때만 바꾼다. 글자를 다 지우면 처음 목록으로 돌린다. */
+    $('#clear').hidden = !$('#q').value.trim();
+    clearTimeout(t);
+    if (!$('#q').value.trim()) t = setTimeout(search, 220);
     clearTimeout(제안.타이머); 제안.타이머 = setTimeout(제안부르기, 150); });
   $('#q').addEventListener('keydown', e => {
     if (askMode) { if (e.key === 'Enter') ask(); return; }
@@ -4872,7 +4876,7 @@ async function boot() {
     else if (e.key === 'ArrowUp' && 열림) { e.preventDefault(); 제안표시(제안.고른 - 1); }
     else if (e.key === 'Enter') {
       if (열림 && 제안.고른 >= 0) { e.preventDefault(); 제안고르기(제안.항목[제안.고른]); }
-      else 제안닫기();                        /* 안 고르고 Enter - 목록 검색 결과를 본다 */
+      else { e.preventDefault(); 제안닫기(); clearTimeout(t); search(); $('#q').blur(); }   /* 안 고르고 Enter(폰 검색 키) — 제안을 닫고 그때 단지 목록을 연다 · 키보드도 내린다 */
     } else if (e.key === 'Escape') 제안닫기();
   });
   /* 누르는 순간 입력창이 포커스를 잃어 제안이 닫히지 않게 — 마우스는 pointerdown 에서 바로 고른다.
