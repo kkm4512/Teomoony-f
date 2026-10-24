@@ -5708,12 +5708,16 @@ app.get('/api/complexes/:id', async (req, res) => {
       SELECT cb.mgm_bldrgst_pk, cb.regstr_kind_cd, cb.is_recap,
              b.regstr_kind_nm, b.bld_nm AS basis_nm,
              t.dong_nm, t.bld_nm, t.main_purps_nm, t.strct_nm,
-             t.hhld_cnt, t.tot_area, t.grnd_flr_cnt, t.ugrnd_flr_cnt, t.use_apr_day
+             t.hhld_cnt, t.tot_area, t.grnd_flr_cnt, t.ugrnd_flr_cnt, t.use_apr_day,
+             /* 349 (2026-10-24 사장님 "위반건축물 표시하면 좋긴해"): GIS건물통합정보의 위반건축물 표시(Y/N) · 그 자료의 기준일.
+                대장PK 끝자리 + 필지 + 사용승인일/연면적으로 하나만 맞을 때만 이어 둔 것 — 안 이어진 동은 NULL(모름) */
+             v.violt_bild AS 위반, v.기준일 AS 위반기준일
       FROM gold.complex_bld cb
       LEFT JOIN silver.bld_basis_outline b
              ON b.mgm_bldrgst_pk = cb.mgm_bldrgst_pk AND b.is_current = 1
       LEFT JOIN silver.bld_title t
              ON t.mgm_bldrgst_pk = cb.mgm_bldrgst_pk AND t.is_current = 1
+      LEFT JOIN gold.bld_violation v ON v.mgm_bldrgst_pk = cb.mgm_bldrgst_pk
       WHERE cb.complex_id = @id
       ORDER BY cb.is_recap DESC, t.dong_nm, cb.mgm_bldrgst_pk`);
 
@@ -7184,17 +7188,21 @@ app.get('/api/complexes/:id/history', async (req, res) => {
       SELECT 매매 = SUM(CASE WHEN is_rent = 0 THEN 1 ELSE 0 END), 전월세 = SUM(CASE WHEN is_rent = 1 THEN 1 ELSE 0 END),
              처음 = MIN(deal_ymd), 끝 = MAX(deal_ymd)
         FROM silver.rtms_trade WHERE match_complex_id = @id AND trade_kind NOT LIKE 'SILV%' AND ISNULL(is_canceled, 0) = 0;
-      /* 347 (2026-10-24 사장님 "달라진 칼럼을 액션로그식으로"): 이 단지 필지의 **토지특성 바뀜**(원천 기준연도 사이) — 지목 · 용도지역 · 이용상황만 목차에.
-         도로접면 · 지형은 감정 평가 칸이라 해마다 흔들려 목차를 덮는다(변경 로그 표에는 다 있다). 같은 해 · 같은 바뀜은 필지 수로 묶는다. */
+      /* 348 (2026-10-24 17:58 사장님 "ㄱㄱ"): 토지특성 바뀜은 **용도지역만**(종류 = 바뀜 · 흔들림은 뺀다).
+         지형 · 도로접면 · 이용상황은 조사원이 해마다 다시 보는 감정 칸이라 '변화' 가 아니다. 지목 · 면적은 아래 토지이동이력(원문 사유 · 일자)이 원본. */
       SELECT TOP 30 g.시점, g.칼럼, g.전값, g.새값, 필지 = COUNT(DISTINCT g.키)
         FROM gold.change_log g
-       WHERE g.자료 = N'토지특성' AND g.종류 = N'바뀜' AND g.키 IN (SELECT pnu FROM #p)
-         AND g.칼럼 IN (N'지목', N'용도지역', N'이용상황')
+       WHERE g.자료 = N'토지특성' AND g.칼럼 = N'용도지역' AND g.종류 = N'바뀜' AND g.키 IN (SELECT pnu FROM #p)
        GROUP BY g.시점, g.칼럼, g.전값, g.새값
-       ORDER BY g.시점, COUNT(DISTINCT g.키) DESC;`);
+       ORDER BY g.시점, COUNT(DISTINCT g.키) DESC;
+      /* 토지이동이력(VWorld NED 원문) — 이 단지 필지의 이동일 · 사유. 같은 날 · 같은 사유는 필지 수로 묶는다 */
+      SELECT TOP 40 h.이동일, h.이동사유, 필지 = COUNT(DISTINCT h.pnu)
+        FROM silver.land_move_hist h WHERE h.pnu IN (SELECT pnu FROM #p) AND h.이동일 IS NOT NULL
+       GROUP BY h.이동일, h.이동사유
+       ORDER BY h.이동일 DESC;`);
     const R = r.recordsets;
     res.json({ 단지: R[0][0] || null, 옛대장: { 전체: Number((R[1][0] || {}).전체 || 0), 줄: R[2] }, 정비: R[3], 인허가: R[4],
-               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null, 토지바뀜: R[8] || [] });
+               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null, 토지바뀜: R[8] || [], 토지이동: R[9] || [] });
   } catch (e) { fail(res, e, 'complex-history'); }
 });
 
