@@ -130,4 +130,35 @@ async function 단지응답(req, res, next) {
   }
 }
 
-module.exports = { 단지응답, pg, 지금설정 };
+
+/* ---------- 지도 마커 (2단계 첫 칸) ----------
+   svc.complex_marker = 발행기가 적재DB 에서 통째로 만든 단지 점 + 최근 3년 최고가(없으면 마지막 매매). 기존 /api/complexes/markers 와 같은 모양으로 낸다.
+   ★ 같은 동 수 · 세대 수끼리의 순서는 적재DB 도 정해 두지 않은 것이라(ORDER BY 동점) 줄 순서가 다를 수 있다 — 고르는 집합은 같다. */
+function 상한(v, 기본, 최대) { const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= 1 ? Math.min(n, 최대) : 기본; }
+async function 마커(req, res, next) {
+  if (!지금설정().read || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => k !== 'bbox' && k !== 'limit')) return next();   // 진단 · 대조용 물음표는 기존 경로
+  const bbox = String(req.query.bbox || '').split(',').map(Number);
+  if (bbox.length !== 4 || bbox.some(n => !Number.isFinite(n))) return next();
+  const limit = 상한(req.query.limit, 400, 1000);
+  const 오늘 = new Date(Date.now() + 9 * 3600 * 1000);
+  const 기준 = `${오늘.getUTCFullYear() - 3}${String(오늘.getUTCMonth() + 1).padStart(2, '0')}${String(오늘.getUTCDate()).padStart(2, '0')}`;
+  try {
+    const r = await pg().query(`SELECT complex_id, complex_nm, rep_plat_plc, has_recap, dong_cnt, hhld_cnt_sum, centroid_lat, centroid_lng,
+                                       trade_cnt, rent_cnt, area_grp, max_amount, max_ymd, max_dealing, "실거래이름"
+                                  FROM svc.complex_marker
+                                 WHERE centroid_lng BETWEEN $1 AND $3 AND centroid_lat BETWEEN $2 AND $4
+                                 ORDER BY dong_cnt DESC NULLS LAST, hhld_cnt_sum DESC NULLS LAST, complex_id LIMIT $5`,
+                              [bbox[0], bbox[1], bbox[2], bbox[3], limit + 1]);
+    실패 = 0; 세기('markers', 'hit');
+    const 잘림 = r.rows.length > limit;
+    const 행 = (잘림 ? r.rows.slice(0, limit) : r.rows).map(m => ({ ...m, 최근3년: m.max_ymd ? m.max_ymd >= 기준 : null }));
+    res.set('X-Svc', 'hit');
+    return res.json({ 상한: limit, 잘림, 가격기준: { 말: '최근 3년 최고가 · 없으면 마지막 매매', 시작: 기준 }, markers: 행 });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('markers', 'fallback'); return next();
+  }
+}
+
+module.exports = { 단지응답, 마커, pg, 지금설정 };

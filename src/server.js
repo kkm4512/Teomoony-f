@@ -441,6 +441,7 @@ setTimeout(기록_정리, 5 * 60 * 1000).unref();   /* 뜨고 5분 뒤 한 번 *
 /* 이용현황 조회 — 누구나 본다 */
 /* 2026-10-24 서비스DB(PostgreSQL) 읽기 — 발행된 단지 응답이 있으면 그걸 보내고, 없으면 아래 기존 경로(적재DB). 끄기: svc_mode.json read:false (src/svc.js) */
 app.use(require('./svc').단지응답);
+app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지도 마커도 서비스DB 에서(없거나 실패면 아래 기존 경로) */
 
 app.get('/api/usage', async (req, res) => {
   try {
@@ -5711,12 +5712,13 @@ app.get('/api/complexes/markers', async (req, res) => {
             AND r.is_canceled = 0 AND r.deal_amount IS NOT NULL
           ORDER BY CASE WHEN r.deal_ymd >= @cut THEN 0 ELSE 1 END,             -- 최근 3년이 있으면 그 안에서
                    CASE WHEN r.deal_ymd >= @cut THEN r.deal_amount END DESC,   --   가장 비싼 것
-                   r.deal_ymd DESC, r.deal_amount DESC                         -- 없으면 마지막 매매
+                   r.deal_ymd DESC, r.deal_amount DESC,                        -- 없으면 마지막 매매
+                   r.trade_sk DESC                                             -- 2026-10-25: 같은 날 · 같은 값 동점의 순서를 정한다(서비스DB 발행과 같은 답)
         ) t
         WHERE c.centroid_lat IS NOT NULL
           AND c.centroid_lng BETWEEN @x0 AND @x1
           AND c.centroid_lat BETWEEN @y0 AND @y1
-        ORDER BY c.dong_cnt DESC, c.hhld_cnt_sum DESC`);
+        ORDER BY c.dong_cnt DESC, c.hhld_cnt_sum DESC, c.complex_id`);   /* 2026-10-25: 동점은 단지번호 순(잘릴 때 어느 것이 남는지 정해 둔다 — 서비스DB 와 같은 답) */
     /* ★ 상한에 걸렸는지 **정확히** 알려면 한 줄 더 받아 본다 (2026-10-20).
        길이가 상한과 같다는 것만으로는 '딱 그만큼'인지 '잘렸는지' 모른다.
        TOP 을 lim+1 로 받고 넘치면 잘린 것이다 — 추측이 아니라 사실이 된다.
