@@ -1904,3 +1904,6 @@ table.cned td.sm { line-height: 1.6; }
 .sbox .lt2{margin-top:12px}
 .sbox .hm-t td,.sbox .hm-t th{padding:3px 6px}
 .lgrp .lgl .lgo{margin-left:6px;padding:0 6px;font-size:10.5px}
+/* 2026-10-24 카드에 '자세히' 버튼이 들면 거리 줄이 첫 칸(52px)으로 밀려 아래 줄과 겹쳤다 — 버튼은 첫 줄 오른쪽, 거리 · 공시 · 보조 줄은 둘째 칸부터 끝까지 */
+.scell:has(.sdet) .sdet{grid-row:1;grid-column:3}
+.scell:has(.sdet) .sd{grid-column:2 / -1;white-space:normal}

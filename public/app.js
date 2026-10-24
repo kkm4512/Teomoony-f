@@ -1098,10 +1098,7 @@ function renderNewbuild({ newbuild: n, tradeStats, cost }) {
     <h2>${esc(n.kapt_name || '(이름 없음)')}</h2>
     <p class="sub">${esc(n.kapt_addr || '')}${n.doro_juso ? '<br>' + esc(n.doro_juso) : ''}</p>
 
-    <p class="note nb">이 단지는 <b>건축물대장이 아직 나오지 않았습니다.</b>
-      사용승인 ${day(n.사용승인)} 기준이며, 공동주택관리정보(K-apt)에서 가져온 정보입니다.
-      대장이 공개되면 정식 단지로 전환되고 단지코드가 발급됩니다.<br>
-      동 목록·필지·공시지가는 대장에서 나오므로 지금은 표시할 수 없습니다.</p>
+    <p class="note nb">건축물대장이 아직 없는 신축 — K-apt 정보만(동 · 필지 · 공시지가 없음)</p>
 
     <dl>
       ${row('세대수', fmt(n.세대))}
@@ -1116,9 +1113,7 @@ function renderNewbuild({ newbuild: n, tradeStats, cost }) {
       ${row('건축인허가', n.인허가 ? fmt(n.인허가) + '건' : '없음')}
       ${row('K-apt 코드', esc(n.kapt_code))}
     </dl>
-    ${multi ? `<p class="note">실거래가 <b>${groups.length}개 단지</b>로 갈립니다.
-       한 지번(${esc(n.pnu.slice(10))})에 여러 단지가 있고, 신고 데이터의 단지 일련번호로 구분했습니다.
-       <b>동 단위는 표시할 수 없습니다</b> — 동 이름은 건축물대장에서 나오는데 아직 없습니다.</p>` : ''}
+    ${multi ? `<p class="note sm">실거래가 ${groups.length}개 단지로 갈림(한 지번 · 신고 단지 일련번호로 구분)</p>` : ''}
     ${tradeBlocks}
     ${stats.length ? '' : '<p class="muted" style="padding:6px 2px">이 지번에 매칭된 실거래가 없습니다.</p>'}
     <div class="ahbox" data-ah="k|${esc(n.kapt_code)}"></div>
@@ -2518,7 +2513,8 @@ async function select(id, fromList) {
 let lastDetail = null;      // 직거래 토글 시 재요청 없이 다시 그리려고 보관
 let hideDirect = false;     // 직거래 제외하고 볼 것인가
 let lastGeo = null, lastBgeo = null;   // 상세 썸네일용. select() 가 채운다
-let detailTab = 'info';                // 단지정보 | 실거래 | 토지·건물 (왼쪽부터)
+let detailTab = 'info';
+let 탭줄위치 = 0;                     // 2026-10-24 탭 줄 가로 위치(다시 그려도 유지)                // 단지정보 | 실거래 | 토지·건물 (왼쪽부터)
 let hoDong = null;                     // 동호배치도에서 펼쳐 둔 동 (null = 세대 많은 동)
 let tradeArea = null;                  // 실거래에서 고른 평형(area_grp). null = 전체
 /* 공시가격 추이에서 지금 몇 호까지 보여주고 있나. 10 에서 시작해 '더보기' 로 10 씩.
@@ -2658,7 +2654,7 @@ function jeonseBlock(rows0, area = null) {
     const [n, src] = String(area).split('|');
     rows = src ? [] : rows0.filter(r => String(r.평형) === n);
     if (!rows.length) return sect('전세가율', 'rtms', '', '매매·전세 각각의 최근 1건')
-      + `<p class="note">${gapCell('', 'NA', `${esc(src ? src + ' ' : '')}${esc(n)}㎡ 는 전세가율을 낼 수 없습니다 — 이 평형의 중개 매매와 순수 전세(월세 0)가 둘 다 있어야 합니다`)}
+      + `<p class="note">${gapCell('', 'NA', `${esc(src ? src + ' ' : '')}${esc(n)}㎡ 전세가율 없음 — 중개 매매 · 순수 전세가 둘 다 있어야 함`)}
          <span class="muted">(다른 ${fmt(rows0.length)}개 평형은 '전체' 에서 보입니다)</span></p>`;
   }
   const far = rows.filter(r => Number(r.개월차) >= 12).length;
@@ -2673,7 +2669,7 @@ function jeonseBlock(rows0, area = null) {
       <td class="n"><b>${r.전세가율 == null ? '—' : Number(r.전세가율).toFixed(1) + '%'}</b></td>
       <td class="n${Number(r.개월차) >= 12 ? ' bad' : ''}">${fmt(r.개월차)}개월</td>
     </tr>`).join('')}</tbody></table>
-    ${far ? `<p class="note sm">★ <b>${fmt(far)}개 평형은 두 거래가 1년 이상 떨어져 있습니다</b> — 같은 시점의 값이 아닙니다.</p>` : ''}`;
+    ${far ? `<p class="note sm">★ ${fmt(far)}개 평형은 매매 · 전세가 1년 넘게 떨어진 거래(같은 시점 아님)</p>` : ''}`;
 }
 
 function offsiteBlock(rows) {
@@ -3371,13 +3367,12 @@ function tradeList(rows, 거래탭, 평형) {
     ? (전체종류 > 받은본
         /* ★ 2026-10-21 QA: 이 '전체' 는 **해제 포함**이다(목록은 해제도 제자리에 둔다). 바로 위 탭·평형 카드의
            건수는 해제를 뺀 수라 '매매 1,429' 옆에 '1,443건 중' 이 떠서 어긋나 보였다 - 그 말을 적는다. */
-        ? `<p class="srcline">${esc(거래탭)} ${fmt(전체종류)}건(해제 포함) 중 <b>최근 ${fmt(받은본)}건</b>입니다.</p>` : '')
-    : `<p class="srcline">${esc(거래탭)} <b>최근 ${fmt(종R.length)}건</b>을 받아 그중
-         <b>이 평형 ${fmt(받은)}건</b>입니다 — ${esc(거래탭)} 전체는 ${fmt(전체종류)}건(해제 포함)입니다.</p>`;
+        ? `<p class="srcline">${esc(거래탭)} ${fmt(전체종류)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '')
+    : `<p class="srcline">최근 ${fmt(종R.length)}건 중 이 평형 ${fmt(받은)}건 · ${esc(거래탭)} 전체 ${fmt(전체종류)}건(해제 포함)</p>`;
 
   /* 316: 섞인 분양권·입주권 — 몇 건인지 · 집계에는 안 넣었다는 사실만(설명은 정책 화면) */
   const 분 = 거래탭 === '매매' ? Number(종R[0].분양권수) || 0 : 0;
-  const 분줄 = 분 ? `<p class="srcline"><b>분양권·입주권 ${fmt(분)}건</b>이 날짜순으로 섞여 있습니다(줄에 표시 · 국토부에 권리 거래로 신고된 것) — 위 평형 요약·최고가에는 넣지 않았습니다.</p>` : '';
+  const 분줄 = 분 ? `<p class="srcline">분양권·입주권 ${fmt(분)}건 섞임(줄에 표시) · 평형 요약 · 최고가에는 안 넣음</p>` : '';
   return sect('거래 내역', 'rtms', ` ${fmt(받은)}`)
     + ``
     + 잘림 + 분줄 + `<div class="tlist">${줄}</div>${더}`;
@@ -3443,14 +3438,12 @@ function costBlock(co, ctx) {
     const inLawd = Number((ctx && ctx.kapt) || 0);
     /* 2026-10-23: K-apt 가 **이어져 있는데** 관리비만 없으면 '연결이 확정되지 않았다' 는 틀린 말이다(관악드림타운) — 그 경우를 가른다 */
     if (ctx && ctx.이음) return sect('관리비', 'cost') + `<p class="note">${Number(ctx.관리비구)
-      ? gapCell('', 'UNSURE', '이 단지는 K-apt 에 이어져 있지만 그 K-apt 단지의 관리비가 없습니다 — 같은 구의 관리비는 받았으니 그 단지가 공시하지 않았거나 그 단지만 못 받은 것입니다(둘을 가를 기록이 아직 없습니다).')
-      : gapCell('', 'SCOPE', '이 구의 K-apt 관리비를 아직 받지 않았습니다 — 관리비는 일부 구만 받아 두었습니다.')}</p>`;
+      ? gapCell('', 'UNSURE', '이 K-apt 단지의 관리비가 없습니다(공시 안 함인지 못 받음인지 모름)')
+      : gapCell('', 'SCOPE', '이 구의 K-apt 관리비를 아직 받지 않았습니다')}</p>`;
     return sect('관리비', 'cost') + `<p class="note">${
       inLawd
         ? gapCell('', 'UNSURE',
-            'K-apt 연결이 확정되지 않았습니다. 법정동과 사용승인일로 잇는데 같은 날 '
-          + '승인된 단지가 여럿이면 버립니다 — 추측으로 붙이면 다른 단지의 관리비가 '
-          + '사실처럼 보입니다. 데이터가 없는 것이 아니라 이 단지의 것이라고 확신할 수 없는 것입니다.')
+            'K-apt 연결이 확정되지 않아 관리비를 붙이지 않았습니다(후보가 여럿)')
         : gapCell('', 'SCOPE',
             '이 법정동의 K-apt(공동주택관리정보)를 아직 받아오지 않았습니다.')
     }</p>`;
@@ -4249,7 +4242,7 @@ function renderDetail(payload) {
          한 줄(건수 · 범위 · 해제 수)만 둔다. 해제 수는 남긴다 — 거래 내역은 최근 120건만이라 오래된 해제는 거기 없다.
          '전체' 에서는 평형끼리 견주는 표라 줄을 둔다(거래 내역은 평형이 섞인 날짜순이다). */
       if (tradeArea !== null)
-        return `<p class="srcline">${r.area_grp == null ? AREA_미상 : esc(alabel(r))} ${label} ${fmt(cnt)}건 — 거래는 아래 <b>거래 내역</b>에 있습니다${
+        return `<p class="srcline">${r.area_grp == null ? AREA_미상 : esc(alabel(r))} ${label} ${fmt(cnt)}건${
           tags.length ? ` <span class="muted">· ${tags.join(' · ')}</span>` : ''}</p>`;
       return `<div class="prow">
         <div class="pa">${r.area_grp == null
@@ -4271,17 +4264,9 @@ function renderDetail(payload) {
       ${!rent && all ? `<p class="srcline">중개 ${fmt(all - direct)} · 직거래 ${fmt(direct)}${
         share ? ` · 지분거래 ${fmt(share)}` : ''} · 등기일자 확인 ${fmt(rgst)}/${fmt(all)}${
         canc ? ` · 해제 ${fmt(canc)}` : ''}</p>` : ''}
-      ${!rent && dlyN ? `<p class="srcline">계약에서 <b>소유권이전 등기</b>까지 평균
-        <b>${Math.round(dlyAvg)}일</b>${dlyMax ? ` · 최장 ${fmt(dlyMax)}일` : ''}${
-        slow ? ` · <b>180일 넘은 건 ${fmt(slow)}건</b>` : ''}.${
-        /* ★ 결측 안내는 **실제로 많이 빌 때만** 적는다. 1건 비었는데
-             "20~30%가 빈다" 고 하면 그 단지에서는 그게 거짓말이다. */
-        (all - rgst) / Math.max(all, 1) >= 0.05
-          ? ` <span class="muted">등기일자가 없는 ${fmt(all - rgst)}건(${
-              Math.round(100 * (all - rgst) / all)}%)은 아직 등기 전이라고 단정할 수 없습니다 —
-              전체에서도 거래 시점과 무관하게 20~30%가 비어 있습니다(원인 미상).</span>`
-          : ''}</p>` : ''}
-      ${rent && preN ? `<p class="srcline">갱신 ${fmt(preN)}건은 종전 보증금이 함께 신고돼 같은 계약의 전후를 비교할 수 있습니다. 변동률은 건별 평균입니다.</p>` : ''}
+      ${!rent && dlyN ? `<p class="srcline">등기까지 평균 <b>${Math.round(dlyAvg)}일</b>${dlyMax ? ` · 최장 ${fmt(dlyMax)}일` : ''}${
+        slow ? ` · 180일 넘음 ${fmt(slow)}건` : ''}${(all - rgst) ? ` · 등기일자 없음 ${fmt(all - rgst)}건` : ''}</p>` : ''}
+      ${rent && preN ? `<p class="srcline">종전 보증금 신고 ${fmt(preN)}건(갱신) · 변동률은 건별 평균</p>` : ''}
       <div class="plist">${cards}</div>`;
   };
 
@@ -4419,11 +4404,7 @@ function renderDetail(payload) {
     ${jeonseBlock(jeonse, tradeArea)}
     ${offsiteBlock(offsite)}
     ${stats.length ? '' : `<p class="note">${gapCell('', 'NA',
-        '이 단지에 붙은 실거래가 없습니다 — **거래가 없다는 뜻이 아닙니다.** '
-      + '실거래 자체는 시군구 단위로 전부 받아와 있고, 이 단지에 **이어 붙이지 못한** 것입니다. '
-      + '단독·다가구는 API 가 지번을 가려(1**) 매칭이 구조적으로 불가능한 경우가 많습니다. '
-      + '(2026-10-20: 전에는 면적이 없는 거래까지 여기서 버려서, 실제로 붙어 있는 거래가 '
-      + '있는데도 이 문구가 떴습니다. 지금은 면적 미상으로 보여 줍니다.)')}</p>`}`;
+        '이 단지에 이어진 실거래가 없습니다 — 거래가 없다는 뜻은 아닙니다(못 이음)')}</p>`}`;
 
   /* 주변 상권 (2026-10-19)
      ★ 반경과 '단지내상가' 는 **다른 축**이다 - 반경은 입지, 단지내는 그 단지의
@@ -4484,12 +4465,10 @@ function renderDetail(payload) {
      없는 것과 아직 못 본 것은 다르다 - 먼저 그렇게 말하고, 0건 목록은 안 그린다. */
   const paneN = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 <b>중심좌표가 아직 없습니다</b> — 학교·지하철·버스·상권은
-      거리로 찾으므로 <b>볼 수 없습니다.</b> 없는 게 아니라 아직 못 본 것입니다.
-      <br>필지(연속지적도)를 적재하면 좌표가 생깁니다.</div>` : `
+      이 단지는 중심좌표가 없어 지하철 · 버스를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${/* ★ 머리글 숫자는 **전체**다. 보여주는 수(4)를 적으면 그게 전부인 줄 안다 */''}
     ${sect('지하철', 'subway', sub.length ? ` ${fmt(Number(sub[0].전체) || sub.length)}` : '')}
-    ${kapt && (kapt.지하철 || kapt.지하철도보) ? `<p class="note sm">K-apt 신고: ${esc(kapt.지하철 || '')}${kapt.지하철노선 ? ` <span class="muted">${esc(kapt.지하철노선)}</span>` : ''}${kapt.지하철도보 ? ` · 도보 ${esc(kapt.지하철도보)}` : ''} <span class="muted">(관리주체가 적은 값 — 아래 거리와 잰 방법이 다릅니다)</span></p>` : ''}
+    ${kapt && (kapt.지하철 || kapt.지하철도보) ? `<p class="note sm">K-apt 신고: ${esc(kapt.지하철 || '')}${kapt.지하철노선 ? ` <span class="muted">${esc(kapt.지하철노선)}</span>` : ''}${kapt.지하철도보 ? ` · 도보 ${esc(kapt.지하철도보)}` : ''} <span class="muted">(관리주체 신고)</span></p>` : ''}
     ${sub.length ? `
       <div class="schrow">${sub.map(x => `
         <div class="scell" data-pt="subway|${esc(x.역)}">
@@ -4564,7 +4543,7 @@ function renderDetail(payload) {
   /* ★ 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 상권 탭(상가 점포 · 브랜드 · 생활 편의). 병원·약국 묶음은 의료 탭으로 */
   const paneC = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 <b>중심좌표가 아직 없습니다</b> — 상권은 거리로 찾으므로 <b>볼 수 없습니다.</b> 없는 게 아니라 아직 못 본 것입니다.</div>` : `
+      이 단지는 중심좌표가 없어 상권을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${sect('상권', 'poi', pz.length ? ` ${fmt(pTot('r500'))}` : '')}
     ${pz.length ? `
       <div class="poirow">
@@ -4593,8 +4572,7 @@ function renderDetail(payload) {
           <span class="zbar"><i style="width:${
             (100 * Number(r.r500) / Math.max(1, Number(pz[0].r500))).toFixed(1)}%"></i></span>
           <b>${fmt(r.r500)}</b></div>`).join('')}</div>
-      ${pOn ? `<p class="note sm">이 단지 땅 위에 있는 점포가 <b>${fmt(pOn)}곳</b>입니다
-        — 거리로 센 게 아니라 <b>지번(PNU)으로</b> 붙은 것이라 단지내상가로 봐도 됩니다.</p>` : ''}
+      ${pOn ? `<p class="note sm">단지 땅 위 점포 <b>${fmt(pOn)}곳</b>(지번으로 붙음 — 단지내상가)</p>` : ''}
       `
       : `<p class="note">${gapCell('', 'SCOPE',
           '이 법정동의 상가업소를 아직 받아오지 않았습니다')}</p>`}
@@ -4604,11 +4582,11 @@ function renderDetail(payload) {
   /* ★ 2026-10-24 병원·약국 탭 — 심평원 병원(종별 · 큰 병원 · 간판 과목) · 행안부 약국 인허가 · 상가 업종 병원·약국(출처 갈라 적음) */
   const paneH = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 <b>중심좌표가 아직 없습니다</b> — 병원·약국은 거리로 찾으므로 <b>볼 수 없습니다.</b> 없는 게 아니라 아직 못 본 것입니다.</div>` : `
+      이 단지는 중심좌표가 없어 병원·약국을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     <div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>
     <div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>
     ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null; if (!g) return '';
-      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(소상공인 상가 데이터 · 업종 이름 기준 — 위 심평원 · 인허가와 출처가 다릅니다)</span></div>
+      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(상가 데이터 — 위와 출처 다름)</span></div>
         <div class="lifegrid">${g[1].map(x => `
         <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}" title="가장 가까운 곳 ${fmt(x.최단m)}m">
           <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`; })()}
@@ -4618,7 +4596,7 @@ function renderDetail(payload) {
   /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 → 학원·교습소(교육청 등록, 01:09 사장님 "교육에 학원 넣자"). 상가 업종 '입시·보습학원' 은 상권 탭 생활 편의 그대로(출처가 다름) */
   const paneE = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 <b>중심좌표가 아직 없습니다</b> — 어린이집·유치원·학교는 거리로 찾으므로 <b>볼 수 없습니다.</b></div>` : `
+      이 단지는 중심좌표가 없어 어린이집 · 유치원 · 학교를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     <div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>
     ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
     ${kin.length ? `
@@ -4643,8 +4621,7 @@ function renderDetail(payload) {
 
     ${['초등학교', '중학교', '고등학교'].map(급 => 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
         (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)).join('')}
-    ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학생 · 학급 · 교사 수는 <b>학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</b>(학년별·학급별 학생수) 그대로입니다 — 학급당 학생 수 · 수업교원 1인당 학생 수도 공시값이며 우리가 나누지 않았습니다.
-      학교는 코드 규칙(학교급 · 설립일 · 법정동)으로만 이었습니다.</p>` : ''}
+    ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학생 · 학급 · 교사: 학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시 그대로</p>` : ''}
 
     ${학원칸(academy)}
 `;
@@ -4699,7 +4676,7 @@ function renderDetail(payload) {
              MAIN=표제부 지번 / ATTACHED=부속지번. 둘 다 아니면 근거가 없는 것이다. -->
         <td>${p.pnu_role === 'ATTACHED' ? '부속'
              : p.pnu_role === 'MAIN' ? '대지'
-             : gapCell('', 'UNSURE', '대지인지 부속인지 근거가 없습니다 — 부속지번(getBrAtchJibunInfo)이 이 단지에 안 왔습니다.')
+             : gapCell('', 'UNSURE', '대지 · 부속 근거 없음(부속지번 자료가 안 옴)')
             }${p.centroid_lat ? '' : ' · 폴리곤없음'}</td>
         <td class="n">${p.jiga ? fmt(Math.round(p.jiga)) : '—'}</td>
       </tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
@@ -4709,14 +4686,14 @@ function renderDetail(payload) {
       ? `<p class="note">${gapCell('', scope && Number(scope.필지) === 1 ? 'EMPTY' : 'SCOPE',
           scope && Number(scope.필지) === 1
             ? '이 단지의 지번이 연속지적도에 매칭되지 않아 지도에 그릴 수 없습니다'
-            : '이 법정동의 연속지적도를 아직 받아오지 않았습니다 (현재 종로 87동 + 장위동)')}</p>` : ''}
+            : '이 법정동의 연속지적도를 아직 받지 않았습니다')}</p>` : ''}
 
     ${sect('용도지역', 'zone', zMain.length ? ` ${fmt(zMain.length)}` : '')}
     ${spec && (spec.용도지역 || spec.용도지구 || spec.용도구역) ? `<dl class="zdl">
       ${spec.용도지역 ? `<dt>대장 용도지역</dt><dd>${esc(spec.용도지역)}</dd>` : ''}
       ${spec.용도지구 ? `<dt>대장 용도지구</dt><dd>${esc(spec.용도지구)}</dd>` : ''}
       ${spec.용도구역 ? `<dt>대장 용도구역</dt><dd>${esc(spec.용도구역)}</dd>` : ''}
-    </dl><p class="srcline">위: 건축물대장(${esc(spec.기준 || '대장')})에 적힌 값 · 아래: 필지와 용도지역 지도의 겹친 넓이 비중(VWorld)</p>` : ''}
+    </dl><p class="srcline">위: 대장(${esc(spec.기준 || '대장')}) 값 · 아래: 지도 겹친 넓이(VWorld)</p>` : ''}
     ${zMain.length ? `<div class="zlist">${zMain.map(z => `
       <div class="zrow"><span class="zn">${esc(z.용도지역 || '')}</span>
         <span class="zbar"><i style="width:${Math.max(2, Number(z.비중) || 0).toFixed(1)}%"></i></span>
@@ -4726,7 +4703,7 @@ function renderDetail(payload) {
         필지와 용도지역 폴리곤의 경계가 미세하게 어긋나 생기는 조각입니다.</p>` : ''}
       
     </div>` : `<p class="note">${gapCell('', 'SCOPE',
-        '이 법정동의 용도지역을 아직 받아오지 않았습니다 (현재 종로·성북·은평)')}</p>`}
+        '이 법정동의 용도지역을 아직 받지 않았습니다')}</p>`}
 
     <div class="lubox" data-lu="${esc(String(c.complex_id))}"></div>
     <div class="clbox" data-cl="${esc(String(c.complex_id))}"></div>
@@ -4790,7 +4767,15 @@ function renderDetail(payload) {
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
 
   $('#detail').querySelectorAll('.tab').forEach(b =>
-    b.addEventListener('click', () => { detailTab = b.dataset.tab; renderDetail(lastDetail); }));
+    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs') || {}).scrollLeft || 0; detailTab = b.dataset.tab; renderDetail(lastDetail); }));
+  /* ★ 2026-10-24 사장님 "상권 탭을 누르면 단지정보 탭으로 가" — 다시 그리면 탭 줄(폰에서 가로로 넘김)이 맨 왼쪽으로 돌아가
+       오른쪽 끝 탭(상권 · 병원·약국)을 눌러도 '단지정보 · 동·호 …' 만 보였다. 누르기 전 위치를 되살리고, 고른 탭이 안 보이면 보이게 민다. */
+  { const bar = $('#detail .tabs'), on = bar && bar.querySelector('.tab[aria-selected="true"]');
+    if (bar && on) {
+      bar.scrollLeft = 탭줄위치;
+      if (on.offsetLeft < bar.scrollLeft || on.offsetLeft + on.offsetWidth > bar.scrollLeft + bar.clientWidth)
+        bar.scrollLeft = Math.max(0, on.offsetLeft - (bar.clientWidth - on.offsetWidth) / 2);
+    } }
 
   /* 동호배치도의 동 선택 — 탭과 같은 패턴(상태 바꾸고 다시 그린다) */
   $('#detail').querySelectorAll('[data-ho-dong]').forEach(b =>
@@ -5187,6 +5172,8 @@ const 정책 = [
     '빈칸의 뜻을 가릅니다 — <b>SCOPE</b> 아직 안 받음 · <b>EMPTY</b> 받았는데 없음 · <b>NA</b> 해당 없음 · <b>UNSURE</b> 확인 못 함.',
     '거리는 모두 <b>단지 중심점에서 잰 직선거리</b>입니다 — 단지 경계·출입구·도보 거리가 아닙니다. 큰 단지일수록 실제와 벌어집니다.',
     '계산한 값(평당가·중위값·분위 등)은 <b>데이터가 다 있고 계산이 정확할 때만</b> 보이고, 기준(대상·기간·표본)을 같이 적습니다. 목록을 자르면 전체 몇 개 중 몇 개인지 적습니다.',
+    '단지 중심좌표가 없으면 거리로 찾는 칸(교통 · 교육 · 상권 · 병원·약국)을 볼 수 없습니다 — 없는 것이 아니라 못 본 것입니다. 필지(연속지적도)를 받으면 좌표가 생깁니다.',
+    '화면에는 이 단지에 해당하는 숫자만 짧게 적고, 왜 그런지 · 무엇을 빼고 셌는지 같은 설명은 이 정책 화면에 모읍니다(칸 머리의 출처 칩 ? 을 누르면 그 칸의 항목으로 옵니다).',
   ] },
   { 키: '매칭', 제목: '데이터 잇기 규칙 (매칭)', 글: [
     '<b>원칙</b> — 이름은 보지 않습니다. <b>공식 코드</b>(법정동코드 · 지번(PNU) · 도로명코드+건물번호 · 대장 관리번호)가 같을 때만 잇고, 후보가 <b>하나</b>일 때만 잇습니다. 잘못 이은 값은 비워 둔 것보다 나쁘므로, 시험에서 틀린 연결이 나온 길은 막는 조건(가드)을 더하거나 쓰지 않습니다. 이은 것마다 어느 길로 이었는지(근거)를 남기고, 원본 값은 고치지 않습니다.',
@@ -5223,6 +5210,9 @@ const 정책 = [
     '<b>전세가율</b> = 그 평형의 최근 순수 전세(월세 0) 1건 ÷ 최근 중개 매매 1건. 월세가 낀 계약과 직거래는 뺍니다. 두 거래가 떨어져 있으면 <b>시점 차</b>를 같이 적습니다 — 1년 넘게 떨어지면 같은 시점의 값이 아닙니다.',
     '<b>등기 지연</b>은 계약일에서 소유권이전 등기일까지입니다. 등기일자가 빈 거래는 아직 등기 전이라고 단정하지 않습니다(전체에서도 20~30%가 비어 있습니다).',
     '<b>분양권·입주권</b>은 분양권전매 실거래를 <b>지번</b>(공고 지번 · 준공 후 지번)으로 이은 것이고 첫 모집공고일 이후 계약만 셉니다. \'분양가와 차이\' 는 같은 전용면적의 <b>최고</b> 분양가를 뺀 값이라 옵션·확장·층 차이는 들어 있지 않습니다. 입주권은 조합원 권리라 분양가와 견주지 않습니다.',
+    '단지에 이어진 실거래가 없다고 나오면 <b>거래가 없다는 뜻이 아닙니다</b> — 실거래는 시군구 단위로 전부 받아 두었고 이 단지에 이어 붙이지 못한 것입니다. 단독·다가구는 원본이 지번을 가려(1**) 잇기가 구조적으로 어렵습니다.',
+    '거래 내역은 그 종류(매매 · 전세 · 월세)의 <b>최근 120건</b>까지 받아 보여 줍니다(분양권·입주권은 따로 120건까지 섞음). 평형을 고르면 그 120건 안에서 고른 평형만 남기고, 전체 건수(해제 포함)를 같이 적습니다. 평형 줄의 건수 · 범위는 전체 거래로 셉니다.',
+    '전월세 갱신 계약 가운데 <b>종전 보증금</b>이 함께 신고된 것은 같은 계약의 전후를 견줄 수 있습니다. 평형 줄의 \'종전 대비\' 는 그 계약들의 변동률을 건마다 낸 뒤 평균한 값입니다.',
   ] },
   { 키: '지역순위', 제목: 'AI 검색 · 지역 순위', 글: [
     'AI는 문장을 정해진 조건으로 바꾸기만 합니다. <b>숫자는 전부 DB가 셉니다.</b> 어떻게 알아들었는지를 먼저 보여 드리고, 못 알아들은 말은 그렇다고 적습니다.',
@@ -5251,6 +5241,9 @@ const 정책 = [
   { 키: 'kapt', 제목: 'K-apt 공동주택관리정보', 글: [
     'K-apt 는 단지 코드를 대장과 공유하지 않아 <b>법정동 + 사용승인일</b>, 또는 <b>공식 도로명코드+건물번호 · 공식 지번 + 세대 5% 안</b>으로 잇습니다(양쪽 하나씩일 때만). 자세한 규칙은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',
     'K-apt는 주거동만, 대장은 상가·부속동까지 세므로 동 수·세대수가 다를 수 있습니다.',
+    '관리비가 비어 있는 까닭을 가릅니다 — <b>이 구의 관리비를 아직 안 받음</b>(SCOPE) · <b>K-apt 에 이어져 있는데 그 단지 관리비가 없음</b>(같은 구는 받았으니 그 단지가 공시하지 않았거나 그 단지만 못 받은 것 — 둘을 가를 기록은 아직 없음) · <b>K-apt 연결이 확정되지 않음</b>(같은 날 승인된 단지가 여럿이라 버림 — 추측으로 붙이면 다른 단지의 관리비가 사실처럼 보입니다).',
+    '교통 탭의 \'K-apt 신고\' 역 · 도보 시간은 관리주체가 적은 값이라, 단지 중심점에서 잰 직선거리와 잰 방법이 다릅니다.',
+    '건축물대장이 아직 없는 신축은 K-apt 정보만 보입니다(동 목록 · 필지 · 공시지가는 대장에서 나오므로 없음). 대장이 공개되면 정식 단지로 바뀝니다. 한 지번에 여러 단지가 있으면 실거래 신고의 단지 일련번호로 가릅니다.',
   ] },
   { 키: 'permit', 제목: '건축인허가 (국토교통부 세움터)', 글: [
     '허가 건수는 건물 수가 아닙니다 — 설계변경·취소로 한 지번에 여러 건이 쌓입니다.',
@@ -5262,11 +5255,17 @@ const 정책 = [
     '단지의 용도지역 비중은 <b>필지와 용도지역 폴리곤의 교차 면적</b>입니다 — 땅으로 잰 값이라 대장 경계와 정확히 같지는 않습니다.',
     '토지이용계획의 \'일부 걸침\' 은 필지의 일부만 구역 안, \'접함\' 은 경계에 닿아 있다는 <b>원본 표기</b>입니다. 묶음(개발·정비 · 높이·경관 …)은 우리가 정한 것이고 이름은 원본 그대로입니다.',
     '지도 겹쳐보기는 원본 영역을 <b>하나도 빼지 않고</b> 그립니다. 겹친 곳은 위(작은 것)의 색만 보이고, 누르면 그 자리의 영역이 전부 나옵니다.',
+    '<b>토지거래허가구역</b>: 구역 안에서 정해진 면적을 넘는 땅(아파트는 대지지분)을 사고팔려면 시·군·구청 허가가 필요합니다.',
+    '토지이용계획은 세대 있는 단지의 <b>대표 필지부터</b> 받고 있습니다 — 나머지 필지의 지정은 받기 전까지 모릅니다.',
+    '필지 표의 \'대표 · 부속\' 은 대장의 표제부 지번 · 부속지번(getBrAtchJibunInfo)으로 가립니다. 부속지번 자료가 안 온 단지는 근거가 없다고 적습니다.',
+    '용도지역 칸 위는 건축물대장(총괄표제부 · 표제부)에 적힌 값, 아래는 필지와 용도지역 지도(VWorld)가 겹친 넓이 비중입니다.',
   ] },
   { 키: 'poi', 제목: '주변 상권 · 생활 편의 (소상공인시장진흥공단)', 글: [
     '생활 편의 묶음은 <b>우리가 정한 것</b>입니다 — 원본 분류에 그런 축은 없습니다. 숫자는 500m 기준, 500m 안에 없으면 1km 안 개수를 흐리게 적습니다.',
     '학원은 소분류로 나눴습니다(요가·필라테스는 운동으로, 직원 훈련 같은 어른 학원은 묶음에서 뺌). 병원은 원본이 \'내과/소아과\' 를 한 칸으로 적어 소아과만 따로 셀 수 없고, 유사 의료업은 뺐습니다. 상가 데이터라 학교는 들어 있지 않습니다.',
     '브랜드는 상호명에 적힌 글자로 찾습니다 — 상호에 브랜드가 없는 점포가 있어 <b>있다는 말은 되지만 없다는 말은 안 됩니다</b>.',
+    '\'단지 땅 위 점포\' 는 거리로 센 것이 아니라 <b>지번(PNU)</b>이 이 단지 필지와 같은 점포입니다 — 단지내상가로 봐도 됩니다.',
+    '병원·약국 탭의 \'상가 업종으로 본 병원·약국\' 은 이 상가 데이터의 업종 이름으로 센 것이라, 심평원(요양기관) · 행안부(약국 인허가) 숫자와 다릅니다.',
   ] },
   { 키: 'academy', 제목: '학원·교습소 (교육부 NEIS)', 글: [
     '교육청에 <b>등록된</b> 학원·교습소(개원)입니다. 생활 편의의 학원 숫자는 상가 업종이라 출처가 다르고, 둘 다 맞습니다.',
@@ -5301,11 +5300,18 @@ const 정책 = [
     '공고는 지번·입주월·세대·거리로 단지에 잇습니다(추정 연결, 이름으로 잇지 않음). 다섯 길과 막는 조건은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',
     '공고 지번이 지금 지적도에 없으면 같은 본번 필지들의 가운데에 <b>근처</b>로 놓습니다(정확한 자리 아님). 그것도 없으면 <b>자리 모름</b>으로 법정동에 모읍니다.',
     '경쟁률은 <b>1순위 · 해당지역</b> 기준(없으면 그 다음 순위)입니다. \'미달 n\' 은 접수가 공급보다 n세대 적었다는 원문 표기입니다. 오피스텔·도시형은 군 단위로 청약을 받아 같은 군의 타입은 같은 경쟁률입니다.',
+    '공급 세대는 그 공고의 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.',
+    '분양권·입주권 가운데 첫 모집공고 <b>전</b>에 맺은 것은 입주권(조합원 권리) 계약입니다 — 공고 지번에서 공고 전 10년 안의 것만 잇습니다. 공고 자료 없이 <b>이 단지 필지에서 맺은 계약</b>(준공 전 ~ 준공 뒤 10년)으로 이은 것은 같은 필지에 그 무렵 준공된 다른 단지가 없을 때만입니다.',
+    '단지에 아직 안 이어진 공고는 공고 지번 자리에 보입니다(지도 표 · 검색 제안).',
+    '청약홈은 무순위 · 재공급 · 임의공급마다 관리번호를 새로 붙여 이름이 같아도 공고가 따로 있습니다 — 단지 밖 공고는 <b>같은 공고 지번</b>이면 한데 보입니다(묶는 근거는 지번뿐).',
   ] },
   { 키: 'closed', 제목: '폐쇄·말소 건축물대장', 글: [
     '같은 필지(PNU)에 있던 <b>예전 건물(또는 예전 서류)의 닫힌 대장</b>입니다. 땅이 같을 뿐 시기가 다르고, 지금 단지가 그 자리에 이어 지은 것이라고 단정하지 않습니다.',
     '\'폐쇄\' 는 철거와 다를 수 있습니다(대장을 새로 만들며 닫은 경우). 묶음은 같은 필지 · 같은 말소일입니다.',
     '지도의 ✕ 와 회색 점선은 그 대장이 있던 <b>필지의 지금 경계</b>입니다 — 옛 건물 모양이 아닙니다.',
+    '폐쇄 대장에는 지금 대장과 달리 <b>호가 어느 동 대장에 속하는지 적는 번호</b>(상위 대장 번호)가 없어 호를 동에 확실히 이을 수 없습니다 — 이름으로 잇지 않으므로 동 · 호 격자를 그리지 않고 따로 보입니다. 층은 표제부 번호로, 전용면적은 호 번호로 이었습니다(코드).',
+    '폐쇄 상세의 공시가격은 VWorld 공동주택가격(국토교통부 공시) 원문입니다 — 과세 기준 값이라 실거래가가 아닙니다. 공시는 지번 단위라 <b>대장이 닫힌 해까지</b>만 보입니다(그 뒤 값은 같은 지번에 새로 지은 건물 것). 연도마다 공시된 호 수가 달라 평균은 내지 않고 원문 최저~최고만 적습니다.',
+    '이 지번으로 신고된 실거래 가운데 단지에 안 붙은 것을 <b>대장이 닫힌 날 앞(헐리기 전 건물)</b> · <b>뒤(이 자리에 새로 지은 건물 — 새 대장이 아직 없거나 다른 지번이라 못 이음)</b>로 나눠 보입니다. 닫힌 뒤의 분양권·입주권은 이 자리에 새로 짓는 사업의 권리입니다. 실거래 신고의 단지 이름은 참고로만 보이고 잇는 데 쓰지 않습니다.',
   ] },
   { 키: '지역', 제목: '법정동 · 행정동', 글: [
     '법정동·행정동 마스터는 국가데이터처 법정동 연계정보(분기별, 2013.07~)입니다. 옛 행정동 이름으로 찾으면 그 뒤를 이은 지금 행정동(공식 연계정보에서 같은 법정동을 나눠 가진 동)으로 안내하고, 그 동이 걸친 법정동 기준으로 결과를 보여 줍니다 — 행정동과 법정동 경계가 달라 경계 밖 단지가 섞일 수 있습니다.',
@@ -5328,7 +5334,8 @@ document.addEventListener('click', e => {
   const a = e.target.closest('[data-pol]');
   if (a) { e.preventDefault(); 보기전환('policy'); 정책그리기(a.dataset.pol); return; }
   const g = e.target.closest('[data-pol-go]');
-  if (g) { e.preventDefault(); 정책그리기(g.dataset.polGo); return; }
+  /* 2026-10-24 사장님 "정책을 눌러도 이동 안 해" — 정책 안 목차용이라 화면을 안 바꿨다. 단지 상세 · 모달에서 눌러도 정책으로 간다 */
+  if (g) { e.preventDefault(); if (!g.closest('#polbody')) { try { $('#homodal').classList.remove('on'); } catch (x) {} 보기전환('policy'); } 정책그리기(g.dataset.polGo); return; }
   if (e.target.closest('#polback')) { 보기전환('map'); }
 });
 
@@ -5763,11 +5770,8 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
         <b>${esc(z.구역)}</b>${Number(z.공동) ? ' <span class="zb">공동</span>' : ''}
         <span class="muted sm">· ${esc(짧)}학교 ${fmt(구.filter(y => y.구역id === z.구역id && y.school_id).length)}곳</span>
         <span class="hzgo">지도에 보기</span>
-      </div>`).join('') + `<p class="note sm">${급 === '초등학교'
-        ? '통학구역은 교육지원청이 정한 배정 구역입니다. 공동통학구역이면 표시된 학교 중에서 배정됩니다.'
-        : 급 === '중학교' ? '중학교는 학교군 안에서 추첨으로 배정됩니다 — 표시된 학교는 <b>후보</b>입니다.'
-        : '고등학교 학군은 일반고 배정 단위입니다. 특목·자율·특성화고는 학군과 따로 지원합니다(학군 표가 없는 학교).'}
-        단지 중심점 한 점으로 판정 · 최종 배정은 교육지원청 · 기준일 ${esc(날짜((구[0] || {}).기준일, ''))}</p>`
+      </div>`).join('') + `<p class="note sm">${급 === '초등학교' ? '배정 구역' : 급 === '중학교' ? '학교군 안 추첨 — 표시 학교는 후보' : '일반고 배정 단위(특목 · 자율 · 특성화는 따로)'}
+        · 단지 중심점 판정 · 기준일 ${esc(날짜((구[0] || {}).기준일, ''))}</p>`
     : `<p class="note sm">${gapCell('', 학구받음 ? 'UNSURE' : 'SCOPE', 학구받음
         ? `단지 중심점이 어느 ${급 === '초등학교' ? '통학구역' : '학교군'}에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다`
         : '이 지역의 학구도를 아직 받지 않았습니다')}</p>`;
@@ -5835,7 +5839,7 @@ function 분양칸(공고, 머리에적음 = false) {   // 머리에적음: 공�
         ${p.공고종류 === 'PBLPVT' ? '<p class="note sm">공공지원민간임대는 분양이 아니라 임대라 금액 칸을 비웠습니다(조건은 공고문).</p>' : ''}
       </div>`;
     }).join('')}
-    <p class="note sm">${안이어짐만 && !머리에적음 ? `아직 단지(건축물대장 · K-apt)에 이어지지 않은 공고${여럿 ? '들' : ''}입니다 — 공고 지번 자리에 보입니다. ` : ''}공급세대는 일반·특별공급분이라 단지 전체 세대보다 적을 수 있습니다.</p>`;
+    ${안이어짐만 && !머리에적음 ? `<p class="note sm">단지에 아직 안 이어진 공고 — 공고 지번 자리에 보임</p>` : ''}`;
 }
 
 /* 생활 편의 묶음 머리 (294, 2026-10-21) — 서버 ord 번호 구간으로 나눈다. 번호는 server.js _q_poiLife 한 곳에서만 정한다. */
@@ -5900,7 +5904,7 @@ function 토지이용칸(r) {
   const 필지 = Number(s.필지) || 0, 받은 = Number(s.받은) || 0;
   const 머리 = sect('토지이용계획', 'landuse', 항목.length ? ` ${fmt(항목.length)}` : '');
   if (!받은) return `${머리}<p class="note">${gapCell('', 'SCOPE',
-    '이 단지 필지의 토지이용계획을 아직 받지 않았습니다 — 세대 있는 단지의 대표 필지부터 받고 있습니다')}</p>`;
+    '이 단지 필지의 토지이용계획을 아직 받지 않았습니다')}</p>`;
   const 저촉말 = { '1': '포함', '2': '일부 걸침', '3': '접함' };
   const 줄 = x => `<li${경계됨(x.코드) ? ` data-lushape="${esc(x.코드)}|${esc(x.이름 || '')}" role="button" tabindex="0" title="누르면 지도에 이 구역 경계를 그립니다 · 다시 누르면 지웁니다"` : ''}><b>${esc(x.이름 || '')}</b><span class="muted"> ${esc(저촉말[x.저촉] || '')}${
       받은 > 1 && Number(x.필지) < 받은 ? ` · 필지 ${fmt(x.필지)}/${fmt(받은)}` : ''}${
@@ -5912,12 +5916,11 @@ function 토지이용칸(r) {
   const 최신 = 항목.map(x => x.갱신일 || '').sort().pop();
   return `${머리}
     ${묶음['거래'] ? `<div class="lu-hot" data-lushape="${esc(묶음['거래'][0].코드 || 'UQQ600')}|${esc(묶음['거래'][0].이름 || '')}" role="button" tabindex="0" title="누르면 지도에 허가구역 경계를 그립니다"><b>토지거래허가구역</b> 안에 있습니다
-      <span class="muted">— 구역 안에서 정해진 면적을 넘는 땅(아파트는 대지지분)을 사고팔려면 시·군·구청 허가가 필요합니다.
-      지정 ${fmt(묶음['거래'].reduce((t, x) => t + (Number(x.지정) || 0), 0))}건</span></div>` : ''}
+      <span class="muted">— 지정 ${fmt(묶음['거래'].reduce((t, x) => t + (Number(x.지정) || 0), 0))}건</span></div>` : ''}
     ${펼침('개발·정비')}${펼침('용도지역')}${접음('높이·경관')}${접음('그 밖')}${접음('접함')}
     ${해제.length ? `<p class="note sm">전에는 걸려 있다가 <b>빠진 것</b>: ${esc(해제.map(x => x.이름).join(', '))}</p>` : ''}
     <p class="srcline">받은 필지 <b>${fmt(받은)}/${fmt(필지)}</b>${받은 < 필지
-      ? ' — 나머지 필지는 아직 안 받았습니다(대표 필지부터 받는 중). 나머지 필지의 지정은 모릅니다' : ''}${최신 ? ` · 가장 최근 갱신 ${esc(최신)}` : ''}</p>`;
+      ? ' · 나머지 필지는 아직 안 받음' : ''}${최신 ? ` · 가장 최근 갱신 ${esc(최신)}` : ''}</p>`;
 }
 
 /* ---------------- 심평원 병원·약국 (2026-10-21 밤) ----------------
@@ -5995,9 +5998,9 @@ function 분양권칸(r) {
   const 날 = d => 날짜(d);
   /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
   return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 해제 ${fmt(n.취소)}건)</span>` : ''}</div>
-    ${Number(n.공고전) ? `<p class="note sm">${fmt(n.공고전)}건은 첫 모집공고 <b>전</b>에 맺은 <b>입주권</b>(조합원 권리) 계약입니다 — 공고 지번에서, 공고 전 10년 안의 것만 이었습니다.</p>` : ''}
+    ${Number(n.공고전) ? `<p class="note sm">${fmt(n.공고전)}건은 첫 공고 전 입주권(조합원 권리)</p>` : ''}
     ${r.분양권말 ? `<p class="note sm">${r.분양권말}</p>` : ''}
-    ${Number(n.필지로) ? `<p class="note sm">${fmt(n.필지로)}건은 공고 자료 없이 <b>이 단지 필지에서 맺은 계약</b>(준공 전 ~ 준공 뒤 10년)으로 이었습니다(같은 필지에 그 무렵 준공된 다른 단지가 없을 때만).</p>` : ''}
+    ${Number(n.필지로) ? `<p class="note sm">${fmt(n.필지로)}건은 이 단지 필지에서 맺은 계약으로 이음(공고 자료 없음)</p>` : ''}
     <table class="mini"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
     ${t.slice(0, 15).map(x => {
       const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);
@@ -6251,7 +6254,7 @@ function 약국칸(r) {
       <ul class="lu">${폐.map(x => `<li><s>${esc(x.이름 || '')}</s><span class="muted"> ${fmt(Number(x.m) || 0)}m${
         x.폐업일 ? ` · ${날(x.폐업일)} ${esc(x.상세상태 || '폐업')}` : ` · ${esc(x.상세상태 || '폐업')} (폐업일 원문에 없음)`}${
         x.인허가일 ? ` · ${날(x.인허가일)} 인허가` : ''}</span></li>`).join('')}</ul>` : ''}
-    <p class="note sm">영업 중 ${fmt(Number(범.영업전체) || 0)}곳 중 ${fmt(Number(범.영업좌표없음) || 0)}곳은 원문에 좌표가 없어 못 셈 · 폐업 기록은 ${폐비 != null ? `${폐비}%만` : '일부만'} 좌표가 있어 적게 잡힘${범.받은날 ? ` · ${esc(날(범.받은날))} 받음` : ''}</p>`;
+    <p class="note sm">좌표 없어 못 센 곳: 영업 ${fmt(Number(범.영업좌표없음) || 0)}/${fmt(Number(범.영업전체) || 0)} · 폐업은 ${폐비 != null ? `${폐비}%만` : '일부만'} 좌표 있음${범.받은날 ? ` · ${esc(날(범.받은날))} 받음` : ''}</p>`;
 }
 
 /* ---------------- 어린이집 (2026-10-22, 사장님 "어린이집 운영 승인 됐엉") ----------------
@@ -6407,7 +6410,7 @@ async function 역사채우기() {
     <ol class="hist">${줄.map(e => `<li data-histgo="${esc(e.간다.join('|'))}"${e.폐쇄 ? ` data-histcl="${esc(e.폐쇄)}"` : ''} role="button" tabindex="0" title="누르면 그 칸으로 갑니다${e.폐쇄 ? ' · 지도에 그 옛 대장 자리를 표시합니다' : ''}">
       <span class="hist-d">${esc(날(e.d) || '날짜 없음')}</span>
       <span class="hist-w">${esc(e.무엇)}<span class="hist-s">${esc(e.출처)} · ${esc(e.간다[1])} 칸</span></span></li>`).join('')}</ol>
-    <p class="srcline">이미 이어 둔 자료의 날짜만 모은 목차입니다 — 값은 각 칸에 있습니다. 어떻게 이었나: <a href="#policy" data-pol-go="역사">정책</a></p>`;
+    <p class="srcline">날짜 목차 — 값은 각 칸 · <a href="#policy" data-pol-go="역사">정책 ›</a></p>`;
 }
 document.addEventListener('click', async e => {
   const li = e.target.closest('#detail [data-histgo]');
@@ -6624,15 +6627,12 @@ async function 공고상세(house, lat, lng) {
   const 이어짐 = r.같은지번이어짐 || [];
   box.innerHTML = `<span class="pill">청약 공고</span> <span class="pill cl">단지 미연결</span>
     <h2>${esc((공고들[공고들.length - 1] || {}).house_nm || '청약 공고')}</h2>
-    ${집수 > 1 ? `<p class="note sm">같은 공고 지번의 공고 <b>${fmt(공고들.length)}건</b>을 한데 보입니다 — 청약홈이 무순위·재공급·임의공급마다
-      관리번호를 따로 붙여 이름이 같아도 공고가 따로 있습니다. 묶은 근거는 공고 지번뿐입니다.</p>` : ''}
+    ${집수 > 1 ? `<p class="note sm">같은 공고 지번의 공고 ${fmt(공고들.length)}건을 한데 보임</p>` : ''}
     ${이어짐.length ? `<p class="note sm">같은 공고 지번의 다른 공고는 이미 ${이어짐.map(c => c.complex_id ? `<a href="/c/${c.complex_id}" data-goc="${c.complex_id}">${esc(c.이름 || '단지')}</a>`
         : `<a href="#" data-gonew="${esc(c.kapt_code)}">${esc(c.이름 || 'K-apt 단지')}</a> <span class="muted">(대장 없는 신축 · K-apt)</span>`).join(' · ')}
-      에 이어져 있습니다(그 단지 상세의 분양 칸). ${집수 > 1 ? '이 공고들은' : '이 공고는'} 아직 안 이어졌습니다.</p>` : ''}
-    <p class="note sm">${집수 > 1 ? '이 공고들은' : '이 공고는'} 아직 <b>단지에 이어지지 않았습니다</b>(이름으로 잇지 않는다 — 지번·입주월·세대·거리로만).
-      ${lat == null ? '공고 지번으로 찾을 필지가 없어 <b>지도에 자리를 찍지 않았습니다</b>.'
-        : 근처 ? `공고 지번 필지가 <b>지금 지적도에 없어</b>(사업으로 합필·분필 중이거나 끝남) 같은 본번 필지 ${fmt(w.근처필지)}개의 가운데에 <b>'근처'</b> 로 놓았습니다 — 정확한 자리가 아닙니다.`
-        : '지도의 표는 <b>공고 지번</b> 자리입니다.'}</p>
+      에 이어져 있음(그 단지의 분양 칸)</p>` : ''}
+    <p class="note sm">단지에 아직 안 이어짐 · ${lat == null ? '지도 자리 없음(공고 지번 필지를 못 찾음)'
+        : 근처 ? `지도 표는 '근처'(공고 지번 필지가 지금 없어 같은 본번 필지 ${fmt(w.근처필지)}개 가운데)` : '지도 표 = 공고 지번 자리'}</p>
     ${이력칸}
     <div class="ahbox">${분양칸(공고들, true)}${공고들.length ? 분양권칸(r) : ''}</div>`;
 }
@@ -6758,9 +6758,9 @@ function 옛거래칸(o, s, 때들 = ['전', '뒤']) {
     const n = (Number(c.매매) || 0) + (Number(c.전월세) || 0) + (Number(c.해제) || 0);
     return sect(때 === '전' ? '이 자리 옛 건물 실거래' : '닫힌 뒤 이 지번으로 신고된 실거래', 'rtms', ` ${fmt(n)}`)
       + `<p class="note sm">${때 === '전'
-          ? `이 필지(지번)로 신고된 거래 중 <b>대장이 닫힌 ${닫} 이전</b> 계약입니다 — 헐리기 전 건물의 거래라 지금 단지에는 붙이지 않았습니다.`
-          : `<b>대장이 닫힌 ${닫} 이후</b> 같은 지번으로 신고된 거래입니다 — 이 자리에 새로 지은 건물의 거래로 보입니다. 새 건물 대장이 아직 없거나 다른 지번이라 단지에 잇지 못했습니다.`}
-        매매 ${fmt(c.매매 || 0)} · 전월세 ${fmt(c.전월세 || 0)}${Number(c.해제) ? ` · 해제 ${fmt(c.해제)}` : ''} · ${날(c.처음)} ~ ${날(c.끝)}${c.이름 ? ` · 실거래 신고의 이름: ${esc(c.이름)} <span class="muted">(참고로만 — 이름으로 잇지 않습니다)</span>` : ''}</p>
+          ? `대장이 닫힌 ${닫} 이전 계약(헐리기 전 건물 — 단지에 안 붙임) ·`
+          : `대장이 닫힌 ${닫} 이후 같은 지번 계약(새 건물로 보임 — 단지에 못 이음) ·`}
+        매매 ${fmt(c.매매 || 0)} · 전월세 ${fmt(c.전월세 || 0)}${Number(c.해제) ? ` · 해제 ${fmt(c.해제)}` : ''} · ${날(c.처음)} ~ ${날(c.끝)}${c.이름 ? ` · 신고 이름 ${esc(c.이름)} <span class="muted">(참고)</span>` : ''}</p>
       <table class="mini"><thead><tr><th>계약</th><th>종류</th><th class="n">전용</th><th class="n">층</th><th class="n">금액</th></tr></thead><tbody>
       ${줄.slice(0, 15).map(x => `<tr${Number(x.취소) ? ' class="canc"' : ''}><td>${날(x.계약일)}${Number(x.취소) ? ` <span class="tcx">${용어('해제')}</span>` : ''}</td>
         <td>${종(x.종류)} ${Number(x.전월세) ? (Number(x.월세) ? '월세' : '전세') : '매매'}</td><td class="n">${x.전용 != null ? Number(x.전용).toFixed(2) : '—'}</td>
@@ -6828,8 +6828,7 @@ function 폐쇄그리기() {
     || String(a.dong_nm || a.bld_nm || '').localeCompare(String(b.dong_nm || b.bld_nm || ''), 'ko'));
   const 층범위 = pk => { const f = (대.층 || []).filter(x => String(x.mgm_bldrgst_pk) === String(pk)).map(x => Number(x.층)).filter(Number.isFinite);
     if (!f.length) return '—'; const lo = Math.min(...f), hi = Math.max(...f); return `${lo < 0 ? '지하 ' + (-lo) : lo}${hi !== lo ? ' ~ ' + hi : ''}층`; };
-  const paneD = `<p class="note"><b>동·호 배치(격자)는 그리지 않습니다.</b> 폐쇄 대장에는 지금 대장과 달리 <b>호가 어느 동 대장에 속하는지 적는 번호</b>(상위 대장 번호)가 없어,
-       호를 동에 확실히 이을 수 없습니다(이름으로 잇지 않습니다). 동과 호를 따로 보여 줍니다.</p>
+  const paneD = `<p class="note sm">동 · 호를 따로 보임(폐쇄 대장엔 호를 동에 잇는 번호가 없음 — 격자 없음)</p>
     ${sect('동', 'closed', ` ${fmt((대.동 || []).length)}`)}
     <table><thead><tr><th>동</th><th>용도</th><th class="n">세대</th><th>층</th><th class="n">연면적</th><th>닫힌 날</th></tr></thead><tbody>
       ${동줄.map((d, i) => `<tr${d.이묶음 ? '' : ' class="muted"'}${i >= 30 && !폐쇄동다 ? ' hidden' : ''}><td>${esc(d.dong_nm || d.bld_nm || '—')}</td><td>${esc(d.main_purps_nm || '—')}</td>
@@ -6853,7 +6852,7 @@ function 폐쇄그리기() {
   const 공 = r.공시 || { 연도: [], 동: [], 받음: null };
   const 억원 = v => { if (v == null) return '—'; const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4); return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
   const 공시칸 = 공.연도.length ? `${sect('공시가격 (공동주택가격)', '주택가격', ` ${fmt(공.연도.length)}회`)}
-    <p class="note sm">국토교통부 공시 — VWorld 공동주택가격 원문. 과세 기준 값이라 실거래가가 아닙니다. <b>대장이 닫힌 해(${esc(String(s.shter_day || '').slice(0, 4))})까지</b>의 공시만 — 공시는 지번 단위라 그 뒤 값은 같은 지번에 새로 지은 건물 것입니다. 연도마다 공시된 호 수가 달라 평균은 내지 않고, 원문 값의 최저~최고만 적습니다.${공.연도.some(y => y.이름수 > 1) ? '' : ` 원문 공동주택명: ${esc(공.연도[0].이름 || '—')}`}</p>
+    <p class="note sm">대장이 닫힌 해(${esc(String(s.shter_day || '').slice(0, 4))})까지의 공시 · 원문 최저~최고${공.연도.some(y => y.이름수 > 1) ? '' : ` 원문 공동주택명: ${esc(공.연도[0].이름 || '—')}`}</p>
     <table><thead><tr><th>기준</th><th class="n">공시된 호</th><th class="n">최저</th><th class="n">최고</th></tr></thead><tbody>
       ${공.연도.map(y => `<tr><td>${esc(y.기준연도)}${y.기준월 && y.기준월 !== '01' ? '.' + esc(y.기준월) : ''}</td><td class="n">${fmt(y.호)}</td><td class="n">${억원(y.최저)}</td><td class="n">${억원(y.최고)}</td></tr>`).join('')}
     </tbody></table>
@@ -6862,13 +6861,13 @@ function 폐쇄그리기() {
       <div id="cnedbox">${폐쇄공시동 != null && 폐쇄공시줄 && 폐쇄공시줄.동 === 폐쇄공시동 ? 공시호표(폐쇄공시줄.줄, 억원) : ''}</div>` : ''}`
     : (공.받음 ? `<p class="note sm">${gapCell('', 'EMPTY', '이 지번에 대장이 닫히기 전 해의 공동주택가격 공시가 없습니다(VWorld 원문 · 공시는 2006년부터)')}</p>`
                : `<p class="note sm">${gapCell('', 'SCOPE', '이 지번의 공동주택가격(VWorld)을 아직 받는 중입니다')}</p>`);
-  const paneP = `${거래수 ? `<p class="note sm">이 필지(지번)로 신고된 거래 중 <b>대장이 닫힌 ${esc(날(s.shter_day))} 이전</b> 계약 — 헐리기 전 건물의 거래입니다. 지금 단지에는 붙이지 않았습니다.
-        ${(r.옛거래.셈 || []).filter(z => z.때 === '전').map(z => z.이름 ? `실거래 신고의 이름: ${esc(z.이름)} <span class="muted">(참고로만)</span>` : '').join('')}</p>` : ''}
+  const paneP = `${거래수 ? `<p class="note sm">대장이 닫힌 ${esc(날(s.shter_day))} 이전 계약(헐리기 전 건물)${
+        (r.옛거래.셈 || []).filter(z => z.때 === '전').map(z => z.이름 ? ` · 신고 이름 ${esc(z.이름)} <span class="muted">(참고)</span>` : '').join('')}</p>` : ''}
     ${거래탭UI}
     ${tradeList(거래, 폐쇄거래탭, null)}
     ${옛거래칸(r.옛거래, s, ['뒤'])}
     ${(r.분양권 || []).length ? sect('이 자리 사업의 분양권·입주권', 'rtms', ` ${fmt(분양권수)}`)
-      + 분양권칸({ ...r, 공고: [], 분양권말: `이 필지(지번)에서 <b>이 대장이 닫힌 ${esc(날(s.shter_day))} 이후</b>에 맺은 계약입니다 — 옛 건물은 이미 없으니 이 자리에 새로 짓는 사업의 권리입니다. 실거래 신고의 단지명: ${esc([...new Set(r.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} (참고로만 보입니다 — 이름으로 잇지 않습니다)` }) : ''}
+      + 분양권칸({ ...r, 공고: [], 분양권말: `대장이 닫힌 ${esc(날(s.shter_day))} 이후 이 지번 계약(새로 짓는 사업의 권리) · 신고 이름 ${esc([...new Set(r.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} <span class="muted">(참고)</span>` }) : ''}
     ${거래수 || (r.분양권 || []).length || (r.옛거래.셈 || []).length ? '' : `<p class="note">${gapCell('', 'NA', '이 지번으로 신고된 실거래 중 단지에 안 붙은 것이 없습니다')}</p>`}
     ${공시칸}`;
 
