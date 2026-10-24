@@ -1,1 +1,1 @@
-{ "read": true, "map": true }
+{ "read": true, "map": true, "suggest": true, "search": true }

@@ -86,7 +86,7 @@ async function 미리채움(v) {
 let 실패 = 0, 쉬는끝 = 0;
 const 셈 = new Map();   // kind → { hit, miss, fallback, ms }
 function 세기(kind, 무엇, ms) {
-  const x = 셈.get(kind) || { hit: 0, miss: 0, fallback: 0, ms: 0 };
+  const x = 셈.get(kind) || { hit: 0, miss: 0, fallback: 0, ms: 0, stored: 0 };
   x[무엇]++; if (ms) x.ms += ms; 셈.set(kind, x);
 }
 setInterval(async () => {
@@ -132,7 +132,7 @@ async function 단지응답(req, res, next) {
   try {
     const r = await pg().query('SELECT status, body_gz FROM svc.complex_json WHERE complex_id = $1 AND kind = $2', [id, kind]);
     실패 = 0;
-    if (!r.rows.length) { 세기(kind, 'miss', Date.now() - a); res.set('X-Svc', 'miss'); return next(); }
+    if (!r.rows.length) { 세기(kind, 'miss', Date.now() - a); res.set('X-Svc', 'miss'); 지나며담기(res, id, kind, v); return next(); }
     세기(kind, 'hit');
     const { status, body_gz } = r.rows[0];
     if (status === 200 && v) { const c = rd(); if (c) c.set(`t:${v}:${kind}:${id}`, body_gz, { EX: 7200 }).catch(() => {}); }
@@ -144,6 +144,35 @@ async function 단지응답(req, res, next) {
   }
 }
 
+
+/* 지나며 담기(10-25): 아직 발행 안 된 단지(작은 단지 46만 곳 등)는 옛 경로가 답한다 — 그 **답을 그대로** 서비스DB 에 담아 둔다.
+   발행기가 받는 것과 같은 몸(같은 서버 · 같은 주소 · 물음표 없음 = _timing 없음)이라 값이 같다. 다음부터는 서비스DB 에서 · 바뀌면 매시 발행이 고친다.
+   ★ 200 만(없는 번호를 두드리는 봇이 404 를 쌓지 않게). 이미 있으면 건드리지 않는다(발행기가 담은 게 우선). 실패는 조용히 넘어간다 — 화면에는 상관없다. */
+function 지나며담기(res, id, kind, v) {
+  /* res.send 를 감싼다 — 옛 경로는 res.json(→ send(글)) 도, 상세처럼 res.type(json).send(글) 도 쓴다. 글(문자열)일 때 한 번만 담는다 */
+  const 원래 = res.send.bind(res);
+  let 담음 = false;
+  res.send = body => {
+    try {
+      if (!담음 && res.statusCode === 200 && (typeof body === 'string' || Buffer.isBuffer(body)) && /json/.test(String(res.get('Content-Type') || ''))) {
+        담음 = true;
+        const raw = Buffer.isBuffer(body) ? body : Buffer.from(body, 'utf8');
+        setImmediate(() => {
+          let j; try { j = JSON.parse(raw.toString('utf8')); } catch { return; }
+          if (j && j.error) return;
+          zlib.gzip(raw, { level: 6 }, (err, gz) => {
+            if (err) return;
+            const sha = require('crypto').createHash('sha256').update(raw).digest('hex');
+            pg().query(`INSERT INTO svc.complex_json (complex_id, kind, status, body_gz, sha, bytes, publish_id, updated_at)
+                        VALUES ($1, $2, 200, $3, $4, $5, $6, now()) ON CONFLICT (complex_id, kind) DO NOTHING`,
+                       [id, kind, gz, sha, raw.length, v || 0]).then(() => 세기(kind, 'stored'), () => {});
+          });
+        });
+      }
+    } catch (e) { /* 담기 실패는 화면과 상관없다 */ }
+    return 원래(body);
+  };
+}
 
 /* ---------- 지도 마커 (2단계 첫 칸) ----------
    svc.complex_marker = 발행기가 적재DB 에서 통째로 만든 단지 점 + 최근 3년 최고가(없으면 마지막 매매). 기존 /api/complexes/markers 와 같은 모양으로 낸다.
