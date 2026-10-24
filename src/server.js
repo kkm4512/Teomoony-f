@@ -649,6 +649,82 @@ app.get('/api/config', (req, res) => {
    느린 것은 전부 디스크 쪽에서 고쳤다(212 뷰 재작성 · 213 인덱스 셋).
    ★ 다시 넣고 싶어지면: 먼저 재고, 인덱스로 안 되는 게 확인된 뒤에만. */
 
+/* ===================== 받은 범위 (2026-10-24 · 전국으로 넓히기 1단계) =====================
+   meta.coverage(339) = 자료 × 시군구 → **실제로 들어 있는 행 수**. 적재 기록이 아니라 데이터에서 센다.
+   ★ 화면의 'SCOPE(아직 안 받음)' 판단과 "터무니는 지금 ○○만 다룹니다" 말이 이것 하나를 본다 — 지역 이름을 코드에 적지 않는다.
+   ★ 일반구(안양 만안구 41171)는 시(41170) 단위로 받은 자료도 있다(어린이집) — 시군구와 그 시(앞 4자리 + '0')를 함께 본다.
+   ★ 10분마다 다시 읽는다. 표가 비었거나 읽지 못하면 null — 그때는 받았다고도 안 받았다고도 말하지 않는다. */
+const 시도짧은이름 = { '11': '서울', '26': '부산', '27': '대구', '28': '인천', '29': '광주', '30': '대전', '31': '울산', '36': '세종',
+  '41': '경기', '42': '강원', '43': '충북', '44': '충남', '45': '전북', '46': '전남', '47': '경북', '48': '경남', '50': '제주', '51': '강원', '52': '전북' };
+let _범위 = null, _범위시각 = 0, _범위중 = null;
+async function 범위표() {
+  if (_범위 && Date.now() - _범위시각 < 10 * 60 * 1000) return _범위;
+  if (_범위중) return _범위중;
+  _범위중 = (async () => {
+    try {
+      const pool = await getPool();
+      /* 시도전체 = 그 시도의 지금 시군구 수. 일반구가 있는 시(41170)는 빼고 일반구(41171 · 41173)를 센다 — 단지는 일반구에 붙는다 */
+      const r = await pool.request().query(`
+        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT 자료, sgg_cd, 행수, 최근, 센때 = CONVERT(CHAR(16), 센때, 120) FROM meta.coverage WHERE sgg_cd <> '00000';
+        WITH 시군구 AS (SELECT a.sido_cd, a.sgg_cd FROM meta.lawd_code a
+                        WHERE a.is_abolished = 0 AND RIGHT(a.lawd_cd, 5) = '00000' AND a.sgg_cd NOT LIKE '__000'
+                          AND NOT EXISTS (SELECT 1 FROM meta.lawd_code g WHERE g.is_abolished = 0 AND RIGHT(g.lawd_cd, 5) = '00000'
+                                           AND RIGHT(a.sgg_cd, 1) = '0' AND g.sgg_cd <> a.sgg_cd AND LEFT(g.sgg_cd, 4) = LEFT(a.sgg_cd, 4)))
+        SELECT c.sgg_cd, l.sido_cd, l.sido_nm, l.sgg_nm, 시도전체 = (SELECT COUNT(*) FROM 시군구 t WHERE t.sido_cd = l.sido_cd)
+          FROM meta.coverage c JOIN meta.lawd_code l ON l.lawd_cd = c.sgg_cd + '00000'
+         WHERE c.자료 = N'단지';`);
+      const 자료 = new Map();
+      for (const x of r.recordsets[0]) {
+        if (!자료.has(x.sgg_cd)) 자료.set(x.sgg_cd, {});
+        자료.get(x.sgg_cd)[x.자료] = { n: Number(x.행수), 최근: x.최근 || null };
+      }
+      /* "서울 · 안양" — 시도를 다 받았으면 시도 이름, 일부면 시·군·구 이름(일반구는 시로 묶는다) */
+      const 시도별 = new Map();
+      for (const x of r.recordsets[1]) {
+        const k = x.sido_cd;
+        if (!시도별.has(k)) 시도별.set(k, { 이름: 시도짧은이름[k] || x.sido_nm, 전체: Number(x.시도전체) || 0, 곳: [] });
+        시도별.get(k).곳.push(x);
+      }
+      const 말조각 = [], 지역 = [];
+      for (const [, v] of [...시도별.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        const 다받음 = !!(v.전체 && v.곳.length >= v.전체);
+        const 시들 = [...new Set(v.곳.map(x => String(x.sgg_nm || '').split(' ')[0]
+          .replace(/^(.{2,}?시).+구$/, '$1')            /* 일반구 → 시 ('안양시만안구' → '안양시') */
+          .replace(/^(.{2,})[시군구]$/, '$1')))];
+        if (다받음) 말조각.push(v.이름); else 말조각.push(...시들);
+        지역.push({ 시도: v.이름, 다받음, 시군구: v.곳.map(x => ({ sgg: x.sgg_cd, 이름: x.sgg_nm })).sort((a, b) => a.sgg.localeCompare(b.sgg)) });
+      }
+      const 센때 = r.recordsets[0].reduce((m, x) => (x.센때 > m ? x.센때 : m), '');
+      _범위 = r.recordsets[0].length ? { 자료, 말: 말조각.join(' · '), 지역, 센때 } : null;
+      _범위시각 = Date.now();
+      return _범위;
+    } catch (e) { console.error('[범위표]', e.message); return _범위; }
+    finally { _범위중 = null; }
+  })();
+  return _범위중;
+}
+/* 한 시군구의 받은 자료 { 자료: {n, 최근} } — 그 시(일반구의 시) 것 위에 시군구 것을 얹는다 */
+function 받은자료(범, sgg) {
+  if (!범 || !sgg) return null;
+  const s = String(sgg).slice(0, 5), 시 = s.slice(0, 4) + '0';
+  return Object.assign({}, 범.자료.get(시) || {}, 범.자료.get(s) || {});
+}
+/* SQL 안에서 쓰는 같은 판정 — 5자리 시군구 식을 받아 1/0. 자료 이름은 코드에 적힌 상수만 넣는다(사용자 입력 아님) */
+const 받았나SQL = (자료, sgg식) => `CASE WHEN EXISTS (SELECT 1 FROM meta.coverage WHERE 자료 = N'${자료}' AND sgg_cd IN (${sgg식}, LEFT(${sgg식}, 4) + '0')) THEN 1 ELSE 0 END`;
+const 단지시군구SQL = `(SELECT LEFT(sigungu_cd, 5) FROM gold.complex WHERE complex_id = @id)`;
+
+/* /api/coverage — 받은 지역 말 · 시도별 시군구. ?sgg=11110 이면 그 시군구의 자료별 행 수 · 최근 */
+app.get('/api/coverage', async (req, res) => {
+  try {
+    const 범 = await 범위표();
+    if (!범) return res.json({ 말: null, 지역: [], 센때: null });
+    const sgg = /^\d{5}$/.test(String(req.query.sgg || '')) ? String(req.query.sgg) : null;
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 말: 범.말, 지역: 범.지역, 센때: 범.센때, ...(sgg ? { sgg, 자료: 받은자료(범, sgg) } : {}) });
+  } catch (e) { fail(res, e, 'coverage'); }
+});
+
 app.get('/api/health', async (req, res) => {
   /* ★ 2026-10-20 실측: COUNT(*) 19개를 한 번에 세면 **6,403ms** 다. 그런데 이건
      app.js 의 boot() 에서 **페이지 열 때마다** 불린다. 그래서 둘로 나눈다.
@@ -709,11 +785,11 @@ app.get('/api/health', async (req, res) => {
           (SELECT COUNT(*) FROM silver.bld_expos          WHERE is_current=1)      AS expos,
           (SELECT COUNT(*) FROM silver.bld_hsprc          WHERE is_current=1)      AS hsprc,
           (SELECT COUNT(*) FROM silver.bld_flr_outline    WHERE is_current=1)      AS flr,
-          /* 308 (2026-10-22 사장님 "법정동·행정동 갯수도 홈에서"): **서울·안양 · 지금 있는 것**만(마스터 = 연계정보 최신 분기).
+          /* 308 (2026-10-22 사장님 "법정동·행정동 갯수도 홈에서"): **받은 시군구(meta.coverage 단지) · 지금 있는 것**만(마스터 = 연계정보 최신 분기).
              법정동은 리까지 센다(서울·안양엔 리가 없다). 바뀐 행정동 = 2013.07 이후 없어진 옛 행정동 수. */
-          (SELECT COUNT(*) FROM gold.region_bdong WHERE 현행 = 1 AND (LEFT(법정동코드, 2) = '11' OR LEFT(법정동코드, 4) = '4117') AND RIGHT(법정동코드, 5) <> '00000') AS bdongs,
-          (SELECT COUNT(*) FROM gold.region_hdong WHERE 현행 = 1 AND (LEFT(행정동코드, 2) = '11' OR LEFT(행정동코드, 4) = '4117') AND RIGHT(행정동코드, 5) <> '00000') AS hdongs,
-          (SELECT COUNT(*) FROM gold.region_hdong WHERE 현행 = 0 AND (LEFT(행정동코드, 2) = '11' OR LEFT(행정동코드, 4) = '4117') AND RIGHT(행정동코드, 5) <> '00000') AS hdongs_old`;
+          (SELECT COUNT(*) FROM gold.region_bdong WHERE 현행 = 1 AND LEFT(법정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지') AND RIGHT(법정동코드, 5) <> '00000') AS bdongs,
+          (SELECT COUNT(*) FROM gold.region_hdong WHERE 현행 = 1 AND LEFT(행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지') AND RIGHT(행정동코드, 5) <> '00000') AS hdongs,
+          (SELECT COUNT(*) FROM gold.region_hdong WHERE 현행 = 0 AND LEFT(행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지') AND RIGHT(행정동코드, 5) <> '00000') AS hdongs_old`;
       const a = Date.now();
       const r1 = await pool.request().query(핵심);
       const 몸 = { ok: true, approx: true, ...r1.recordset[0] };
@@ -894,17 +970,19 @@ app.get('/api/_apply', async (req, res) => {
    VM 이 받아 SQL 파일을 만들면 /api/_apply 로 넣는다(약국과 같은 길).
    ★ 집안에서만 · **이름이 정해진 SELECT 만**(SQL 을 받지 않는다) · 쓰는 곳은 Teomoony/etl/_export/<이름>.txt 하나. */
 const 내보내기목록 = {
+  /* 2026-10-24: 적재 대상 시군구(meta.load_target) — DB 가 안 보이는 장치 VM 의 적재 스크립트가 etl/_targets.py 로 읽는다 */
+  target_sgg: `SELECT sgg_cd, 시 FROM meta.v_target_sgg ORDER BY sgg_cd;`,
   ned_targets: `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
     SELECT DISTINCT e.pnu FROM silver.bld_expos e
       JOIN silver.bld_expos_pubuse_area x ON x.mgm_bldrgst_pk = e.mgm_bldrgst_pk AND x.is_current = 1
        AND x.expos_pubuse_gb_cd = '1' AND x.main_purps_cd IN ('02002', '02003')
-     WHERE e.is_current = 1 AND e.pnu IS NOT NULL AND (LEFT(e.pnu, 2) = '11' OR LEFT(e.pnu, 5) IN ('41171', '41173'))
+     WHERE e.is_current = 1 AND e.pnu IS NOT NULL AND LEFT(e.pnu, 5) IN (SELECT sgg_cd FROM meta.v_target_sgg)
        AND NOT EXISTS (SELECT 1 FROM silver.ned_aphus_done d WHERE d.pnu = e.pnu)
      ORDER BY e.pnu;`,
-  /* 2026-10-23 도로명주소 전체: 서울·안양 법정동(폐지 아님 · 리 아님) — 이름 그대로 juso 에 묻는다 */
+  /* 2026-10-23 도로명주소 전체: 적재 대상 시군구(meta.v_target_sgg) 법정동(폐지 아님 · 리 아님) — 이름 그대로 juso 에 묻는다 */
   juso_dongs: `SELECT l.lawd_cd, l.full_nm FROM meta.lawd_code l
      WHERE l.is_abolished = 0 AND l.ri_nm IS NULL AND l.emd_nm IS NOT NULL
-       AND (l.lawd_cd LIKE '11%' OR LEFT(l.lawd_cd, 5) IN ('41171', '41173'))
+       AND l.sgg_cd IN (SELECT sgg_cd FROM meta.v_target_sgg)
        AND NOT EXISTS (SELECT 1 FROM silver.juso_addr_done d WHERE d.lawd_cd = l.lawd_cd AND d.다받음 = 1)
      ORDER BY l.lawd_cd;`,
   /* 326: 좌표 없는 단지의 대장 도로명주소 — VWorld 지오코더에 물을 말(아직 안 물은 것) */
@@ -915,7 +993,7 @@ const 내보내기목록 = {
   juso_bonbun: `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
     WITH 동 AS (SELECT l.lawd_cd FROM meta.lawd_code l
                 WHERE l.is_abolished = 0 AND l.ri_nm IS NULL AND l.emd_nm IS NOT NULL
-                  AND (l.lawd_cd LIKE '11%' OR LEFT(l.lawd_cd, 5) IN ('41171', '41173'))
+                  AND l.sgg_cd IN (SELECT sgg_cd FROM meta.v_target_sgg)
                   AND NOT EXISTS (SELECT 1 FROM silver.juso_addr_done d WHERE d.lawd_cd = l.lawd_cd AND d.다받음 = 1)),
     p AS (SELECT pnu FROM silver.cadastral_parcel WHERE is_current = 1 AND LEFT(pnu, 10) IN (SELECT lawd_cd FROM 동)
           UNION SELECT pnu FROM silver.bld_title WHERE LEFT(pnu, 10) IN (SELECT lawd_cd FROM 동))
@@ -1422,7 +1500,7 @@ app.get('/api/_rtms', async (req, res) => {
       SELECT sgg_cd, trade_kind, 건수 = COUNT(*),
              처음 = MIN(deal_ymd), 끝 = MAX(deal_ymd)
         FROM silver.rtms_trade
-       WHERE sgg_cd LIKE '11%'
+       WHERE sgg_cd IN (SELECT sgg_cd FROM meta.v_target_sgg)   /* 2026-10-24: 서울만 → 적재 대상 시군구 */
        GROUP BY sgg_cd, trade_kind`);
     const rows = r.recordset;
     const 구 = [...new Set(rows.map(x => x.sgg_cd))].sort();
@@ -1778,14 +1856,14 @@ app.get('/api/complexes', async (req, res) => {
           FROM gold.region_hdong o
           JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
           JOIN gold.region_hdong n ON n.행정동코드 = c.새코드
-         WHERE o.현행 = 0 AND o.행정동명 = @nm AND (LEFT(o.행정동코드, 2) = '11' OR LEFT(o.행정동코드, 4) = '4117')
+         WHERE o.현행 = 0 AND o.행정동명 = @nm AND LEFT(o.행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지')
            AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명)
          ORDER BY o.행정동코드, n.행정동명;
         SELECT DISTINCT c.옛코드, l.법정동코드, l.법정동명
           FROM gold.region_hdong o
           JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
           JOIN silver.region_link l ON l.행정동코드 = c.새코드 AND l.개정일자 = @최신분기
-         WHERE o.현행 = 0 AND o.행정동명 = @nm AND (LEFT(o.행정동코드, 2) = '11' OR LEFT(o.행정동코드, 4) = '4117')
+         WHERE o.현행 = 0 AND o.행정동명 = @nm AND LEFT(o.행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지')
            AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명);`);
       const 쌍 = br.recordsets[0], 법 = br.recordsets[1];
       if (쌍.length && 법.length) {
@@ -2048,7 +2126,7 @@ app.get('/api/suggest', async (req, res) => {
                   FROM gold.region_hdong o
                   JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
                   JOIN gold.region_hdong n ON n.행정동코드 = c.새코드
-                 WHERE o.현행 = 0 AND o.행정동명 LIKE @q AND (LEFT(o.행정동코드, 2) = '11' OR LEFT(o.행정동코드, 4) = '4117')
+                 WHERE o.현행 = 0 AND o.행정동명 LIKE @q AND LEFT(o.행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지')
                    AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명)
                  GROUP BY o.행정동코드, o.시도명, o.시군구명, o.행정동명, o.마지막본분기) g
           OUTER APPLY (SELECT minx = MIN(lb.bbox_minx), miny = MIN(lb.bbox_miny), maxx = MAX(lb.bbox_maxx), maxy = MAX(lb.bbox_maxy)
@@ -2505,9 +2583,12 @@ async function lookupRegion(pool, cands) {
        WHERE ri_nm IS NULL AND (${ors})
        ORDER BY CASE WHEN emd_nm IS NULL THEN 0 ELSE 1 END, lawd_cd`);
     let rows = lr.recordset;
-    /* 2026-10-23 QA: **우리 범위(서울 · 안양)** 안에 맞는 것이 있으면 그것만 — '강동구' 가 경남 김해시 '강동',
+    /* 2026-10-23 QA: **우리 범위(받은 시군구 — meta.coverage 단지)** 안에 맞는 것이 있으면 그것만 — '강동구' 가 경남 김해시 '강동',
        '강서구' 가 부산 강서구, '안양 평촌동' 이 대전·청주 평촌동까지 잡았다. 범위 안에 없을 때만 밖의 것(→ '아직 적재 안 함' 안내). */
-    const 범위안 = r => /^11/.test(r.lawd_cd) || /^4117[13]/.test(r.lawd_cd);
+    const 범표 = await 범위표();
+    const 받은곳 = new Set(범표 ? [...범표.자료].filter(([, v]) => v['단지']).map(([k]) => k) : []);
+    /* 범위표를 못 읽으면(표 없음) 거르지 않는다 — 넓게 잡고 '아직 안 받음' 안내에 맡긴다 */
+    const 범위안 = r => 받은곳.has(String(r.lawd_cd).slice(0, 5));
     if (rows.some(범위안)) rows = rows.filter(범위안);
     /* 동 이름이 **정확히** 맞으면 그 동. 아니면 시군구. (안양 -> 만안+동안) */
     /* ★ 2026-10-22 QA: '성수동' 은 법정동이 성수동1가 · 성수동2가 로 나뉘어 **정확히 맞는 이름이 없었다** → 지역이 통째로 빠지고
@@ -3055,8 +3136,8 @@ function 조건SQL(조건, rq) {
     const 안 = `EXISTS (SELECT 1 FROM gold.complex_redev_hit h JOIN silver.redev_zone r ON r.present_sn = h.present_sn AND r.is_current = 1
                          WHERE h.complex_id = c.complex_id AND h.xarea >= 0.01 * h.parea AND (${조건.정비.목록.map(x => x.s).join(' OR ')}))`;
     /* 2026-10-23 QA: 경계에 겨우 닿은(필지의 1% 미만) 단지는 '걸친' 으로 치지 않는다 — 정비구역 상세와 같은 기준(정책). '삼선푸르지오 · 필지 0% 걸침' 이 재개발 결과에 나왔다 */
-    /* 정비 자료는 서울만 있다 — 서울 밖 단지는 '안 걸침' 이 아니라 '모름' 이다 */
-    조각.push(`AND LEFT(c.sigungu_cd, 2) = '11' AND ${조건.정비.아님 ? 'NOT ' : ''}${안}`);
+    /* 정비 자료를 받은 시군구만 — 안 받은 곳의 단지는 '안 걸침' 이 아니라 '모름' 이다(2026-10-24: 서울 고정 → meta.coverage) */
+    조각.push(`AND c.sigungu_cd IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'정비구역') AND ${조건.정비.아님 ? 'NOT ' : ''}${안}`);
   }
   if (조건.용도) {
     if (조건.용도.uname) rq.input('zu', sql.NVarChar(100), 조건.용도.uname);
@@ -3135,7 +3216,7 @@ function 모름SQL(조건, 지역조건) {
             FROM (SELECT ${칸.join(',\n                         ')} FROM gold.complex c WHERE c.is_active = 1 AND ${지역조건}) x;`;
 }
 const 모름이름 = { 면적: '전용면적(아파트·연립·오피스텔 매매는 있는데 대장·거래 면적이 없음)', 연식: '사용승인일', 세대: '세대수',
-  좌표: '단지 좌표(거리를 못 잼)', 정비: '정비구역(서울 밖 — 자료가 서울만 있음)', 용도: '용도지역' };
+  좌표: '단지 좌표(거리를 못 잼)', 정비: '정비구역(정비 자료를 받지 않은 시군구)', 용도: '용도지역' };
 
 
 app.get('/api/ask', requireAuth, async (req, res) => {
@@ -4840,7 +4921,7 @@ app.get('/api/complexes/:id/childcare', async (req, res) => {
       SELECT 유형, n = COUNT(*) FROM #cc303 GROUP BY 유형 ORDER BY COUNT(*) DESC;
       SELECT 받은곳 = (SELECT COUNT(*) FROM silver.childcare WHERE is_current = 1),
              이시군구 = (SELECT COUNT(*) FROM silver.childcare k JOIN gold.complex c ON c.complex_id = @id
-                          WHERE k.is_current = 1 AND k.arcode = CASE WHEN LEFT(c.sigungu_cd, 4) = '4117' THEN '41170' ELSE c.sigungu_cd END),
+                          WHERE k.is_current = 1 AND k.arcode IN (c.sigungu_cd, LEFT(c.sigungu_cd, 4) + '0')),   /* 일반구는 시 코드로 받는다(안양 41170) */
              좌표 = CASE WHEN @g IS NULL THEN 0 ELSE 1 END;`);
     res.json({ 곳: r.recordsets[0], 유형: r.recordsets[1], 범위: r.recordsets[2][0] || {} });
   } catch (e) { fail(res, e, 'complex-childcare'); }
@@ -4873,7 +4954,8 @@ app.get('/api/complexes/:id/pharmacy', async (req, res) => {
              폐업5년 = SUM(CASE WHEN 영업 = 0 AND 폐업일 >= CONVERT(CHAR(10), DATEADD(YEAR, -5, GETDATE()), 23) THEN 1 ELSE 0 END),
              개업5년 = SUM(CASE WHEN 영업 = 1 AND 인허가일 >= CONVERT(CHAR(10), DATEADD(YEAR, -5, GETDATE()), 23) THEN 1 ELSE 0 END)
         FROM #ph307;
-      SELECT 적재 = COUNT(*),
+      DECLARE @받음 INT = ${받았나SQL('약국인허가', 단지시군구SQL)};   /* ★ 2026-10-24: 표 전체 건수가 아니라 **이 단지 시군구**를 받았나 */
+      SELECT 적재 = @받음, 전체 = COUNT(*),
              영업좌표없음 = SUM(CASE WHEN 영업상태 LIKE N'영업%' AND geog IS NULL THEN 1 ELSE 0 END),
              영업전체 = SUM(CASE WHEN 영업상태 LIKE N'영업%' THEN 1 ELSE 0 END),
              폐업좌표 = SUM(CASE WHEN 영업상태 NOT LIKE N'영업%' AND geog IS NOT NULL THEN 1 ELSE 0 END),
@@ -5181,7 +5263,7 @@ app.get('/api/areas/dongs', async (req, res) => {
     const 경계없음 = r.recordset.filter(x => !x.경계있음).length;
     res.json({ kind, sgg, 동: r.recordset, 경계없음,
                말: !r.recordset.length
-                   ? (kind === 'adm' ? '이 지역의 행정동 경계는 아직 받지 않았습니다(서울·안양만 있습니다)' : '이 지역의 법정동이 없습니다')
+                   ? (kind === 'adm' ? `이 지역의 행정동 경계는 아직 받지 않았습니다${((await 범위표()) || {}).말 ? `(${_범위.말}만 있습니다)` : ''}` : '이 지역의 법정동이 없습니다')
                  : 경계없음 === r.recordset.length ? '이 지역은 아직 자료를 받지 않았습니다 — 이름만 보입니다'
                  : 경계없음 ? `${경계없음}곳은 법정동 경계를 아직 받지 않아 테두리 없이 그 동네로만 옮깁니다` : null });
   } catch (e) { fail(res, e, 'areas-dongs'); }
@@ -6144,7 +6226,7 @@ app.get('/api/complexes/:id', async (req, res) => {
              가까운곳 = MAX(CASE WHEN rn = 1 THEN stop_nm END),
              /* ★ '없다' 와 '아직 안 받았다' 를 가른다. 이게 비면 화면이
                 "500m 안에 정류장이 없습니다" 라고 **거짓말**을 한다. */
-             적재 = (SELECT COUNT(*) FROM silver.bus_stop WHERE is_current = 1)
+             적재 = ${받았나SQL('버스정류장', 단지시군구SQL)}   /* ★ 2026-10-24: 전국 건수가 아니라 이 시군구 */
         FROM v`);
 
     /* 이 단지 앞에 서는 버스 번호 (2026-10-19)
@@ -6370,7 +6452,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        나머지 19개 구는 원본이 빠진 게 아니라 **우리가 안 받은 것**이다.
        둘은 전혀 다른 말이고, 섞으면 사용자가 원본을 의심하게 된다.
        ★ 전국 건수로 판정하면 안 된다 - 135건이 있다고 해서 이 구를 받은 건 아니다.
-         kinderLoaded 는 전국 건수로 보지만 유치원은 전국을 한 번에 받는 축이라 그게 맞고,
+         (kinderLoaded 도 2026-10-24 부터 시군구로 묻는다 — 유치원도 전국이 아니었다.)
          학구도는 구 단위로 잘라 넣었으므로 **구로 물어야 한다.** */
     const _q_szScope = () => pool.request().input('id', sql.Int, id).query(`
       /* ★★ 2026-10-21 QA: 학구도 적재(b-hakgudo-bg)가 school_zone 에 쓰는 동안 이 EXISTS 가
@@ -6413,8 +6495,9 @@ app.get('/api/complexes/:id', async (req, res) => {
        WHERE cb.complex_id = @id
        GROUP BY f.종류`);
 
-    const _q_kinderN = () => pool.request().query(
-      `SELECT n = COUNT(*) FROM silver.kindergarten WHERE geog IS NOT NULL`);
+    /* ★ 2026-10-24: 유치원은 '전국을 한 번에' 가 아니었다 — 서울·안양 824곳뿐이다. 전국 건수로 보면 다른 지역에서 '없다' 가 된다. 이 시군구로 묻는다 */
+    const _q_kinderN = () => pool.request().input('id', sql.Int, id).query(
+      `SELECT n = ${받았나SQL('유치원', 단지시군구SQL)}`);
 
     /* ---------- 이 법정동 주택가격을 **다 받았나** (2026-10-21) ----------
        ⚠ 화면이 잠실(524566)에 "이 단지 호에 공시가격이 없습니다" 라고 **단정했다.**
@@ -6848,11 +6931,14 @@ app.get('/api/complexes/:id', async (req, res) => {
        전부 0건이 되는데, 그걸 그냥 보여주면 "500m 안에 없습니다" 라는
        거짓말이 된다. 없는 것과 못 본 것은 다르다 - 화면이 가를 수 있게 알린다. */
     const h0 = head.recordset[0] || {};
+    const 범 = await 범위표();
+    const 이시군구자료 = 받은자료(범, String(h0.sigungu_cd || h0.rep_pnu || '').slice(0, 5));
     const 좌표없음 = h0.centroid_lat == null || h0.centroid_lng == null;
 
     /* ★ 진단용. 공개 주소에서는 켜지지 않는다 — localhost 에서만. */
     const _보여줘 = (req.query._t || _하나만) && 집안에서(req);
     res.json({ 좌표없음,
+               받은자료: 이시군구자료 ? Object.fromEntries(Object.entries(이시군구자료).map(([k, v]) => [k, v.n])) : null,
                ...(_보여줘 ? { _timing: Object.fromEntries(
                      Object.entries(잼).sort((a, b) => b[1] - a[1])) } : {}),
                complex: head.recordset[0], dongs: dongs.recordset,
@@ -7092,7 +7178,7 @@ app.get('/api/complexes/:id/hira', async (req, res) => {
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       DECLARE @g GEOGRAPHY = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
                                WHERE complex_id = @id AND centroid_lat IS NOT NULL);
-      SELECT 적재 = (SELECT COUNT(*) FROM silver.hira_inst WHERE is_current = 1), 좌표 = CASE WHEN @g IS NULL THEN 0 ELSE 1 END,
+      SELECT 적재 = ${받았나SQL('병원', 단지시군구SQL)}, 좌표 = CASE WHEN @g IS NULL THEN 0 ELSE 1 END,
              받은시각 = (SELECT MAX(마지막본시각) FROM silver.hira_inst);
       SELECT TOP 3 이름 = h.yadm_nm, 종별 = h.cl_cd_nm, 의사 = h.dr_tot, 전문의 = h.mdept_sdr, m = CAST(h.geog.STDistance(@g) AS INT), h.ykiho
         FROM silver.hira_inst h
