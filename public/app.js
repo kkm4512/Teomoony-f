@@ -2169,6 +2169,7 @@ function 주변점묶기() {
   if (!d || d.dataset.ptBound) return;
   d.dataset.ptBound = '1';
   d.addEventListener('click', e => {
+    if (e.target.closest('[data-school]')) return;          // 2026-10-24 '자세히' 는 모달 — 점 고정과 따로
     const el = e.target.closest('[data-pt]');
     if (!el || !selected) return;
     고정토글(el);
@@ -4366,20 +4367,24 @@ function renderDetail(payload) {
   const subN = sub.length ? (Number(sub[0].전체) || sub.length) : 0;
   /* 2026-10-24 학교는 '교육' 탭으로 — 주변 숫자는 지하철 + 버스(500m) 만 */
   const nearN = subN + (bus && Number(bus.r500) || 0);
+  /* ★ 2026-10-24 10:36 사장님 "연관성 있는 것끼리 순서" — 세 묶음(묶음 사이에 가는 줄):
+       ① 이 단지 — 단지정보 · 동·호 · 관리 · 토지  (건물 · 호 · 사는 정보 · 그 땅)
+       ② 가격    — 실거래 · 분양·청약              (거래된 값 · 처음 판 값)
+       ③ 주변    — 교통 · 교육 · 상권 · 병원·약국   (어디에 있나 · 집 고를 때 묻는 순서)
+     각 줄의 4번째 칸 = 묶음 이름(탭 줄 구분선용) */
   const TABS = [
-    ['info',  `단지정보`],
-    ['near',  `교통 <b>${fmt(nearN)}</b>`],     /* 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 지하철 · 버스 */
-    ['shop',  `상권${(poi || []).length ? ` <b>${fmt((poi || []).reduce((t, r) => t + (Number(r.r500) || 0), 0))}</b>` : ''}`],   /* 숫자 = 상권 칸 머리글과 같은 500m 합 */
-    ['med',   `병원·약국`],
-    /* 2026-10-24 사장님 "어린이집·유치원·초등·중등·고등은 주변에서 분리" — 나이 순(어린이집 → 고등). 학원은 주변에 그대로(사장님) */
-    ['edu',   `교육`],
-    ['dong',  `동·호 <b>${fmt(dongN)}</b>`],
-    ['mgmt',  `관리`],
-    ['price', `실거래 <b>${fmt(saleN + rentN)}</b>`],
-    /* 2026-10-22 사장님 "청약을 왜 실거래 탭에 놨어? 섹션을 분리해도 될 수준" — 분양·청약을 따로 탭으로.
-       ★ 이어진 공고가 있을 때만 탭을 보인다(2020년 전 단지까지 빈 탭이면 소음). 모르면 숨겨 두고 받은 뒤 연다(분양탭확인). */
-    ['sale',  `분양·청약${분양수(c.complex_id) ? ` <b>${fmt(분양수(c.complex_id))}</b>` : ''}`],
-    ['land',  `토지 <b>${fmt(parcels.length)}</b>`],   /* 2026-10-24 사장님 "땅 보다는 토지로" */
+    ['info',  `단지정보`, '단지'],
+    ['dong',  `동·호 <b>${fmt(dongN)}</b>`, '단지'],
+    ['mgmt',  `관리`, '단지'],
+    ['land',  `토지 <b>${fmt(parcels.length)}</b>`, '단지'],   /* 2026-10-24 사장님 "땅 보다는 토지로" */
+    ['price', `실거래 <b>${fmt(saleN + rentN)}</b>`, '가격'],
+    /* 2026-10-22 사장님 "청약을 왜 실거래 탭에 놨어?" — 분양·청약을 따로 탭으로. 이어진 공고가 있을 때만 보인다(분양탭확인). */
+    ['sale',  `분양·청약${분양수(c.complex_id) ? ` <b>${fmt(분양수(c.complex_id))}</b>` : ''}`, '가격'],
+    ['near',  `교통 <b>${fmt(nearN)}</b>`, '주변'],     /* 2026-10-24 10:29 "교통 · 상권 · 의료로 나누고 싶어" — 지하철 · 버스 */
+    /* 2026-10-24 "어린이집·유치원·초등·중등·고등은 분리" — 나이 순 · 학원(교육청 등록)까지 */
+    ['edu',   `교육`, '주변'],
+    ['shop',  `상권${(poi || []).length ? ` <b>${fmt((poi || []).reduce((t, r) => t + (Number(r.r500) || 0), 0))}</b>` : ''}`, '주변'],   /* 숫자 = 상권 칸 머리글과 같은 500m 합 */
+    ['med',   `병원·약국`, '주변'],
   ];
   const TAB_KEYS = TABS.map(t => t[0]);
   if (!TAB_KEYS.includes(detailTab)) detailTab = 'info';
@@ -4757,8 +4762,8 @@ function renderDetail(payload) {
     <p class="sub">${esc(c.rep_plat_plc || '')}${c.rep_road_addr ? '<br>' + esc(c.rep_road_addr) : ''}</p>
     <p class="facts">${facts}${ratios ? `<br><span class="muted">${ratios}</span>` : ''}</p>
     <p class="sub muted usecomp" data-usecomp="${esc(String(c.complex_id))}" hidden></p>
-    <div class="tabs">${TABS.map(([k, label]) =>
-      `<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !분양수(c.complex_id) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
+    <div class="tabs">${TABS.map(([k, label, 묶], i) =>
+      `${i && 묶 !== TABS[i - 1][2] ? '<span class="tabsep" aria-hidden="true"></span>' : ''}<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !분양수(c.complex_id) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
     <div class="pane">${({ info: paneI, near: paneN, shop: paneC, med: paneH, edu: paneE, dong: paneD, mgmt: paneM,
                            price: paneP, sale: paneS, land: paneL })[detailTab] || paneI}</div>`;
 
@@ -5725,6 +5730,7 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
     <div class="scell"${x.school_id && !x.위치없음 ? ` data-pt="schoolid|${esc(x.school_id)}"` : ''}>
       <span class="sg">${esc(x.설립 || '')}${x.분교 === '분교' ? ' 분교' : ''}</span>
       <b>${esc(x.이름 || '—')}${x.구역 ? ` <span class="ztag">${표말}</span>` : ''}</b>
+      ${x.school_id && !x.위치없음 ? `<button type="button" class="sdet" data-school="${esc(x.school_id)}" title="학교 상세">자세히 ›</button>` : ''}
       <span class="sd">${x.거리m != null ? fmt(x.거리m) + 'm' : '거리 모름'}${x.남녀 && x.남녀 !== '남녀공학' ? ' · ' + esc(x.남녀 === '남' ? '남학교' : x.남녀 === '여' ? '여학교' : x.남녀) : ''}</span>
       ${x.위치없음 ? `<span class="sst">${gapCell('', 'UNSURE', '연계표에는 있는데 학교 위치 자료에 없습니다(폐교·이전 등) — 원문 이름만')}</span>` : 학교공시줄(x)}
     </div>`;
@@ -6039,6 +6045,7 @@ function 시트달기() {
 
   /* 주변 항목을 누르면 반쯤 내려 지도에 찍힌 점을 보인다(폰에는 '마우스 올리기' 가 없다) */
   document.addEventListener('click', e => {
+    if (e.target.closest('[data-school]')) return;
     const el = e.target.closest('#detail [data-pt]');
     if (!폰() || !el) return;
     if (app.dataset.sheet === 'full') 시트('half');
@@ -6880,6 +6887,85 @@ function 구역지우기() {
   구역층 = null; 구역지금 = null;
   document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on, #detail [data-clsite].on, #detail [data-hzone].on').forEach(el => el.classList.remove('on'));
 }
+/* ★ 2026-10-24 10:36 사장님 "학교나 그 외 상세는 모달로" — 학교 상세 모달(호 상세와 같은 그릇 #homodal).
+   위치표준 · 학교알리미 · 학구도 세 출처를 칸마다 밝힌다. 값은 원문 그대로(나눗셈 없음 — 학급당 · 1인당도 공시값). */
+async function 학교상세(sid) {
+  const el = $('#homodal');
+  el.innerHTML = `<div class="hm-box sbox"><div class="hm-h">불러오는 중…</div></div>`;
+  el.classList.add('on');
+  let d;
+  try {
+    const r = await fetch(`/api/school/${encodeURIComponent(sid)}${selected ? `?cid=${encodeURIComponent(selected)}` : ''}`);
+    d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || '불러오지 못했습니다');
+  } catch (e) {
+    el.innerHTML = `<div class="hm-box sbox"><div class="hm-h">학교 상세<button type="button" class="hm-x" data-ho-close>닫기</button></div>
+      <p class="note">${esc(e.message || '불러오지 못했습니다')}</p></div>`;
+    return;
+  }
+  const b = d.학교 || {}, 연 = d.연도 || [], 동 = d.전출입 || [], 구 = d.구역 || [];
+  const 최근 = 연[0];
+  const 줄 = (k, v) => v == null || v === '' ? '' : `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+  const 남녀 = v => v === '남' ? '남학교' : v === '여' ? '여학교' : v;
+  const 링크 = u => { const t = String(u || '').trim(); return /^https?:\/\//.test(t) ? `<a href="${esc(t)}" target="_blank" rel="noopener">${esc(t.replace(/^https?:\/\//, ''))}</a>` : (t ? esc(t) : ''); };
+  const 구역말 = { E: '초등 통학구역', M: '중학교 학교군', H: '고등학교 학군' };
+  const 없음 = !b.schul_code
+    ? `<p class="note sm">${gapCell('', 'UNSURE', '학교알리미 공시와 코드로 잇지 못했습니다 — 학생 · 교사 수가 없습니다(이름으로는 잇지 않습니다)')}</p>` : '';
+  el.innerHTML = `<div class="hm-box sbox">
+    <div class="hm-h">${esc(b.school_nm || '학교')} <span>${esc([b.school_se, b.fond_type, b.고교종류].filter(Boolean).join(' · '))}</span>
+      <button type="button" class="hm-x" data-ho-close>닫기</button></div>
+    <p class="hm-addr">${esc(b.rdnmadr || b.road_addr || '')}${b.lnmadr ? ` · ${esc(b.lnmadr)}` : ''}${b.거리m != null ? ` · 이 단지에서 ${fmt(b.거리m)}m(직선)` : ''}</p>
+
+    ${최근 && 연.length === 1 ? `<div class="hm-s"><b>학생 ${fmt(최근.학생)}명</b><span class="muted">학급 ${fmt(최근.학급)} · 학급당 ${esc(String(최근.학급당 ?? '—'))}명 · 교사 ${fmt(최근.교사)} · 수업교원 1인당 ${esc(String(최근.교사당 ?? '—'))}명 · ${esc(String(최근.공시연도))}년 공시</span></div>` : 최근 ? '' : 없음}
+    ${/* 연도별 표가 있으면 머리 요약을 안 둔다 — 첫 줄(최근 공시)과 같은 숫자를 두 번 보이지 않게 */''}
+    ${연.length > 1 ? `<div class="lt2">학생 · 학급 · 교사 <span class="muted">(학교알리미 공시 · 최근 3년만)</span></div>
+      <table class="hm-t"><thead><tr><th>공시연도</th><th class="n">학생</th><th class="n">학급</th><th class="n">학급당</th><th class="n">교사</th><th class="n">교원 1인당</th></tr></thead><tbody>
+      ${연.map(x => `<tr><td>${esc(String(x.공시연도))}</td><td class="n">${fmt(x.학생)}</td><td class="n">${fmt(x.학급)}</td><td class="n">${esc(String(x.학급당 ?? '—'))}</td><td class="n">${fmt(x.교사)}</td><td class="n">${esc(String(x.교사당 ?? '—'))}</td></tr>`).join('')}
+      </tbody></table>` : ''}
+
+    ${(d.학년 || []).length ? `<div class="lt2">학년별 <span class="muted">(${esc(String(d.학년공시 || ''))}년 공시)</span></div>
+      <table class="hm-t"><thead><tr><th>학년</th><th class="n">학생</th><th class="n">학급</th><th class="n">학급당</th></tr></thead><tbody>
+      ${d.학년.map(x => `<tr><td>${esc(x.이름)}</td><td class="n">${fmt(x.학생)}</td><td class="n">${fmt(x.학급)}</td><td class="n">${esc(String(x.학급당 ?? '—'))}</td></tr>`).join('')}
+      </tbody></table>` : ''}
+
+    ${동.length ? `<div class="lt2">전입 · 전출 <span class="muted">(그 공시연도 학년도 중 이 학교로 오고 간 학생)</span></div>
+      <table class="hm-t"><thead><tr><th>공시연도</th><th class="n">전입</th><th class="n">전출</th></tr></thead><tbody>
+      ${동.map(x => `<tr><td>${esc(String(x.공시연도))}</td><td class="n">${fmt(x.전입)}</td><td class="n">${fmt(x.전출)}</td></tr>`).join('')}
+      </tbody></table>` : ''}
+
+    ${구.length ? `<div class="lt2">이 학교를 받는 구역 <span class="muted">(학구도 · 학교학구도연계정보)</span></div>
+      ${구.map(z => `<div class="zrow2 hzone" role="button" tabindex="0" data-hzone="${esc(z.종류)}|${esc(z.hakgudo_id)}" data-hzclose="1">
+        <span class="zt">${esc(구역말[z.종류] || '')}</span><b>${esc(z.이름 || '')}</b>${Number(z.공동) ? ' <span class="zb">공동</span>' : ''}
+        <span class="muted sm">· 학교 ${fmt(z.학교수)}곳 · 구역 안 세대 있는 단지 ${fmt(z.단지)}곳${z.세대 ? ` · ${fmt(z.세대)}세대` : ''}</span><span class="hzgo">지도에 보기</span></div>`).join('')}
+      <p class="note sm">구역 안 단지 = 대장 세대가 있는 단지 중 중심점이 구역 경계 안(교육 탭과 같은 판정 · 단독주택처럼 세대가 안 적힌 건물은 안 셈) · 기준일 ${esc(날짜((구[0] || {}).기준일, ''))}</p>`
+      : `<p class="note sm">${gapCell('', 'NA', b.school_se === '고등학교' ? '학군 배정 대상이 아닌 학교입니다(특목 · 자율 · 특성화 등 — 연계표에 구역이 없음)' : '연계표에 이 학교를 받는 구역이 없습니다')}</p>`}
+
+    <div class="lt2">기본</div>
+    <dl class="ahkv">${[
+      줄('설립', esc([b.fond_type || b.fond_sc, b.설립유형].filter(Boolean).join(' · '))),
+      줄('남녀', esc(남녀(b.coedu) || '')),
+      줄('주야', esc(b.주야 || '')),
+      줄('설립일', b.fond_ymd ? esc(날짜(b.fond_ymd)) : ''),
+      줄('개교일', b.개교 ? esc(날짜(b.개교)) : ''),
+      줄('교육지원청', esc(b.edc_sport_nm || '')),
+      줄('홈페이지', 링크(b.hmpg)),
+    ].join('')}</dl>
+    <p class="srcline">위치 · 이름: ${esc(d.출처.위치)} · 학생 · 교사: ${esc(d.출처.공시)}${b.schul_code ? `(학교 코드 규칙으로 이음 — ${esc(b.이음근거 || '')})` : ''} · 구역: ${esc(d.출처.구역)}</p>
+  </div>`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-school]');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  학교상세(b.dataset.school);
+});
+/* 모달 안 구역 줄 → 모달 닫고 지도에 경계 */
+document.addEventListener('click', e => {
+  const z = e.target.closest('#homodal [data-hzone]');
+  if (!z) return;
+  $('#homodal').classList.remove('on');
+  if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half');
+}, true);
 /* ★ 2026-10-24 사장님 "학구도를 클릭하면 지도에 표시" — 교육 탭 통학구역 · 학교군 줄 → 그 경계 + 그 구역 학교 점.
    정비구역 · 토지이용과 같은 층(한 번에 하나 · 다시 누르면 지움). 초록 — 정비(주황) · 토지이용(보라)과 갈리게. */
 async function 학구보이기(el) {
@@ -6909,7 +6995,7 @@ async function 학구보이기(el) {
   } catch (e) { toast('경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 2500); }
 }
 document.addEventListener('click', e => {
-  const el = e.target.closest && e.target.closest('#detail [data-hzone]');
+  const el = e.target.closest && e.target.closest('#detail [data-hzone], #homodal [data-hzone]');
   if (el) 학구보이기(el);
 });
 document.addEventListener('keydown', e => {

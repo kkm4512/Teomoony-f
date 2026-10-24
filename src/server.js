@@ -4183,6 +4183,78 @@ function wktPolys(w) {
   }
   return out;
 }
+/* ★ 2026-10-24 10:36 사장님 "학교 상세는 모달로" — 학교 하나(교육부 학교ID 'B…')의 상세.
+   ① 위치표준(이름 · 주소 · 설립) ② 학교알리미(gold.school_link 로 이은 것만): 기본 · 연도별 학생/학급/교사(09) · 학년별(최근 공시 원문) · 전입·전출(10)
+   ③ 이 학교가 받는 구역(학교학구도연계정보) — 초 통학구역 · 중 학교군 · 고 학군, 구역 안 단지 수 · 세대 합(단지 중심점이 구역 안).
+   모두 원문 값 그대로 · 계산은 '구역 안 단지 세기' 하나(중심점 판정 — 교육 탭과 같은 규칙). */
+app.get('/api/school/:sid', async (req, res) => {
+  const sid = String(req.params.sid || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20);
+  const cid = Number(req.query.cid) || null;
+  if (!sid) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('s', sql.VarChar(20), sid).input('cid', sql.Int, cid).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      DECLARE @code VARCHAR(12) = (SELECT schul_code FROM gold.school_link WHERE school_id = @s);
+      DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
+                               WHERE complex_id = @cid AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL);
+      SELECT TOP 1 s.school_id, s.school_nm, s.school_se, s.fond_type, s.fond_date, s.bnhh_se, s.oper_sttus, s.lnmadr, s.rdnmadr,
+             s.lat, s.lon, s.cddc_nm, s.edc_sport_nm, s.reference_date,
+             거리m = CASE WHEN @g IS NOT NULL AND s.geog IS NOT NULL THEN CAST(s.geog.STDistance(@g) AS INT) END,
+             i.schul_code, 알리미이름 = i.schul_nm, i.fond_sc, i.fond_ymd, 개교 = JSON_VALUE(i.raw_json, '$.FOAS_MEMRD'), i.coedu, i.hmpg,
+             i.road_addr, 주야 = JSON_VALUE(i.raw_json, '$.DGHT_SC_CODE'), 고교종류 = JSON_VALUE(i.raw_json, '$.HS_KND_SC_NM'),
+             설립유형 = JSON_VALUE(i.raw_json, '$.SCHUL_FOND_TYP_CODE'), 이음근거 = l.근거
+        FROM silver.school s
+        LEFT JOIN gold.school_link l ON l.school_id = s.school_id
+        LEFT JOIN silver.schoolinfo i ON i.schul_code = l.schul_code
+       WHERE s.school_id = @s AND s.is_current = 1;
+      SELECT 공시연도 = t.pban_yr, 학급 = t.class_cnt, 학생 = t.stdnt_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt, 교사당 = t.per_teacher,
+             제외 = t.excp_yn, 제외사유 = t.excp_rsn, 원문 = t.raw_json
+        FROM silver.schoolinfo_stat t WHERE t.schul_code = @code ORDER BY t.pban_yr DESC;
+      SELECT 공시연도 = m.pban_yr, 전입 = m.mvin_cnt, 전출 = m.mvt_cnt, 학생 = m.stdnt_cnt, 제외 = m.excp_yn
+        FROM silver.schoolinfo_move m WHERE m.schul_code = @code ORDER BY m.pban_yr DESC;
+      IF OBJECT_ID('tempdb..#zz') IS NOT NULL DROP TABLE #zz;
+      SELECT 종류 = CASE WHEN z.hakgudo_id IS NOT NULL THEN 'E' ELSE g.kind END, k.hakgudo_id,
+             이름 = COALESCE(z.hakgudo_nm, g.hakgudo_nm), 공동 = CASE WHEN COALESCE(z.hakgudo_gb, g.hakgudo_gb) = '1' THEN 1 ELSE 0 END,
+             geom = COALESCE(z.geom, g.geom), 기준일 = k.base_dt
+        INTO #zz
+        FROM silver.school_zone_link k
+        LEFT JOIN silver.school_zone z ON z.hakgudo_id = k.hakgudo_id
+        LEFT JOIN silver.school_group g ON g.hakgudo_id = k.hakgudo_id
+       WHERE k.school_id = @s AND (z.hakgudo_id IS NOT NULL OR g.hakgudo_id IS NOT NULL);
+      SELECT z.종류, z.hakgudo_id, z.이름, z.공동, z.기준일,
+             학교수 = (SELECT COUNT(*) FROM silver.school_zone_link k2 WHERE k2.hakgudo_id = z.hakgudo_id),
+             단지 = cc.n, 세대 = cc.hh
+        FROM #zz z
+        OUTER APPLY (SELECT n = COUNT(*), hh = SUM(CAST(c.hhld_cnt_sum AS BIGINT)) FROM gold.complex c
+                      WHERE c.is_active = 1 AND c.merged_into IS NULL AND c.centroid_lat IS NOT NULL AND c.hhld_cnt_sum > 0
+                        AND c.centroid_lng BETWEEN z.geom.STEnvelope().STPointN(1).STX AND z.geom.STEnvelope().STPointN(3).STX
+                        AND c.centroid_lat BETWEEN z.geom.STEnvelope().STPointN(1).STY AND z.geom.STEnvelope().STPointN(3).STY
+                        AND z.geom.STContains(geometry::Point(c.centroid_lng, c.centroid_lat, 4326)) = 1) cc
+       ORDER BY CASE z.종류 WHEN 'E' THEN 1 WHEN 'M' THEN 2 ELSE 3 END;`);
+    const b = r.recordsets[0][0];
+    if (!b) return res.status(404).json({ error: '이 학교를 찾지 못했습니다' });
+    const 연도 = (r.recordsets[1] || []).map(({ 원문, ...x }) => x);
+    let 학년 = null;
+    const 최근 = (r.recordsets[1] || [])[0];
+    if (최근 && 최근.원문) {
+      try {
+        const j = JSON.parse(최근.원문);
+        학년 = [];
+        for (let k = 1; k <= 8; k++) {
+          const 학생 = j['COL_S' + k], 학급 = j['COL_C' + k];
+          if (학생 == null && 학급 == null) continue;
+          const 이름 = k === 7 ? '특수학급' : k === 8 ? '순회학급' : `${k}학년`;
+          if ((Number(학생) || 0) === 0 && (Number(학급) || 0) === 0 && k >= 7) continue;
+          학년.push({ 이름, 학생: 학생 == null ? null : Number(학생), 학급: 학급 == null ? null : Number(학급), 학급당: j['COL_' + k] == null ? null : Number(j['COL_' + k]) });
+        }
+      } catch (e) { 학년 = null; }
+    }
+    res.json({ 학교: b, 연도, 학년, 학년공시: 최근 ? 최근.공시연도 : null, 전출입: r.recordsets[2] || [], 구역: r.recordsets[3] || [],
+               출처: { 위치: '전국초중등학교위치표준데이터(교육부)', 공시: '학교알리미(한국교육학술정보원)', 구역: '학구도 · 학교학구도연계정보(한국교육시설안전원)' } });
+  } catch (e) { fail(res, e, 'school'); }
+});
+
 app.get('/api/schoolzone/:kind/:id', async (req, res) => {
   const kind = String(req.params.kind || '').toUpperCase();
   const id = String(req.params.id || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20);
