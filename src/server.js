@@ -4709,6 +4709,98 @@ app.get('/api/complexes/:id/usage', async (req, res) => {
 
 /* ===================== 어린이집 (2026-10-22, 303) =====================
    보육정보공개 cpmsapi030. 유치원과 같은 500m · 가까운 순. 인원은 원문 기준일 값이다(유형별 셈은 줄 수를 센 것). */
+/* ★ 2026-10-24 10:44 사장님 "어린이집 · 유치원 · 상권도 자세히 볼 데이터가 있으면 받아오고 모달로" — 상세 세 가지.
+   ① 유치원 /api/kinder/:code — silver.kindergarten + silver.kinder_info(유치원알리미 항목 원문 · 338)
+   ② 어린이집 /api/childcare/:stcode — silver.childcare 원문(raw_json: 연령별 반 · 아동 · 교직원 · 근속 · 입소대기)
+   ③ 상권 /api/complexes/:id/poi-list?life=… — 생활 편의 항목의 점포 목록(상권 칸과 같은 뷰 v_complex_poi · 1km 안)
+   원문 값 그대로(계산 없음) · 대표자 · 원장 이름은 내보내지 않는다. */
+const _한점 = id => `DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
+                     WHERE complex_id = ${Number(id) || 0} AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL);`;
+app.get('/api/kinder/:code', async (req, res) => {
+  const code = String(req.params.code || '').replace(/[^0-9A-Za-z-]/g, '').slice(0, 64);
+  const cid = Number(req.query.cid) || 0;
+  if (!code) return res.status(400).json({ error: 'bad code' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('c', sql.VarChar(64), code).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      ${_한점(cid)}
+      SELECT TOP 1 k.kinder_cd, k.kinder_nm, k.establish, k.office_edu, k.suboffice_edu, k.addr, k.tel_no, k.hp_addr, k.oper_time,
+             k.est_date, k.open_date, k.pbnt_tmng, k.cap_cnt, k.pupil_cnt, k.class_cnt, k.lat, k.lng,
+             거리m = CASE WHEN @g IS NOT NULL AND k.geog IS NOT NULL THEN CAST(k.geog.STDistance(@g) AS INT) END
+        FROM silver.kindergarten k WHERE k.kinder_cd = @c;
+      SELECT item, pbnt_tmng, raw_json FROM silver.kinder_info WHERE kinder_cd = @c;`);
+    const b = r.recordsets[0][0];
+    if (!b) return res.status(404).json({ error: '이 유치원을 찾지 못했습니다' });
+    const 항목 = {};
+    for (const x of (r.recordsets[1] || [])) {
+      try { const j = JSON.parse(x.raw_json); delete j.rppnname; delete j.ldgrname; 항목[x.item] = j; } catch (e) { /* 원문이 깨졌으면 그 항목만 뺀다 */ }
+    }
+    res.json({ 유치원: b, 항목, 출처: '유치원알리미(교육부 · 한국교육학술정보원) 공시' });
+  } catch (e) { fail(res, e, 'kinder'); }
+});
+app.get('/api/childcare/:st', async (req, res) => {
+  const st = String(req.params.st || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20);
+  const cid = Number(req.query.cid) || 0;
+  if (!st) return res.status(400).json({ error: 'bad code' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('s', sql.VarChar(20), st).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      ${_한점(cid)}
+      SELECT TOP 1 k.stcode, k.이름, k.유형, k.상태, k.주소, k.전화, k.홈페이지, k.정원, k.현원, k.반수, k.교직원수, k.보육실수, k.보육실면적,
+             k.놀이터수, k.CCTV수, k.통학차량, k.제공서비스, k.인가일, k.휴지시작, k.휴지끝, k.폐지일, k.기준일, k.lat, k.lng, k.raw_json,
+             거리m = CASE WHEN @g IS NOT NULL AND k.geog IS NOT NULL THEN CAST(k.geog.STDistance(@g) AS INT) END
+        FROM silver.childcare k WHERE k.stcode = @s AND k.is_current = 1;`);
+    const b = r.recordset[0];
+    if (!b) return res.status(404).json({ error: '이 어린이집을 찾지 못했습니다' });
+    let 원문 = {};
+    try { 원문 = JSON.parse(b.raw_json || '{}'); } catch (e) {}
+    delete b.raw_json; delete 원문.CRREPNAME;
+    /* 칸 이름은 data.go.kr 15101154(어린이집별 기본정보 조회) 출력 목록 순서와 원문 칸 순서를 맞춘 것 — M5 처럼 목록에 없는 칸은 원문 이름 그대로 */
+    const 수 = k => (원문[k] == null || 원문[k] === '' ? null : Number(원문[k]));
+    const 연령 = [['00', '만0세'], ['01', '만1세'], ['02', '만2세'], ['03', '만3세'], ['04', '만4세'], ['05', '만5세'],
+                 ['M2', '영아혼합(만0~2세)'], ['M3', '유아혼합(만3~5세)'], ['M5', '원문 M5'], ['SP', '특수(장애)']]
+      .map(([k, nm]) => ({ 이름: nm, 반: 수('CLASS_CNT_' + k), 아동: 수('CHILD_CNT_' + k) }))
+      .filter(x => (x.반 || 0) > 0 || (x.아동 || 0) > 0);
+    const 교직원 = [['A1', '원장'], ['A2', '보육교사'], ['A3', '특수교사'], ['A4', '치료교사'], ['A5', '영양사'], ['A6', '간호사'],
+                   ['A10', '간호조무사'], ['A7', '조리원'], ['A8', '사무직원']]
+      .map(([k, nm]) => ({ 이름: nm, 수: 수('EM_CNT_' + k) })).filter(x => (x.수 || 0) > 0);
+    const 근속 = [['0Y', '1년 미만'], ['1Y', '1~2년'], ['2Y', '2~4년'], ['4Y', '4~6년'], ['6Y', '6년 이상']]
+      .map(([k, nm]) => ({ 이름: nm, 비율: 수('EM_CNT_' + k) })).filter(x => x.비율 != null);
+    const 대기 = [['00', '0세'], ['01', '1세'], ['02', '2세'], ['03', '3세'], ['04', '4세'], ['05', '5세'], ['M6', '6세 이상']]
+      .map(([k, nm]) => ({ 이름: nm, 수: 수('EW_CNT_' + k) })).filter(x => x.수 != null);
+    res.json({ 어린이집: b, 연령, 반합: 수('CLASS_CNT_TOT'), 아동합: 수('CHILD_CNT_TOT'), 교직원, 교직원합: 수('EM_CNT_TOT'),
+               근속, 대기, 대기합: 수('EW_CNT_TOT'), 특성: 원문.crspec || null,
+               출처: '어린이집정보공개포털(교육부 · 한국사회보장정보원) 어린이집별 기본정보' });
+  } catch (e) { fail(res, e, 'childcare-one'); }
+});
+app.get('/api/complexes/:id/poi-list', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1 || id > 2147483647) return res.status(400).json({ error: 'bad id' });
+  const 항목 = String(req.query.life || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 20);
+  if (!항목.length) return res.status(400).json({ error: 'life=항목,항목' });
+  try {
+    const pool = await getPool();
+    const rq = pool.request().input('id', sql.Int, id);
+    항목.forEach((x, i) => rq.input('l' + i, sql.NVarChar(60), x));
+    const r = await rq.query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      /* 항목마다 가까운 60곳 + 그 항목 전체 수(1km · 500m) — 한 항목(음식점)이 다른 항목을 밀어내지 않게 */
+      SELECT x.* FROM (
+        SELECT 항목 = v.life, 이름 = v.bizes_nm, 지점 = v.brch_nm, 업종 = v.inds_scls_nm, 층 = v.flr_no, 건물 = v.bld_nm,
+               거리m = CAST(v.dist_m AS INT), 단지안 = CAST(ISNULL(v.on_site, 0) AS INT),
+               rn = ROW_NUMBER() OVER (PARTITION BY v.life ORDER BY v.dist_m),
+               전체 = COUNT(*) OVER (PARTITION BY v.life),
+               전체500 = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) OVER (PARTITION BY v.life)
+          FROM gold.v_complex_poi v
+         WHERE v.complex_id = @id AND v.dist_m <= 1000 AND v.life IN (${항목.map((_, i) => '@l' + i).join(',')})) x
+       WHERE x.rn <= 60
+       ORDER BY x.항목, x.거리m`);
+    res.json({ 점포: r.recordset, 출처: '소상공인시장진흥공단 상가(상권)정보' });
+  } catch (e) { fail(res, e, 'poi-list'); }
+});
+
 app.get('/api/complexes/:id/childcare', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
@@ -6222,12 +6314,12 @@ app.get('/api/complexes/:id', async (req, res) => {
          가까운 한 곳은 ROW_NUMBER 로 뽑는다. */
     const _q_kinders = () => pool.request().input('id', sql.Int, id).query(`
       WITH v AS (SELECT * FROM gold.v_complex_kinder WHERE complex_id = @id),
-      n AS (SELECT kinder_nm, establish, cap_cnt, pupil_cnt, class_cnt,
+      n AS (SELECT kinder_cd, kinder_nm, establish, cap_cnt, pupil_cnt, class_cnt,
                    pbnt_tmng, oper_time, dist_m,
                    rn = ROW_NUMBER() OVER (ORDER BY dist_m)
               FROM v)
       /* ★ 2026-10-21: 여기도 8곳에서 **조용히 잘랐다.** 몇 곳 중 몇 곳인지 같이 낸다. */
-      SELECT 이름 = kinder_nm, 설립 = establish, 정원 = cap_cnt, 원아 = pupil_cnt,
+      SELECT kinder_cd, 이름 = kinder_nm, 설립 = establish, 정원 = cap_cnt, 원아 = pupil_cnt,
              학급 = class_cnt, 공시 = pbnt_tmng, 운영시간 = oper_time,
              거리m = CAST(dist_m AS INT), 전체 = COUNT(*) OVER ()
         FROM n WHERE rn <= 8 ORDER BY dist_m`);

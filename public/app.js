@@ -2169,7 +2169,7 @@ function 주변점묶기() {
   if (!d || d.dataset.ptBound) return;
   d.dataset.ptBound = '1';
   d.addEventListener('click', e => {
-    if (e.target.closest('[data-school]')) return;          // 2026-10-24 '자세히' 는 모달 — 점 고정과 따로
+    if (e.target.closest('[data-school], [data-kinder], [data-ccone], [data-poilist]')) return;          // 2026-10-24 '자세히' 는 모달 — 점 고정과 따로
     const el = e.target.closest('[data-pt]');
     if (!el || !selected) return;
     고정토글(el);
@@ -4580,7 +4580,7 @@ function renderDetail(payload) {
           Number(b.r500) > 1 ? `<b>${fmt(b.r500)}</b>` : ''}</span>`).join('')}</div>
         ` : ''}
       ${pl.length ? `${생활묶음(pl).filter(([g]) => g !== '병원·약국').map(([g, xs]) => `
-        <div class="lgrp"><span class="lgl">${esc(g)}</span><div class="lifegrid">${xs.map(x => `
+        <div class="lgrp"><span class="lgl">${esc(g)}<button type="button" class="sdet lgo" data-poilist="${esc(xs.map(x => x.항목).join(','))}" data-poinm="${esc(g)}" title="이 묶음의 점포 목록">목록 ›</button></span><div class="lifegrid">${xs.map(x => `
         <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}"
              data-pt-r="${Number(x.r500) ? 500 : 1000}"
              title="가장 가까운 곳 ${fmt(x.최단m)}m">
@@ -4626,6 +4626,7 @@ function renderDetail(payload) {
         <div class="scell" data-pt="kinder|${esc(x.이름 || '')}" data-pt-r="500">
           <span class="sg">${esc((x.설립 || '').replace(/\s/g, '') || '—')}</span>
           <b>${esc(x.이름 || '—')}</b>
+          ${x.kinder_cd ? `<button type="button" class="sdet" data-kinder="${esc(x.kinder_cd)}" title="유치원 상세">자세히 ›</button>` : ''}
           <span class="sd">${fmt(x.거리m)}m${
             x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${
             x.원아 != null ? ` · 원아 ${fmt(x.원아)}` : ''}</span>
@@ -6045,7 +6046,7 @@ function 시트달기() {
 
   /* 주변 항목을 누르면 반쯤 내려 지도에 찍힌 점을 보인다(폰에는 '마우스 올리기' 가 없다) */
   document.addEventListener('click', e => {
-    if (e.target.closest('[data-school]')) return;
+    if (e.target.closest('[data-school], [data-kinder], [data-ccone], [data-poilist]')) return;
     const el = e.target.closest('#detail [data-pt]');
     if (!폰() || !el) return;
     if (app.dataset.sheet === 'full') 시트('half');
@@ -6264,6 +6265,7 @@ async function 어린이집채우기() {
         <div class="scell" data-pt="childcarenm|${esc(x.이름 || '')}" data-pt-r="500">
           <span class="sg">${esc(x.유형 || '—')}</span>
           <b>${esc(x.이름 || '—')}</b>
+          ${x.stcode ? `<button type="button" class="sdet" data-ccone="${esc(x.stcode)}" title="어린이집 상세">자세히 ›</button>` : ''}
           <span class="sd">${fmt(x.m)}m${x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${x.현원 != null ? ` · 현원 ${fmt(x.현원)}` : ''}</span>
           <span class="sn">${[x.반수 != null ? `${fmt(x.반수)}반` : null, x.통학차량 === '운영' ? '통학차량' : null,
             x.상태 && x.상태 !== '정상' ? `<b>${esc(x.상태)}</b>` : null,
@@ -6887,6 +6889,121 @@ function 구역지우기() {
   구역층 = null; 구역지금 = null;
   document.querySelectorAll('#detail [data-redev].on, #detail [data-lushape].on, #detail [data-clsite].on, #detail [data-hzone].on').forEach(el => el.classList.remove('on'));
 }
+/* ★ 2026-10-24 10:44 사장님 "어린이집 · 유치원 · 상권도 자세히 · 모달로" — 학교 상세와 같은 그릇(#homodal · .sbox). 원문 값 그대로. */
+function 모달열기(html) { const el = $('#homodal'); el.innerHTML = `<div class="hm-box sbox">${html}</div>`; el.classList.add('on'); }
+const 모달머리 = (이름, 보조) => `<div class="hm-h">${esc(이름 || '')} <span>${esc(보조 || '')}</span><button type="button" class="hm-x" data-ho-close>닫기</button></div>`;
+const 모달표 = (머리, 줄들) => !줄들.length ? '' : `<table class="hm-t"><thead><tr>${머리.map((h, i) => `<th${i ? ' class="n"' : ''}>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
+  줄들.map(r => `<tr>${r.map((v, i) => `<td${i ? ' class="n"' : ''}>${v == null || v === '' ? '—' : (typeof v === 'number' ? fmt(v) : esc(String(v)))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+const 모달줄 = (k, v) => v == null || v === '' ? '' : `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
+const 모달링크 = u => { const t = String(u || '').trim(); return /^https?:\/\//.test(t) ? `<a href="${esc(t)}" target="_blank" rel="noopener">${esc(t.replace(/^https?:\/\//, ''))}</a>` : (t ? esc(t) : ''); };
+async function 모달받기(url, 무엇) {
+  모달열기(`<div class="hm-h">불러오는 중…</div>`);
+  try { const r = await fetch(url); const d = await r.json(); if (!r.ok || d.error) throw new Error(d.error || '불러오지 못했습니다'); return d; }
+  catch (e) { 모달열기(`${모달머리(무엇)}<p class="note">${esc(e.message || '불러오지 못했습니다')}</p>`); return null; }
+}
+const 수칸 = v => { if (v == null) return null; const t = String(v).replace(/[^0-9.]/g, ''); return t === '' ? null : Number(t); };   /* 원문이 '5개' · '2명' 처럼 단위를 달고 올 때가 있다 */
+const 공시차수말 = t => { const s = String(t || ''); return /^\d{5}$/.test(s) ? `${s.slice(0, 4)}년 ${s.slice(4)}차 공시` : (s || ''); };
+
+async function 유치원상세(code) {
+  const d = await 모달받기(`/api/kinder/${encodeURIComponent(code)}${selected ? `?cid=${encodeURIComponent(selected)}` : ''}`, '유치원 상세');
+  if (!d) return;
+  const k = d.유치원 || {}, h = d.항목 || {};
+  const b = h.basicInfo2 || {}, t = h.teachersInfo || {}, y = h.yearOfWork || {}, bd = h.building || {}, ca = h.classArea || {},
+        bus = h.schoolBus || {}, sf = h.safetyEdu || {}, ml = h.schoolMeal || {}, ev = h.environmentHygiene || {}, ld = h.lessonDay || {}, af = h.afterSchoolPresent || {};
+  const 연령 = [['만3세', 'clcnt3', 'ag3fpcnt', 'ppcnt3'], ['만4세', 'clcnt4', 'ag4fpcnt', 'ppcnt4'], ['만5세', 'clcnt5', 'ag5fpcnt', 'ppcnt5'],
+               ['혼합', 'mixclcnt', 'mixfpcnt', 'mixppcnt'], ['특수', 'shclcnt', 'spcnfpcnt', 'shppcnt']]
+    .map(([n, c, f, p]) => [n, 수칸(b[c]), 수칸(b[f]), 수칸(b[p])]).filter(r => r.slice(1).some(v => v));
+  const 교원 = [['원장', 'drcnt'], ['원감', 'adcnt'], ['수석교사', 'hdst_thcnt'], ['보직교사', 'asps_thcnt'], ['일반교사', 'gnrl_thcnt'], ['특수교사', 'spcn_thcnt'],
+               ['보건교사', 'ntcnt'], ['영양교사', 'ntrt_thcnt'], ['기간제교사·강사', 'shcnt_thcnt'], ['직원', 'owcnt']]
+    .map(([n, f]) => [n, 수칸(t[f])]).filter(r => r[1]);
+  const 자격 = [['정교사 1급', 'rgth_gd1_qacnt'], ['정교사 2급', 'rgth_gd2_qacnt'], ['준교사', 'asth_qacnt'], ['수석교사', 'hdst_tchr_qacnt'], ['특수학교 정교사', 'spsc_tchr_qacnt'], ['보건교사', 'nth_qacnt'], ['영양교사', 'ntth_qacnt']]
+    .map(([n, f]) => [n, 수칸(t[f])]).filter(r => r[1]);
+  const 근속 = [['1년 미만', 'yy1_undr_thcnt'], ['1~2년', 'yy1_abv_yy2_undr_thcnt'], ['2~4년', 'yy2_abv_yy4_undr_thcnt'], ['4~6년', 'yy4_abv_yy6_undr_thcnt'], ['6년 이상', 'yy6_abv_thcnt']]
+    .map(([n, f]) => [n, 수칸(y[f])]).filter(r => r[1] != null);
+  const 점검 = [['놀이시설 안전검사', sf.plyg_ck_yn === 'Y' ? `${날짜(sf.plyg_ck_dt, '')} ${sf.plyg_ck_rs_cd || ''}` : (sf.plyg_ck_yn === 'N' ? '대상 아님' : '')],
+               ['소방 대피훈련', sf.fire_avd_yn === 'Y' ? 날짜(sf.fire_avd_dt, '') : sf.fire_avd_yn], ['소방 안전점검', sf.fire_safe_yn === 'Y' ? 날짜(sf.fire_safe_dt, '') : sf.fire_safe_yn],
+               ['가스 점검', sf.gas_ck_yn === 'Y' ? 날짜(sf.gas_ck_dt, '') : sf.gas_ck_yn], ['전기설비 점검', sf.elect_ck_yn === 'Y' ? 날짜(sf.elect_ck_dt, '') : sf.elect_ck_yn],
+               ['실내공기질', ev.arql_chk_dt ? `${날짜(ev.arql_chk_dt, '')} ${ev.arql_chk_rslt_tp_cd || ''}` : ''], ['미세먼지', ev.mdst_chk_dt ? `${날짜(ev.mdst_chk_dt, '')} ${ev.mdst_chk_rslt_cd || ''}` : ''],
+               ['조도', ev.ilmn_chk_dt ? `${날짜(ev.ilmn_chk_dt, '')} ${ev.ilmn_chk_rslt_cd || ''}` : ''], ['정기소독', ev.fxtm_dsnf_chk_dt ? `${날짜(ev.fxtm_dsnf_chk_dt, '')} ${ev.fxtm_dsnf_chk_rslt_tp_cd || ''}` : '']]
+    .filter(r => r[1]);
+  const 차수 = 공시차수말(b.pbnttmng || k.pbnt_tmng);
+  모달열기(`${모달머리(k.kinder_nm, [k.establish].filter(Boolean).join(' · '))}
+    <p class="hm-addr">${esc(k.addr || '')}${k.거리m != null ? ` · 이 단지에서 ${fmt(k.거리m)}m(직선)` : ''}</p>
+    ${연령.length ? `<div class="lt2">반 · 정원 · 원아 <span class="muted">(${esc(차수)})</span></div>${모달표(['연령', '학급', '정원', '원아'], 연령)}
+      <p class="note sm">인가 총정원 ${fmt(수칸(b.prmstfcnt) ?? k.cap_cnt)}명</p>` : ''}
+    ${교원.length ? `<div class="lt2">교직원 <span class="muted">(직위별 · ${esc(공시차수말(t.pbnttmng))})</span></div>${모달표(['직위', '인원'], 교원)}` : ''}
+    ${자격.length ? `<div class="lt2">교원 자격 <span class="muted">(자격 보유 수)</span></div>${모달표(['자격', '인원'], 자격)}` : ''}
+    ${근속.length ? `<div class="lt2">교사 근속연수 <span class="muted">(${esc(공시차수말(y.pbnttmng))})</span></div>${모달표(['근속', '교사 수'], 근속)}` : ''}
+    <div class="lt2">시설 · 운영</div>
+    <dl class="ahkv">${[
+      모달줄('운영시간', esc(k.oper_time || '')),
+      /* 원문이 '2009년' · '지상1층/ 지하0층' 처럼 단위를 달고 온다 — 붙이지 않고 그대로 */
+      /* 건물 · 교실면적은 원문이 단위를 달고 온다('2009년' · '지상1층/ 지하0층' · '5개' · '323㎡') — 글자 그대로 */
+      모달줄('건물', [bd.archyy ? `건축 ${esc(bd.archyy)}` : '', bd.floorcnt ? esc(bd.floorcnt) : '', bd.bldgprusarea ? `건물 전용 ${esc(bd.bldgprusarea)}` : '', bd.grottar ? `대지 ${esc(bd.grottar)}` : ''].filter(Boolean).join(' · ')),
+      모달줄('교실', [ca.crcnt ? esc(ca.crcnt) : '', ca.clsrarea ? esc(ca.clsrarea) : ''].filter(Boolean).join(' · ')),
+      모달줄('체육장', ca.phgrindrarea ? esc(ca.phgrindrarea) : ''),
+      모달줄('보건 · 조리 · 기타 공간', [ca.hlsparea ? `보건 ${esc(ca.hlsparea)}` : '', ca.ktchmssparea ? `조리 ${esc(ca.ktchmssparea)}` : '', ca.otsparea ? `기타 ${esc(ca.otsparea)}` : ''].filter(Boolean).join(' · ')),
+      모달줄('통학차량', bus.vhcl_oprn_yn === 'Y' ? `운행 ${fmt(수칸(bus.opra_vhcnt))}대(신고 ${fmt(수칸(bus.dclr_vhcnt))}대)` : (bus.vhcl_oprn_yn === 'N' ? '운행 안 함' : '')),
+      모달줄('CCTV', sf.cctv_ist_yn === 'Y' ? `${fmt(수칸(sf.cctv_ist_total))}대(안 ${fmt(수칸(sf.cctv_ist_in))} · 밖 ${fmt(수칸(sf.cctv_ist_out))})` : (sf.cctv_ist_yn === 'N' ? '없음' : '')),
+      모달줄('급식', [ml.mlsr_oprn_way_tp_cd, 수칸(ml.mlsr_kpcnt) != null ? `급식 원아 ${fmt(수칸(ml.mlsr_kpcnt))}명` : '', ml.ntrt_tchr_agmt_yn === 'Y' ? '영양교사 배치' : ''].filter(Boolean).map(esc).join(' · ')),
+      모달줄('방과후 과정', [수칸(af.inor_clcnt) ? `독립편성 ${fmt(수칸(af.inor_clcnt))}학급` : '', 수칸(af.pm_rrgn_clcnt) ? `오후재편성 ${fmt(수칸(af.pm_rrgn_clcnt))}학급` : '', af.oper_time || ''].filter(Boolean).map(esc).join(' · ')),
+      모달줄('수업일수', [수칸(ld.ag5_lsn_dcnt) ? `만5세 ${fmt(수칸(ld.ag5_lsn_dcnt))}일` : '', 수칸(ld.afsc_pros_lsn_dcnt) ? `방과후 ${fmt(수칸(ld.afsc_pros_lsn_dcnt))}일` : ''].filter(Boolean).join(' · ')),
+      모달줄('설립일', k.est_date ? esc(날짜(k.est_date)) : ''), 모달줄('개원일', k.open_date ? esc(날짜(k.open_date)) : ''),
+      모달줄('전화', esc(k.tel_no || '')), 모달줄('홈페이지', 모달링크(k.hp_addr)),
+    ].join('')}</dl>
+    ${점검.length ? `<div class="lt2">안전 · 위생 점검 <span class="muted">(점검일 · 결과 원문)</span></div>${모달표(['항목', '점검'], 점검)}` : ''}
+    ${!Object.keys(h).length ? `<p class="note sm">${gapCell('', 'SCOPE', '이 유치원의 공시 상세 항목을 아직 받지 않았습니다')}</p>` : ''}
+    <p class="srcline">${esc(d.출처)} · 항목마다 공시 차수가 다를 수 있습니다</p>`);
+}
+
+async function 어린이집상세(st) {
+  const d = await 모달받기(`/api/childcare/${encodeURIComponent(st)}${selected ? `?cid=${encodeURIComponent(selected)}` : ''}`, '어린이집 상세');
+  if (!d) return;
+  const c = d.어린이집 || {};
+  모달열기(`${모달머리(c.이름, [c.유형, c.상태 && c.상태 !== '정상' ? c.상태 : ''].filter(Boolean).join(' · '))}
+    <p class="hm-addr">${esc(c.주소 || '')}${c.거리m != null ? ` · 이 단지에서 ${fmt(c.거리m)}m(직선)` : ''}</p>
+    <div class="hm-s"><b>정원 ${fmt(c.정원)} · 현원 ${fmt(c.현원)}</b><span class="muted">${d.대기합 != null ? `입소대기 ${fmt(d.대기합)}명 · ` : ''}기준일 ${esc(날짜(c.기준일, ''))}</span></div>
+    ${d.연령.length ? `<div class="lt2">연령별 반 · 아동</div>${모달표(['연령', '반', '아동'], d.연령.map(x => [x.이름, x.반, x.아동]))}
+      <p class="note sm">합계(원문) 반 ${fmt(d.반합)} · 아동 ${fmt(d.아동합)}</p>` : ''}
+    ${d.대기.some(x => x.수) ? `<div class="lt2">입소대기 아동 <span class="muted">(원문)</span></div>${모달표(['나이', '대기'], d.대기.filter(x => x.수 != null).map(x => [x.이름, x.수]))}` : ''}
+    ${d.교직원.length ? `<div class="lt2">보육교직원</div>${모달표(['직종', '인원'], d.교직원.map(x => [x.이름, x.수]))}
+      <p class="note sm">총계(원문) ${fmt(d.교직원합)}명 — 직종별 합과 다를 수 있습니다(원문 목록에 없는 직종)</p>` : ''}
+    ${d.근속.length ? `<div class="lt2">교직원 근속연수 <span class="muted">(원문 값 · 비율 %)</span></div>${모달표(['근속', '%'], d.근속.map(x => [x.이름, x.비율]))}` : ''}
+    <div class="lt2">시설 · 운영</div>
+    <dl class="ahkv">${[
+      모달줄('보육실', [c.보육실수 != null ? `${fmt(c.보육실수)}실` : '', c.보육실면적 != null ? `${fmt(c.보육실면적)}㎡` : ''].filter(Boolean).join(' · ')),
+      모달줄('놀이터', c.놀이터수 != null ? `${fmt(c.놀이터수)}곳` : ''),
+      모달줄('CCTV', c.CCTV수 != null ? `${fmt(c.CCTV수)}대` : ''),
+      모달줄('통학차량', esc(c.통학차량 || '')),
+      모달줄('제공 서비스', esc(c.제공서비스 || d.특성 || '')),
+      모달줄('인가일', c.인가일 ? esc(날짜(c.인가일)) : ''),
+      모달줄('휴지', c.휴지시작 ? `${esc(날짜(c.휴지시작))} ~ ${esc(날짜(c.휴지끝, ''))}` : ''),
+      모달줄('전화', esc(c.전화 || '')), 모달줄('홈페이지', 모달링크(c.홈페이지)),
+    ].join('')}</dl>
+    <p class="srcline">${esc(d.출처)} · 칸 이름은 data.go.kr 15101154 출력 목록 기준</p>`);
+}
+
+async function 점포목록(items, 이름) {
+  if (!selected) return;
+  const d = await 모달받기(`/api/complexes/${encodeURIComponent(selected)}/poi-list?life=${encodeURIComponent(items)}`, `${이름} 점포`);
+  if (!d) return;
+  const L = d.점포 || [];
+  const 묶 = new Map(); for (const x of L) (묶.get(x.항목) || 묶.set(x.항목, []).get(x.항목)).push(x);
+  모달열기(`${모달머리(`${이름} 점포`, '1km 안 · 가까운 순')}
+    ${[...묶.entries()].map(([항, xs]) => `<div class="lt2">${esc(항)} <span class="muted">1km 안 ${fmt(xs[0].전체)}곳 · 500m 안 ${fmt(xs[0].전체500)}곳</span></div>
+      ${모달표(['이름', '층', '거리'], xs.map(x => [[x.이름, x.지점].filter(Boolean).join(' ') + (x.단지안 ? ' (단지 안)' : ''), x.층 || '', `${fmt(x.거리m)}m`]))}
+      ${Number(xs[0].전체) > xs.length ? `<p class="note sm">가까운 ${fmt(xs.length)}곳만 보입니다 — ${fmt(xs[0].전체)}곳 중</p>` : ''}`).join('')}
+    ${!L.length ? `<p class="note">${gapCell('', 'NA', '1km 안에 이 묶음의 점포가 없습니다')}</p>` : ''}
+    <p class="srcline">${esc(d.출처)} · 상권 칸과 같은 자료 · 거리는 단지 중심점에서 직선</p>`);
+}
+document.addEventListener('click', e => {
+  const k = e.target.closest('[data-kinder]'), c = e.target.closest('[data-ccone]'), p = e.target.closest('[data-poilist]');
+  if (!k && !c && !p) return;
+  e.preventDefault(); e.stopPropagation();
+  if (k) 유치원상세(k.dataset.kinder);
+  else if (c) 어린이집상세(c.dataset.ccone);
+  else 점포목록(p.dataset.poilist, p.dataset.poinm || '');
+});
 /* ★ 2026-10-24 10:36 사장님 "학교나 그 외 상세는 모달로" — 학교 상세 모달(호 상세와 같은 그릇 #homodal).
    위치표준 · 학교알리미 · 학구도 세 출처를 칸마다 밝힌다. 값은 원문 그대로(나눗셈 없음 — 학급당 · 1인당도 공시값). */
 async function 학교상세(sid) {
