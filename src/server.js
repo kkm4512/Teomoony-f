@@ -7183,10 +7183,18 @@ app.get('/api/complexes/:id/history', async (req, res) => {
         FROM gold.fn_complex_silv(@id) f JOIN silver.rtms_trade t ON t.trade_sk = f.trade_sk WHERE ISNULL(t.is_canceled, 0) = 0;
       SELECT 매매 = SUM(CASE WHEN is_rent = 0 THEN 1 ELSE 0 END), 전월세 = SUM(CASE WHEN is_rent = 1 THEN 1 ELSE 0 END),
              처음 = MIN(deal_ymd), 끝 = MAX(deal_ymd)
-        FROM silver.rtms_trade WHERE match_complex_id = @id AND trade_kind NOT LIKE 'SILV%' AND ISNULL(is_canceled, 0) = 0;`);
+        FROM silver.rtms_trade WHERE match_complex_id = @id AND trade_kind NOT LIKE 'SILV%' AND ISNULL(is_canceled, 0) = 0;
+      /* 347 (2026-10-24 사장님 "달라진 칼럼을 액션로그식으로"): 이 단지 필지의 **토지특성 바뀜**(원천 기준연도 사이) — 지목 · 용도지역 · 이용상황만 목차에.
+         도로접면 · 지형은 감정 평가 칸이라 해마다 흔들려 목차를 덮는다(변경 로그 표에는 다 있다). 같은 해 · 같은 바뀜은 필지 수로 묶는다. */
+      SELECT TOP 30 g.시점, g.칼럼, g.전값, g.새값, 필지 = COUNT(DISTINCT g.키)
+        FROM gold.change_log g
+       WHERE g.자료 = N'토지특성' AND g.종류 = N'바뀜' AND g.키 IN (SELECT pnu FROM #p)
+         AND g.칼럼 IN (N'지목', N'용도지역', N'이용상황')
+       GROUP BY g.시점, g.칼럼, g.전값, g.새값
+       ORDER BY g.시점, COUNT(DISTINCT g.키) DESC;`);
     const R = r.recordsets;
     res.json({ 단지: R[0][0] || null, 옛대장: { 전체: Number((R[1][0] || {}).전체 || 0), 줄: R[2] }, 정비: R[3], 인허가: R[4],
-               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null });
+               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null, 토지바뀜: R[8] || [] });
   } catch (e) { fail(res, e, 'complex-history'); }
 });
 
