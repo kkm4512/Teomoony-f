@@ -3043,10 +3043,11 @@ function structureBlock(dongs, floors, hos, scope, hoTotal) {
      동 정보가 아예 없다(../Teomoony/CONTEXT.md 4절). 그러니 동 옆의 금액은
      무엇으로 읽히든 틀린다. 동을 고르는 데 필요한 건 규모(층·호)뿐이다. */
   /* 2026-10-24 22:17 사장님 "동은 이름만 · 단추 하나를 누르면 동들이 쫙 나오고, 동을 누르면 그 동 정보가 밑에" —
-     칩에서 층 · 호를 뺐다. 평소엔 **고른 동 단추 하나**만 보이고, 누르면 동 목록이 펼쳐진다. 동을 고르면 다시 접힌다. */
+     칩에서 층 · 호를 뺐다. 평소엔 **고른 동 단추 하나**만 보이고, 누르면 동 목록이 펼쳐진다. 동을 고르면 다시 접힌다.
+     22:27 사장님 "'동 선택' 을 누르면 동들이 밑으로 나오고 하나를 고르는 방향" — 선택 상자 모양(작게) · 목록은 단추 **밑에 떠서** 화면을 밀지 않는다. */
   const selNm = (dongStat.get(sel) || {}).nm || '—';
   const picker = real.length > 1 ? `<div class="dsel">
-      <button type="button" class="dtog" data-dong-toggle aria-expanded="false">${esc(selNm)}<span class="muted"> · ${fmt(real.length)}동 중</span> ▾</button>
+      <button type="button" class="dtog" data-dong-toggle aria-expanded="false" aria-haspopup="listbox"><span class="muted">동 선택</span> <b>${esc(selNm)}</b> <span class="dcaret">▾</span></button>
       <div class="dpick" role="tablist" hidden>${
       real.map(d => { const pk = d.mgm_bldrgst_pk, s = dongStat.get(pk) || {};
         return `<button type="button" class="dchip" role="tab" data-ho-dong="${esc(String(pk))}"
@@ -3777,6 +3778,8 @@ document.addEventListener('click', e => {
 
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-dong-toggle]');
+  if (!e.target.closest('.dsel')) document.querySelectorAll('.dsel .dpick:not([hidden])').forEach(l => {   // 바깥을 누르면 닫는다
+    l.hidden = true; const b = l.parentElement.querySelector('[data-dong-toggle]'); if (b) b.setAttribute('aria-expanded', 'false'); });
   if (!t) return;
   const list = t.parentElement.querySelector('.dpick');
   if (!list) return;
