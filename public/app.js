@@ -888,6 +888,10 @@ function initMap() {
   /* 줌만 바뀌어도 이름표를 다시 판단한다. loadOverlay 는 bbox 가 그대로면
      다시 안 불릴 수 있어서, 여기서도 한 번 건다. */
   map.on('zoomend', 재개발이름표);
+  map.on('zoomend', () => {   // 흐린 말풍선 문턱(줌 18)을 넘나들 때만 마커를 다시 그린다
+    const 지금 = map.getZoom() >= 흐린말풍선줌;
+    if (지금 !== 흐린말풍선보임) { 흐린말풍선보임 = 지금; paintMarkers(); }
+  });
   refreshMap();
 }
 
@@ -896,6 +900,8 @@ function initMap() {
    라벨은 그 단지의 **최근 3년 최고가** 매매 — 평형과 금액. 3년 안 매매가 없으면 마지막 매매를
    흐리게 + 평형 대신 연도로(2026-10-21). 거래가 없으면 점.
    (단독·다가구·토지·상업업무용은 지번 마스킹으로 매칭 자체가 안 되므로 거래가 비어 있다) */
+const 흐린말풍선줌 = 18;
+let 흐린말풍선보임 = null;   // 문턱을 넘을 때만 다시 그린다
 function markerHtml(m, sel) {
   const has = m.max_amount != null;
   /* 거래가 붙은 단지만 가격 말풍선, 나머지는 점.
@@ -907,6 +913,9 @@ function markerHtml(m, sel) {
   const py = m.area_grp ? Math.round(Number(m.area_grp) / 3.3058) : null;
   const amt = Number(m.max_amount) / 100000000;
   const 오래 = m.최근3년 === false;
+  /* 2026-10-24 22:37 사장님 ㄱㄱ: 3년 안 매매가 없는 단지의 흐린 말풍선이 빌라 동네에서 겹겹이 쌓였다 —
+     평소엔 **점**으로(누르면 상세에 마지막 거래 그대로), 골목 단위(줌 18 이상)로 크게 볼 때만 흐린 말풍선. */
+  if (오래 && map && map.getZoom() < 흐린말풍선줌) return `<div class="cdot${sel ? ' sel' : ''}${m.has_recap ? ' recap' : ''}"></div>`;
   const head = 오래 ? `${m.max_ymd.slice(0, 4)}년` : py ? `${py}평` : '최고';
   const body = (amt >= 10 ? amt.toFixed(1) : amt.toFixed(2)).replace(/\.?0+$/, '') + '억';
   return `<div class="cmark${sel ? ' sel' : ''}${m.has_recap ? ' recap' : ''}${오래 ? ' stale' : ''}">
