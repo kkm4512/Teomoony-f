@@ -423,7 +423,9 @@ app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지�
 { const s = require('./svc');
   app.get('/api/parcels', s.필지); app.get('/api/buildings', s.건물); app.get('/api/lawds', s.법정동); app.get('/api/adms', s.행정동);
   app.get('/api/closed/pins', s.닫힌핀); app.get('/api/newbuilds', s.신축핀);
-  app.get('/api/suggest', s.자동완성); app.get('/api/complexes', s.목록검색); }   /* 자동완성 · 목록 검색 — svc_mode "suggest" · "search" */   /* 자동완성 — svc_mode "suggest" */
+  app.get('/api/suggest', s.자동완성); app.get('/api/complexes', s.목록검색);
+  app.get('/api/areas/here', s.여기지역); app.get('/api/complexes/near', s.주변단지); app.get('/api/applyhome/pins', s.청약핀);   /* svc_mode "misc" */
+  app.use(s.응답캐시); }   /* 호 상세 · 주변 지점 · 점포 목록 지나며 담기 — svc_mode "cache" */   /* 자동완성 · 목록 검색 — svc_mode "suggest" · "search" */   /* 자동완성 — svc_mode "suggest" */
 
 app.get('/api/usage', async (req, res) => {
   try {
@@ -4654,7 +4656,7 @@ app.get('/api/applyhome/pins', async (req, res) => {
           JOIN silver.cadastral_parcel cp ON cp.pnu = p.pnu AND cp.is_current = 1
          WHERE NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no))
       SELECT TOP 600 * FROM p WHERE lng BETWEEN @x0 AND @x1 AND lat BETWEEN @y0 AND @y1
-       ORDER BY rcrit_pblanc_de DESC;
+       ORDER BY rcrit_pblanc_de DESC, house_manage_no, pblanc_no;   /* 10-25: 600 에서 잘릴 때 남는 핀이 매번 같게 */
       /* ★ 집계 안에 서브쿼리를 넣지 않는다(규칙 — 세 번째로 어겼다). 자리 여부를 먼저 칸으로 만들고 센다 */
       SELECT 안이어짐 = COUNT(DISTINCT x.house_manage_no),
              자리없음 = COUNT(DISTINCT CASE WHEN x.자리 = 0 THEN x.house_manage_no END)
@@ -5282,7 +5284,8 @@ app.get('/api/areas/here', async (req, res) => {
         FROM silver.lawd_boundary b
        WHERE b.is_current = 1
          AND b.bbox_minx <= @lng AND b.bbox_maxx >= @lng AND b.bbox_miny <= @lat AND b.bbox_maxy >= @lat
-         AND b.geom.STContains(@p) = 1`);
+         AND b.geom.STContains(@p) = 1
+       ORDER BY 1, 2`);   /* 10-25: 겹친 경계에 걸리면 어느 것을 고를지 정함(서비스DB 와 같게) */
     const 하나 = k => r.recordset.find(x => x.종류 === k) || null;
     res.json({ adm: 하나('adm'), lawd: 하나('lawd') });
   } catch (e) { fail(res, e, 'areas-here'); }
@@ -5579,7 +5582,7 @@ app.get('/api/complexes/near', async (req, res) => {
            /* 상자는 모서리가 반경보다 멀다 — 정확한 거리로 한 번 더 자른다 */
            AND geography::Point(c.centroid_lat, c.centroid_lng, 4326)
                  .STDistance(@me) <= @r
-         ORDER BY 거리m
+         ORDER BY 거리m, c.complex_id   /* 10-25: 같은 거리면 번호순(서비스DB 와 같게) */
         OPTION (RECOMPILE)`);
 
     const 잘림 = r.recordset.length > limit;

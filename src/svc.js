@@ -344,6 +344,10 @@ async function 신축핀(req, res, next) {
 const { 도로명맞춤, 묶음만들기, 종류꼬리 } = require('./suggest_shape');
 const 같이 = s => String(s == null ? '' : s).replace(/[\\%_]/g, m => '\\' + m);   // PG LIKE 이스케이프(옛 글자그대로 의 [..] 대신)
 const K = 'COLLATE svc.ko_ci';
+/* 청약 공고일(rcrit_pblanc_de)은 '2026-10-14' 와 '20261014  ' 가 섞여 있다. 적재DB(Windows 콜레이션)는 하이픈을 1단계에서 무시하고
+   (같은 날로 보고) 마지막에 하이픈 있는 쪽을 크게 친다 · 끝 빈칸은 무시 — 같게 맞춘다(10-25 청약 핀 대조에서 13건) */
+const 날오름 = c => `replace(rtrim(${c}), '-', '') NULLS FIRST, coalesce(${c} LIKE '%-%', false)`;
+const 날내림 = c => `replace(rtrim(${c}), '-', '') DESC NULLS LAST, coalesce(${c} LIKE '%-%', false) DESC`;
 async function 꼬리떼기PG(q) {
   if (!q || /\d/.test(q) || !종류꼬리.test(q)) return null;
   const 후보 = (q.endsWith('빌라') ? [q.slice(0, -1)] : []).concat([q.replace(종류꼬리, '').trim()]).filter(v => [...v].length >= 2);
@@ -451,13 +455,13 @@ async function 자동완성(req, res, next) {
             WHERE a.g IN (SELECT b.g FROM svc.lyr_sg_applyhome b WHERE b.name_ns ILIKE $1)),
          y AS (
            SELECT z.*, max(이름맞음) OVER w AS 맞음, max(앞맞음) OVER w AS 앞, count(*) OVER w AS 공고수,
-                  row_number() OVER (PARTITION BY g ORDER BY rcrit_pblanc_de NULLS FIRST, pblanc_no NULLS FIRST) AS 첫
+                  row_number() OVER (PARTITION BY g ORDER BY ${날오름('rcrit_pblanc_de')}, pblanc_no NULLS FIRST) AS 첫
              FROM z WINDOW w AS (PARTITION BY g)),
          k AS (SELECT g, string_agg("공고종류", ',' ORDER BY "공고종류") AS 종류들 FROM (SELECT DISTINCT g, "공고종류" FROM svc.lyr_sg_applyhome) d GROUP BY g)
          SELECT y.house_manage_no, y.house_nm, y."공고종류", k.종류들, y.공고수::int AS 공고수, y.rcrit_pblanc_de, y.hssply_adres, y.lat, y.lng,
                 count(*) OVER ()::int AS 전체
            FROM y JOIN k ON k.g = y.g WHERE y.첫 = 1 AND y.맞음 = 1
-          ORDER BY y.앞 DESC, y.rcrit_pblanc_de DESC NULLS LAST, y.house_manage_no LIMIT 4`, [q0, p]),
+          ORDER BY y.앞 DESC, ${날내림('y.rcrit_pblanc_de')}, y.house_manage_no LIMIT 4`, [q0, p]),
       /* 14 바뀐 행정동 — 날짜는 글자로 담았다: 옛 경로(tedious)처럼 UTC 자정 Date 로 */
       Q(`SELECT *, count(*) OVER ()::int AS 전체 FROM svc.lyr_sg_hdong_old WHERE "행정동명" ILIKE $2
           ORDER BY CASE WHEN lower("행정동명") = lower($1) THEN 0 WHEN "행정동명" ILIKE $3 THEN 1 ELSE 2 END, "행정동명" ${K} NULLS FIRST, "행정동코드" LIMIT 4`, [raw, q, p])
@@ -523,9 +527,9 @@ async function 목록검색(req, res, next) {
                            FROM svc.lyr_sg_redev WHERE has_geo = 1 AND (zone_ns ILIKE $1 OR biz_ns ILIKE $1)
                           ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, area_m2 DESC NULLS LAST, present_sn LIMIT 8`, [q0, qq]) : [];
     const 공고들 = q ? Q(`SELECT house_manage_no, house_nm, "공고종류", rcrit_pblanc_de, hssply_adres, tot_suply, lat, lng FROM (
-                             SELECT a.*, row_number() OVER (PARTITION BY house_manage_no ORDER BY rcrit_pblanc_de DESC NULLS LAST, pblanc_no DESC NULLS LAST) AS rn
+                             SELECT a.*, row_number() OVER (PARTITION BY house_manage_no ORDER BY ${날내림('rcrit_pblanc_de')}, pblanc_no DESC NULLS LAST) AS rn
                                FROM svc.lyr_sg_applyhome a WHERE a.name_ns ILIKE $1) x
-                          WHERE x.rn = 1 ORDER BY x.rcrit_pblanc_de DESC NULLS LAST, x.house_manage_no LIMIT 8`, [q0]) : [];
+                          WHERE x.rn = 1 ORDER BY ${날내림('x.rcrit_pblanc_de')}, x.house_manage_no LIMIT 8`, [q0]) : [];
     const [r0, lawds0, newbuilds, kr, redevs, applyhomes] = await Promise.all([본, 법정동들, 신축들, 이름들, 정비들, 공고들]);
     let lawds = lawds0;
     let 행들 = r0;
@@ -589,4 +593,134 @@ async function 목록검색(req, res, next) {
   }
 }
 
-module.exports = { 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, pg, 지금설정 };
+
+/* ---------- 남은 넷 (2026-10-25 사장님 "2번 ㄱㄱ") ----------
+   지금 위치 지역(/api/areas/here) · 내 위치 주변(/api/complexes/near) · 청약 핀(/api/applyhome/pins): svc.lyr_here_* · lyr_near · lyr_apin(_cnt)
+   호 상세(/api/ho/:pk) · 주변 지점(/points?kind=) · 점포 목록(/poi-list?life=): 호 · 조합이 너무 많아 미리 못 만든다 → **지나며 담기**(svc.resp_cache, 24시간 · 그 단지가 바뀌면 매시 발행이 지움).
+   ★ 켜고 끄기: svc_mode.json "misc" · "cache". _svc=1 은 켜기 전 대조용. */
+const 소수8 = x => Math.round(x * 1e8) / 1e8;
+async function 여기지역(req, res, next) {
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().misc || 강제) || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => !['lat', 'lng', '_svc'].includes(k))) return next();
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return next();
+  try {
+    const y = 소수8(lat), x = 소수8(lng);   // 옛 경로: sql.Decimal(11, 8) · (12, 8)
+    const r = await pg().query(`
+      SELECT * FROM (
+        SELECT 'adm' AS 종류, cd, "이름", sgg_cd FROM svc.lyr_here_adm
+         WHERE minx <= $1 AND maxx >= $1 AND miny <= $2 AND maxy >= $2 AND ST_Contains(g, ST_SetSRID(ST_MakePoint($1, $2), 4326))
+        UNION ALL
+        SELECT 'lawd', cd, "이름", sgg_cd FROM svc.lyr_here_lawd
+         WHERE minx <= $1 AND maxx >= $1 AND miny <= $2 AND maxy >= $2 AND ST_Contains(g, ST_SetSRID(ST_MakePoint($1, $2), 4326))) z
+      ORDER BY 1, 2`, [x, y]);
+    const 하나 = k => r.rows.find(z => z.종류 === k) || null;
+    실패 = 0; 세기('misc:here', 'hit'); res.set('X-Svc', 'hit');
+    return res.json({ adm: 하나('adm'), lawd: 하나('lawd') });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('misc:here', 'fallback'); return next();
+  }
+}
+async function 주변단지(req, res, next) {
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().misc || 강제) || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => !['lat', 'lng', 'r', 'limit', '_svc'].includes(k))) return next();
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 33 || lat > 39.5 || lng < 124 || lng > 132) return next();   // 거절 문구는 옛 경로가
+  const 반경 = Math.min(Math.max(Number(req.query.r) || 1000, 100), 5000);
+  const limit = 상한(req.query.limit, 30, 100);
+  try {
+    const dLat = 반경 / 111320.0, dLng = 반경 / (111320.0 * Math.cos(lat * Math.PI / 180));
+    const r = await pg().query(`
+      WITH me AS (SELECT geography(ST_SetSRID(ST_MakePoint($2, $1), 4326)) AS p)
+      SELECT complex_id, complex_nm, has_recap, dong_cnt, hhld_cnt_sum, pnu_cnt, centroid_lat, centroid_lng, rep_plat_plc, rep_road_addr, lawd_nm,
+             trunc(ST_Distance(geography(ST_SetSRID(ST_MakePoint(centroid_lng, centroid_lat), 4326)), me.p))::int AS "거리m"
+        FROM svc.lyr_near, me
+       WHERE centroid_lng BETWEEN $3 AND $4 AND centroid_lat BETWEEN $5 AND $6
+         AND ST_Distance(geography(ST_SetSRID(ST_MakePoint(centroid_lng, centroid_lat), 4326)), me.p) <= $7
+       ORDER BY "거리m", complex_id LIMIT $8`,
+      [lat, lng, lng - dLng, lng + dLng, lat - dLat, lat + dLat, 반경, limit + 1]);
+    const 잘림 = r.rows.length > limit;
+    실패 = 0; 세기('misc:near', 'hit'); res.set('X-Svc', 'hit');
+    return res.json({
+      기준: { lat, lng }, 반경m: 반경, 상한: limit, 잘림,
+      개수: 잘림 ? limit : r.rows.length,
+      주의: '좌표가 붙은 단지만 나옵니다. 필지 적재가 끝나는 대로 늘어납니다.',
+      단지: 잘림 ? r.rows.slice(0, limit) : r.rows });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('misc:near', 'fallback'); return next();
+  }
+}
+async function 청약핀(req, res, next) {
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().misc || 강제) || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => !['bbox', '_svc'].includes(k))) return next();
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (b.length !== 4 || b.some(v => !Number.isFinite(v))) return next();
+  try {
+    const [p, c] = await Promise.all([
+      pg().query(`SELECT house_manage_no, pblanc_no, house_nm, "공고종류", house_dtl_secd_nm, tot_suply, rcrit_pblanc_de, mvn_prearnge_ym, pnu, lat, lng
+                    FROM svc.lyr_apin WHERE lng BETWEEN $1 AND $3 AND lat BETWEEN $2 AND $4
+                   ORDER BY ${날내림('rcrit_pblanc_de')}, house_manage_no, pblanc_no LIMIT 600`, b),
+      pg().query(`SELECT "안이어짐", "자리없음" FROM svc.lyr_apin_cnt`)]);
+    실패 = 0; 세기('misc:apin', 'hit'); res.set('X-Svc', 'hit');
+    return res.json({ 핀: p.rows, 셈: c.rows[0] || {} });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('misc:apin', 'fallback'); return next();
+  }
+}
+/* 지나며 담기(응답 통째로) — 주소(물음표 포함) 하나 = 한 줄. 단지 번호를 같이 적어 두고 그 단지가 바뀌면 발행기가 지운다 */
+const 캐시길 = [
+  { re: /^\/api\/ho\/([A-Za-z0-9\-_]{1,50})$/, 허용: [], 단지: (m, body) => body && body.ho && body.ho.complex_id },
+  { re: /^\/api\/complexes\/(\d{1,9})\/points$/, 허용: ['kind', 'key'], 단지: m => Number(m[1]) },
+  { re: /^\/api\/complexes\/(\d{1,9})\/poi-list$/, 허용: ['life'], 단지: m => Number(m[1]) },
+];
+async function 응답캐시(req, res, next) {
+  if (req.method !== 'GET' || !지금설정().read || !지금설정().cache || Date.now() < 쉬는끝) return next();
+  const 길 = 캐시길.find(g => g.re.test(req.path));
+  if (!길 || Object.keys(req.query).some(k => !길.허용.includes(k))) return next();
+  const m = 길.re.exec(req.path), 키 = req.originalUrl;
+  try {
+    const r = await pg().query(`SELECT body_gz FROM svc.resp_cache WHERE url = $1 AND at > now() - interval '24 hours'`, [키]);
+    실패 = 0;
+    if (r.rows.length) {
+      세기('cache', 'hit');
+      res.status(200).set({ 'Content-Type': 'application/json; charset=utf-8', 'X-Svc': 'hit', 'Cache-Control': 'no-store', 'Vary': 'Accept-Encoding' });
+      if (/\bgzip\b/.test(req.get('accept-encoding') || '')) return res.set('Content-Encoding', 'gzip').end(r.rows[0].body_gz);
+      return res.end(zlib.gunzipSync(r.rows[0].body_gz));
+    }
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('cache', 'fallback'); return next();
+  }
+  세기('cache', 'miss'); res.set('X-Svc', 'miss');
+  const 원래 = res.send.bind(res);
+  let 담음 = false;
+  res.send = body => {
+    try {
+      if (!담음 && res.statusCode === 200 && (typeof body === 'string' || Buffer.isBuffer(body)) && /json/.test(String(res.get('Content-Type') || ''))) {
+        담음 = true;
+        const raw = Buffer.isBuffer(body) ? body : Buffer.from(body, 'utf8');
+        setImmediate(() => {
+          let j; try { j = JSON.parse(raw.toString('utf8')); } catch { return; }
+          if (j && j.error) return;
+          const cid = Number(길.단지(m, j)) || null;
+          zlib.gzip(raw, { level: 6 }, (err, gz) => {
+            if (err) return;
+            pg().query(`INSERT INTO svc.resp_cache (url, complex_id, body_gz, bytes, at) VALUES ($1, $2, $3, $4, now())
+                        ON CONFLICT (url) DO UPDATE SET complex_id = EXCLUDED.complex_id, body_gz = EXCLUDED.body_gz, bytes = EXCLUDED.bytes, at = now()`,
+                       [키, cid, gz, raw.length]).then(() => 세기('cache', 'stored'), () => {});
+          });
+        });
+      }
+    } catch (e) { /* 담기 실패는 화면과 상관없다 */ }
+    return 원래(body);
+  };
+  return next();
+}
+
+module.exports = { 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, 여기지역, 주변단지, 청약핀, 응답캐시, pg, 지금설정 };
