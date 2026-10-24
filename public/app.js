@@ -3969,13 +3969,12 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
     /* 단지 머리 · 지도 · AI 검색과 **같은 값**(동별 표제부 세대 합 = hhld_cnt_sum). 총괄표제부 값이 다르면 옆에 적는다 */
     const 대장 = c.hhld_cnt_sum || spec.세대;
     const kh = k && Number(k.kapt_세대) ? Number(k.kapt_세대) : null;
-    add('세대', 대장 ? `${fmt(대장)}세대${spec.세대 && Number(spec.세대) !== Number(대장) ? ` <span class="muted">· 총괄표제부 ${fmt(spec.세대)}세대</span>` : ''}${kh ? (kh === Number(대장) ? ` <span class="muted">· K-apt 같음</span>`
-        : spec.세대 && kh === Number(spec.세대) ? ` <span class="muted">· K-apt ${fmt(kh)}세대(총괄표제부와 같음)</span>`
-        : ` <span class="gap g-unknown">K-apt ${fmt(kh)}세대 — 대장과 다릅니다(상가·관리동이 섞였거나 다른 단지를 이었을 수 있음)</span>`) : ''}${
-        k && Number(k.kapt_호수) && kh && Number(k.kapt_호수) !== kh ? ` <span class="muted">· K-apt 호수 ${fmt(k.kapt_호수)}</span>` : ''}` : '');
-    add('동', [c.dong_cnt != null ? `대장 ${fmt(c.dong_cnt)}동` : '', c.bld_cnt != null ? `건물 외곽선 ${fmt(c.bld_cnt)}` : '',
-               k && Number(k.kapt_동수) ? `K-apt 주거동 ${fmt(k.kapt_동수)}` : ''].filter(Boolean).join(' · '));
-    add('층', [c.max_floor ? `지상 최고 ${fmt(c.max_floor)}층 <span class="muted">(건물 외곽선)</span>` : '',
+    /* 2026-10-24 22:05 사장님: '· K-apt 같음' 같은 덧말을 뺀다. 출처가 서로 **다를 때만** 짧게 그 값을 적는다(무엇이 왜 다른지는 정책). */
+    const 다른값 = [spec.세대 && Number(spec.세대) !== Number(대장) ? `총괄표제부 ${fmt(spec.세대)}` : '',
+                   kh && kh !== Number(대장) && !(spec.세대 && kh === Number(spec.세대)) ? `K-apt ${fmt(kh)}` : ''].filter(Boolean);
+    add('세대', 대장 ? `${fmt(대장)}세대${다른값.length ? ` <span class="muted">· ${다른값.join(' · ')}</span>` : ''}` : '');
+    add('동', c.dong_cnt != null ? `${fmt(c.dong_cnt)}동${k && Number(k.kapt_동수) && Number(k.kapt_동수) !== Number(c.dong_cnt) ? ` <span class="muted">· 주거동 ${fmt(k.kapt_동수)}</span>` : ''}` : '');
+    add('층', [c.max_floor ? `지상 ${fmt(c.max_floor)}층` : '',
                has(spec.지하층) ? (spec.지하층 ? `지하 ${fmt(spec.지하층)}층` : '지하 없음') : ''].filter(Boolean).join(' · '), dongOnly, dongNote);
     add('연면적', c.tot_area_sum ? fmt(Math.round(c.tot_area_sum)) + ' ㎡' : '');
   }
@@ -4007,8 +4006,9 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
       if (v.잰수 < v.대장수) 덧.push(`${fmt(v.대장수)}개 중 ${fmt(v.잰수)}개 기준`);
       /* ★ 수치와 '무엇과 견줬나' 를 **위아래로** 나눈다. 한 줄로 붙이면
          376~520px 패널에서 줄이 넘쳐 읽히지 않는다(실측). */
-      return `<span class="qt"><b>상위 ${수}</b><em>${esc(범위말로())} ${묶음} ${esc(v.종류)} ${fmt(v.바구니수)}개 중`
-           + (덧.length ? ` · ${덧.join(' · ')}` : '') + `</em></span>`;
+      /* 2026-10-24 22:05 사장님: '서울 · 수성 · 성남 · 안양 제2종일반주거지역 단지 3,065개 중' 은 툴팁으로(자세한 기준은 ? · 정책) */
+      const 기준 = `${범위말로()} ${v.바구니종류 > 1 ? '여러 용도지역' : (v.용도지역 || '')} ${v.종류} ${fmt(v.바구니수)}개 중${덧.length ? ' · ' + 덧.join(' · ') : ''}`;
+      return `<span class="qt" title="${esc(기준)}"><b>상위 ${수}</b> <span class="muted">같은 용도지역 ${esc(v.종류)} 중</span></span>`;
     };
     /* 단지를 먼저 — 사람이 먼저 궁금해하는 쪽이다 */
     const 순서 = [...줄].sort((a, b) => (a.종류 === '단지' ? -1 : 1));
@@ -4034,7 +4034,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
   add('건물', (has(spec.주건축물) || has(spec.부속건축물))
     ? [has(spec.주건축물) ? `주 ${fmt(spec.주건축물)}동` : '',
        has(spec.부속건축물) ? `부속 ${fmt(spec.부속건축물)}동` : ''].filter(Boolean).join(' · ') : '');
-  add('주용도', spec.주용도 ? esc(spec.주용도) : '');
+  /* 주용도는 단지 이름 위 용도 칩과 같은 값(중복) — 2026-10-24 뺐다 */
 
   /* ★ 전용률 (2026-10-21). 호 상세(openHo)가 **호 하나**에 대해 이미 적고 있는 것과
      같은 사실을 **단지 단위**로 적는다. 거르는 조건은 서버에서 글자 그대로 맞춰 뒀다
@@ -4058,9 +4058,8 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
       const 계약 = 전유 + 공용;
       const 몇 = (호총수 && 호총수 > e.잰호)
         ? `${fmt(호총수)}호 중 ${fmt(e.잰호)}호` : `${fmt(e.잰호)}호`;
-      add('전용률', `<span class="qt"><b>${(전유 / 계약 * 100).toFixed(1)}%</b>`
-        + `<em>계약면적 기준 · ${몇} 기준</em></span>`
-        + `<p class="srcline">전유 ${fmt(Math.round(전유))}㎡ ÷ 계약면적 ${fmt(Math.round(계약))}㎡</p>`);   // 왜 분양 전용률과 다른지는 정책(bld)
+      /* 2026-10-24 22:05: 계산식 · 기준은 툴팁으로(정책 bld 에 설명) */
+      add('전용률', `<span class="qt" title="${esc(`계약면적 기준 · ${몇} 기준 — 전유 ${fmt(Math.round(전유))}㎡ ÷ 계약면적 ${fmt(Math.round(계약))}㎡`)}"><b>${(전유 / 계약 * 100).toFixed(1)}%</b></span>`);
     } else if (e && Number(e.면적행있는호) > 0) {
       /* 받아왔는데 공용이 없다 - 단독·다가구처럼 실제로 공용부가 없는 건물이 그렇다 */
       add('전용률', '', 'EMPTY', '이 단지 호에 공용 항목이 없습니다');
@@ -5301,6 +5300,10 @@ const 정책 = [
     '<b>동·호 격자</b>는 가로가 라인, 세로가 층, 칸이 호입니다. 라인은 호번호가 <b>층×100+라인</b> 꼴일 때만 가릅니다(상가·지하 등은 ? 칸).',
     '격자 칸에 올리면 동·라인·층·호와 용도·공시가격이 나오고, 누르면 그 호의 공시가격 이력이 열립니다. 한 라인 안을 세로로 읽는 것이 순수한 층 차이입니다(라인이 다르면 평형이 섞입니다).',
     '<b>전용률</b>은 전유 ÷ <b>계약면적</b>(전유+공용 전부)입니다. 공용 합계가 과소일 수 있어 실제보다 높게 나올 수 있습니다. 흔히 말하는 70~80%는 전유 ÷ 공급(분양)면적인데, 공용을 주거공용·기타공용으로 가르는 코드가 원본에 없어 공급면적은 내지 않습니다.',
+    '<b>제원 · 세대</b>는 동별 표제부 세대의 합입니다. 총괄표제부 · K-apt 값이 <b>다를 때만</b> 옆에 그 값을 짧게 적습니다(같으면 안 적음). 다를 수 있는 까닭: 총괄표제부는 단지를 한 장으로 적은 값이라 동별 합과 어긋나기도 하고, K-apt 는 관리사무소가 등록한 값이라 상가 · 관리동이 섞이거나 빠지기도 합니다.',
+    '<b>제원 · 동</b>은 대장의 동(주건축물 · 부속 포함) 수입니다. K-apt 주거동 수가 다르면 옆에 \'주거동 N\' 으로 적습니다. <b>층</b>의 지상 최고층은 건물 외곽선(VWorld) 기준이고, 지하층은 대장 기준입니다.',
+    '<b>용적률 분위</b>: 같은 용도지역(예: 제2종일반주거지역) 안의 단지끼리, 또는 건물끼리 용적률로 줄 세운 순위입니다. 비교 범위는 받은 지역 전체이고, 몇 개와 견줬는지는 값에 마우스를 올리면 나옵니다. 여러 용도지역에 걸친 단지는 \'여러 용도지역\' 묶음과 견줍니다.',
+    '<b>용도</b>(단지 이름 위 칩)는 총괄표제부 주용도(없으면 표제부 주용도) 원문입니다. 칩에 마우스를 올리면 기타용도와 동별 주용도가 나옵니다. 호별 용도(아파트 · 근린생활시설 · 학원 …)는 동·호 탭의 호 칸에 있습니다.',
   ] },
   { 키: '주택가격', 제목: '공시가격 (공동주택가격)', 글: [
     '공시가격은 <b>과세표준용</b>이라 실거래가가 아닙니다. 단지 간 비교에 쓰면 안 됩니다. 격자 색·분위는 <b>그 단지 안</b>에서의 5분위입니다.',
@@ -6311,8 +6314,9 @@ async function 용도채우기(cid) {
   box.innerHTML = (주 ? `<span class="pill use" title="${esc(풀이)}">${esc(주)}</span>` : '<span class="pill">용도 원문 없음</span>')
     + (기타 && 기타 !== 주 ? ` <span class="usetxt" title="${esc(풀이)}">${esc(기타.length > 40 ? 기타.slice(0, 40) + '…' : 기타)}</span>` : '')
     + (다른동.length ? ` <span class="usetxt muted">· 다른 동 ${esc(다른동.join(', '))}</span>` : '')
-    + (총 ? ` <span class="pill" title="총괄표제부(여러 동을 묶은 대장)가 있는 단지">여러 동 · 총괄표제부</span>` : '');
-  const comp = document.querySelector(`#detail [data-usecomp="${키}"]`);
+    + '';
+  /* 2026-10-24 22:05 사장님 "단지 상세에서 쓸데없는 말을 빼고 싶다 — 확인하고 싶으면 정책" : 전유부 호별 용도 줄 · '여러 동 · 총괄표제부' 칩을 뺐다 */
+  const comp = null;
   if (comp && 전.length) {
     const 합 = 전.reduce((t, x) => t + (Number(x.호) || 0), 0);
     comp.innerHTML = `전유부 호별 용도(원문, 센 것): ${전.slice(0, 5).map(x => `${esc(x.세부용도 || '빈칸')} ${fmt(x.호)}`).join(' · ')}${
