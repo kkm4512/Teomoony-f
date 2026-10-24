@@ -175,4 +175,134 @@ async function 마커(req, res, next) {
   }
 }
 
-module.exports = { 단지응답, 마커, pg, 지금설정 };
+
+/* ---------- 지도 층 (2단계, 2026-10-25) ----------
+   발행기(etl/svc_layers.py)가 적재DB 의 화면 질의에서 bbox 조건만 뺀 그대로를 svc.lyr_* 에 담는다. 여기서는 bbox 로 고르고
+   **옛 처리와 같은 코드로** 응답을 만든다(속성 순서 · 형 · 상한 · 잘림 그대로).
+   ★ 켜고 끄기: svc_mode.json "map" (read 와 따로). 물음표에 bbox · limit 말고 다른 게 붙으면 옛 경로(대조용 _x=1).
+   ★ 동점 순서: 옛 경로와 같은 기준 + 마지막에 키(옛 경로에도 같이 넣었다). PG 의 DESC 는 NULL 이 앞이라 NULLS LAST 를 붙인다(MSSQL 과 같게). */
+/* GiST 로 후보를 고르고(&& 는 PG 기하 연산이라 1e-6 만큼 너그럽다 — 경계 밖 필지가 한두 개 더 걸렸다, 10-25 대조) 정확한 비교로 다시 거른다 = 옛 경로와 같은 조건 */
+const 상자 = '(box(point(minx, miny), point(maxx, maxy)) && box(point($1, $2), point($3, $4)) AND maxx >= $1 AND minx <= $3 AND maxy >= $2 AND miny <= $4)';
+const 소수7 = x => Math.round(x * 1e7) / 1e7;
+function 층켜짐(req, 허용) {
+  /* _svc=1 = 켜기 전 대조용(서비스DB 길을 강제로) — map 이 꺼져 있어도 이 요청만 */
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().map || 강제) || Date.now() < 쉬는끝) return null;
+  if (Object.keys(req.query).some(k => !허용.includes(k) && k !== '_svc')) return null;
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (b.length !== 4 || b.some(n => !Number.isFinite(n))) return null;   // 틀린 bbox → 옛 경로가 400 을 낸다
+  return b;
+}
+function 층(이름, 만들기) {
+  return async (req, res, next) => {
+    const b0 = 층켜짐(req, ['bbox', 'limit']);
+    if (!b0) return next();
+    /* 옛 경로는 bbox 를 sql.Decimal(12, 7) 로 넘긴다 = 소수 7자리로 반올림된 값으로 비교. 같게 맞춘다(닫힌 핀은 sql.Float — 그대로) */
+    const b = 이름 === 'closed-pins' ? b0 : b0.map(소수7);
+    try {
+      const 몸 = await 만들기(req, b);
+      실패 = 0; 세기('map:' + 이름, 'hit');
+      res.set('X-Svc', 'hit');
+      return res.json(몸);
+    } catch (e) {
+      if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+      세기('map:' + 이름, 'fallback'); return next();
+    }
+  };
+}
+function 면들(rows) {   // 옛 toFC 와 같다: geojson 이 없거나 깨진 줄은 빼고, 나머지 칸은 그대로 properties
+  const features = [];
+  for (const row of rows) {
+    if (!row.geojson) continue;
+    let g;
+    try { g = JSON.parse(row.geojson); } catch { continue; }
+    const { geojson, ...props } = row;
+    features.push({ type: 'Feature', geometry: g, properties: { ...props } });
+  }
+  return { type: 'FeatureCollection', features };
+}
+const 필지 = 층('parcels', async (req, b) => {
+  const limit = 상한(req.query.limit, 3000, 8000);
+  const r = await pg().query(`SELECT pnu, jibun, addr, jiga, geojson, complex_id, complex_nm, dong_cnt, has_recap
+                                FROM svc.lyr_parcel WHERE ${상자} LIMIT $5`, [b[0], b[1], b[2], b[3], limit + 1]);
+  const 잘림 = r.rows.length > limit;
+  const fc = 면들(잘림 ? r.rows.slice(0, limit) : r.rows);
+  fc.상한 = limit; fc.잘림 = 잘림;
+  return fc;
+});
+const 건물 = 층('buildings', async (req, b) => {
+  const limit = 상한(req.query.limit, 3000, 8000);
+  const r = await pg().query(`SELECT bd_mgt_sn, buld_nm, buld_no, rd_nm, gro_flo_co, area_m2_approx, pnu, geojson, complex_id, complex_nm, has_recap
+                                FROM svc.lyr_building WHERE ${상자} LIMIT $5`, [b[0], b[1], b[2], b[3], limit + 1]);
+  const 잘림 = r.rows.length > limit;
+  const fc = 면들(잘림 ? r.rows.slice(0, limit) : r.rows);
+  fc.상한 = limit; fc.잘림 = 잘림;
+  return fc;
+});
+const 법정동 = 층('lawds', async (req, b) => {
+  const r = await pg().query(`SELECT v.lawd_cd, v.emd_nm, v.full_nm, v.centroid_lat, v.centroid_lng, v.complex_cnt, v.dong_cnt, v.hhld_cnt,
+                                     v.max_amount, v.max_area, v.max_ymd, v.trade_cnt, g.geojson
+                                FROM svc.lyr_lawd_stat v LEFT JOIN svc.lyr_lawd_geo g ON g.lawd_cd = v.lawd_cd
+                               WHERE ${상자.replace(/minx|miny|maxx|maxy/g, m => 'v.' + m)}
+                               ORDER BY v.complex_cnt DESC NULLS LAST, v.lawd_cd`, [b[0], b[1], b[2], b[3]]);
+  const features = r.rows.filter(d => d.geojson).map(d => ({
+    type: 'Feature',
+    geometry: JSON.parse(d.geojson),
+    properties: {
+      lawd_cd: d.lawd_cd, emd_nm: d.emd_nm, full_nm: d.full_nm,
+      centroid_lat: d.centroid_lat, centroid_lng: d.centroid_lng,
+      complex_cnt: d.complex_cnt, dong_cnt: d.dong_cnt, hhld_cnt: d.hhld_cnt,
+      max_amount: d.max_amount, max_area: d.max_area, max_ymd: d.max_ymd,
+      trade_cnt: d.trade_cnt,
+    },
+  }));
+  return { type: 'FeatureCollection', features };
+});
+const 행정동 = 층('adms', async (req, b) => {
+  const r = await pg().query(`SELECT * FROM svc.lyr_adm WHERE minx <= $3 AND maxx >= $1 AND miny <= $4 AND maxy >= $2`, [b[0], b[1], b[2], b[3]]);
+  const features = r.rows.filter(d => d.geojson).map(d => ({
+    type: 'Feature',
+    geometry: JSON.parse(d.geojson),
+    properties: {
+      adm_cd_sgis: d.adm_cd_sgis, year: d.year, adm_nm: d.adm_nm, emd_nm: d.emd_nm,
+      centroid_lat: d.centroid_lat, centroid_lng: d.centroid_lng,
+      연결: d.연결, 연결비율: d.연결비율, 상가수: d.상가수,
+      갈림내역: d.연결 === '갈림' ? d.갈림내역 : null,
+      adm_cd_mois: d.연결 === '확인' ? d.adm_cd_mois : null,
+      mois_nm: d.mois_nm,
+    },
+  }));
+  return { type: 'FeatureCollection', 출처: '통계청 SGIS 행정구역 경계', features };
+});
+const 닫힌핀 = 층('closed-pins', async (req, b) => {
+  const r = await pg().query(`SELECT site_key, pnu, shter_day, "이름", "이름출처", "주용도", "동수", "총괄세대", "사용승인일", "폐쇄구분",
+                                     plat_plc, new_plat_plc, lat, lng, now_complex_id, now_nm, "위치근거"
+                                FROM svc.lyr_closed WHERE lat BETWEEN $2 AND $4 AND lng BETWEEN $1 AND $3
+                               ORDER BY "동수" DESC NULLS LAST, shter_day DESC NULLS LAST, site_key LIMIT 800`, [b[0], b[1], b[2], b[3]]);
+  return { 핀: r.rows };
+});
+/* 신축 핀: bbox 가 없으면 전국 목록(옛 경로와 같게) — 그래서 층() 을 안 쓰고 따로 */
+async function 신축핀(req, res, next) {
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().map || 강제) || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => k !== 'bbox' && k !== 'limit' && k !== '_svc')) return next();
+  const raw = req.query.bbox == null ? null : String(req.query.bbox);
+  const b = String(raw || '').split(',').map(Number).map(소수7);
+  const 있음 = raw !== null;
+  if (있음 && !(b.length === 4 && b.every(Number.isFinite))) return next();
+  try {
+    const lim = 상한(req.query.limit, 200, 500);
+    const r = await pg().query(`SELECT kapt_code, kapt_name, lawd_nm, pnu, "세대", "동수", "사용승인", "거래", "최고가", centroid_lat, centroid_lng
+                                  FROM svc.lyr_newbuild
+                                 WHERE centroid_lat IS NOT NULL ${있음 ? 'AND centroid_lng BETWEEN $2 AND $4 AND centroid_lat BETWEEN $3 AND $5' : ''}
+                                 ORDER BY "거래" DESC NULLS LAST, "세대" DESC NULLS LAST, kapt_code LIMIT $1`,
+                                있음 ? [lim, b[0], b[1], b[2], b[3]] : [lim]);
+    실패 = 0; 세기('map:newbuilds', 'hit'); res.set('X-Svc', 'hit');
+    return res.json({ markers: r.rows });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('map:newbuilds', 'fallback'); return next();
+  }
+}
+
+module.exports = { 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, pg, 지금설정 };

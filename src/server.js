@@ -442,6 +442,10 @@ setTimeout(기록_정리, 5 * 60 * 1000).unref();   /* 뜨고 5분 뒤 한 번 *
 /* 2026-10-24 서비스DB(PostgreSQL) 읽기 — 발행된 단지 응답이 있으면 그걸 보내고, 없으면 아래 기존 경로(적재DB). 끄기: svc_mode.json read:false (src/svc.js) */
 app.use(require('./svc').단지응답);
 app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지도 마커도 서비스DB 에서(없거나 실패면 아래 기존 경로) */
+/* 2026-10-25 2단계: 지도 층도 서비스DB 에서(svc_mode.json "map" 이 켜졌을 때만 · 실패면 아래 기존 경로) */
+{ const s = require('./svc');
+  app.get('/api/parcels', s.필지); app.get('/api/buildings', s.건물); app.get('/api/lawds', s.법정동); app.get('/api/adms', s.행정동);
+  app.get('/api/closed/pins', s.닫힌핀); app.get('/api/newbuilds', s.신축핀); }
 
 app.get('/api/usage', async (req, res) => {
   try {
@@ -4001,7 +4005,7 @@ app.get('/api/newbuilds', async (req, res) => {
              거래, 최고가, centroid_lat, centroid_lng
       FROM gold.v_newbuild
       WHERE ${where}
-      ORDER BY 거래 DESC, 세대 DESC`);
+      ORDER BY 거래 DESC, 세대 DESC, kapt_code`);   /* 10-25: 동점 순서를 정함(서비스DB 와 같게) */
     res.json({ markers: r.recordset });
   } catch (e) { fail(res, e, 'newbuilds'); }
 });
@@ -4128,7 +4132,7 @@ app.get('/api/lawds', async (req, res) => {
         FROM gold.v_lawd_map v
         WHERE bbox_minx <= @x1 AND bbox_maxx >= @x0      -- bbox 가 겹치면 포함
           AND bbox_miny <= @y1 AND bbox_maxy >= @y0
-        ORDER BY complex_cnt DESC`);
+        ORDER BY complex_cnt DESC, lawd_cd`);   /* 10-25: 동점 순서(서비스DB 와 같게) */
     const features = r.recordset.filter(d => d.geojson).map(d => ({
       type: 'Feature',
       geometry: JSON.parse(d.geojson),
@@ -5072,7 +5076,7 @@ app.get('/api/closed/pins', async (req, res) => {
       SELECT TOP 800 ${폐쇄칸}
         FROM gold.closed_site s LEFT JOIN gold.complex c ON c.complex_id = s.now_complex_id
        WHERE s.lat BETWEEN @y0 AND @y1 AND s.lng BETWEEN @x0 AND @x1
-       ORDER BY s.동수 DESC, s.shter_day DESC;`);
+       ORDER BY s.동수 DESC, s.shter_day DESC, s.site_key;`);   /* 10-25: 동점 순서(서비스DB 와 같게) — 800 에서 잘릴 때 남는 핀이 매번 같게 */
     res.json({ 핀: r.recordset });
   } catch (e) { fail(res, e, 'closed-pins'); }
 });
