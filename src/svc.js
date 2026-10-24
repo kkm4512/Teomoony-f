@@ -305,4 +305,259 @@ async function 신축핀(req, res, next) {
   }
 }
 
-module.exports = { 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, pg, 지금설정 };
+
+/* ---------- 자동완성 (2단계 둘째 묶음, 2026-10-25) ----------
+   발행기(svc_layers.py · svc_suggest_src.py)가 묶음마다 **검색어와 상관없는 값을 적재DB 에서 미리 계산**해 svc.lyr_sg_* 에 담는다.
+   여기서는 옛 질의와 같은 조건으로 거르고 · 같은 순서로 세우고 · 같은 상한으로 자른 뒤, **옛 경로와 같은 함수(묶음만들기)** 로 응답을 만든다.
+   ★ 적재DB 는 Korean_Wansung_CI_AS(대소문자 무시) → LIKE 는 ILIKE, '=' 는 lower() 끼리. 이름 정렬은 svc.ko_ci(ICU, 대소문자 무시).
+   ★ NULL 순서: MSSQL 은 오름차순에서 NULL 이 먼저 · 내림차순에서 나중 — PG 는 반대가 기본이라 하나하나 적는다.
+   ★ 켜고 끄기: svc_mode.json "suggest". _svc=1 = 켜기 전 대조용. */
+const { 도로명맞춤, 묶음만들기, 종류꼬리 } = require('./suggest_shape');
+const 같이 = s => String(s == null ? '' : s).replace(/[\\%_]/g, m => '\\' + m);   // PG LIKE 이스케이프(옛 글자그대로 의 [..] 대신)
+const K = 'COLLATE svc.ko_ci';
+async function 꼬리떼기PG(q) {
+  if (!q || /\d/.test(q) || !종류꼬리.test(q)) return null;
+  const 후보 = (q.endsWith('빌라') ? [q.slice(0, -1)] : []).concat([q.replace(종류꼬리, '').trim()]).filter(v => [...v].length >= 2);
+  if (!후보.length) return null;
+  const 있나 = async v => (await pg().query(`
+      (SELECT 1 FROM svc.lyr_sg_complex WHERE complex_nm ILIKE $1 LIMIT 1)
+      UNION ALL (SELECT 1 FROM svc.lyr_sg_complex_name WHERE src = 'alias' AND name ILIKE $1 LIMIT 1)
+      UNION ALL (SELECT 1 FROM svc.lyr_sg_complex_name WHERE src = 'kapt' AND name ILIKE $1 LIMIT 1)`, [`%${같이(v)}%`])).rows.length > 0;
+  if (await 있나(q)) return null;
+  for (const v of 후보) if (await 있나(v)) return v;
+  return null;
+}
+async function 자동완성(req, res, next) {
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().suggest || 강제) || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => k !== 'q' && k !== '_svc')) return next();
+  const raw = String(req.query.q || '').trim().slice(0, 60);
+  const 길이 = [...raw].length;
+  if (!raw || 길이 < 2) return next();   // 빈 것 · 한 글자는 옛 경로가 DB 없이 바로 답한다
+  try {
+    const t0 = Date.now();
+    let 글자 = 도로명맞춤(raw);
+    const 뗀말 = await 꼬리떼기PG(도로명맞춤(raw));
+    if (뗀말) 글자 = 뗀말;
+    const e = 같이(글자);
+    const q = `%${e}%`, p = `${e}%`, q0 = `%${e.replace(/\s+/g, '')}%`;
+    const 짧은 = /\d/.test(raw)
+      ? (() => { const w = 도로명맞춤(raw).replace(/번지/g, '').trim().split(/\s+/); return w.length >= 2 ? w.slice(-2).join(' ') : null; })()
+      : null;
+    const qid = /^\d{1,9}$/.test(raw) ? Number(raw) : null;
+    const 주소 = /\d/.test(raw) && 길이 >= 3;
+    const Q = (sql, v) => pg().query(sql, v).then(r => r.rows);
+    const rs = await Promise.all([
+      /* 1 구 */
+      Q(`SELECT sgg_cd, sgg_nm, sido_nm, 전체, minx, miny, maxx, maxy FROM (
+           SELECT *, count(*) OVER ()::int AS 전체, CASE WHEN lower(sgg_nm) = lower($1) THEN 0 WHEN sgg_nm ILIKE $3 THEN 1 ELSE 2 END AS 순
+             FROM svc.lyr_sg_sgg WHERE sgg_nm ILIKE $2) g
+         ORDER BY 순, sgg_nm ${K} NULLS FIRST, sgg_cd LIMIT 3`, [raw, q, p]),
+      /* 2 법정동 */
+      Q(`SELECT lawd_cd, emd_nm, full_nm, 전체, "경계있음", minx, miny, maxx, maxy FROM (
+           SELECT *, count(*) OVER ()::int AS 전체, CASE WHEN lower(emd_nm) = lower($1) THEN 0 WHEN emd_nm ILIKE $3 THEN 1 ELSE 2 END AS 순
+             FROM svc.lyr_sg_lawd WHERE emd_nm ILIKE $2) d
+         ORDER BY 순, emd_nm ${K} NULLS FIRST, lawd_cd LIMIT 6`, [raw, q, p]),
+      /* 3 행정동 */
+      Q(`SELECT adm_cd_sgis, year, adm_nm, emd_nm, mois_nm, "연결비율", minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체,
+                CASE WHEN emd_nm ILIKE $2 THEN emd_nm ELSE mois_nm END AS 걸린이름, "지금없음"
+           FROM svc.lyr_sg_adm WHERE emd_nm ILIKE $2 OR mois_nm ILIKE $2
+          ORDER BY CASE WHEN lower(emd_nm) = lower($1) OR lower(mois_nm) = lower($1) THEN 0 WHEN emd_nm ILIKE $3 THEN 1 ELSE 2 END,
+                   emd_nm ${K} NULLS FIRST, adm_cd_sgis LIMIT 5`, [raw, q, p]),
+      /* 4 단지 */
+      Q(`WITH c AS (
+           SELECT complex_id FROM svc.lyr_sg_complex WHERE nm_ns ILIKE $1
+           UNION SELECT complex_id FROM svc.lyr_sg_complex WHERE complex_id = $2::int
+           UNION SELECT n.complex_id FROM svc.lyr_sg_complex_name n WHERE n.live = 1 AND n.name_ns ILIKE $1
+           UNION SELECT complex_id FROM svc.lyr_sg_complex WHERE $3::boolean AND (rep_plat_plc ILIKE $4 OR rep_road_addr ILIKE $4))
+         SELECT x.complex_id, x.complex_nm, x.rep_plat_plc, x.hhld_cnt_sum, x.dong_cnt, x.centroid_lat, x.centroid_lng,
+                count(*) OVER ()::int AS 전체, x."실거래이름", x."폐쇄"
+           FROM c JOIN svc.lyr_sg_complex x ON x.complex_id = c.complex_id
+          ORDER BY CASE WHEN x.complex_id = $2::int THEN 0 WHEN x.complex_nm ILIKE $5 THEN 1 WHEN x."실거래이름" ILIKE $5 THEN 1 ELSE 2 END,
+                   x.hhld_cnt_sum DESC NULLS LAST, x.complex_id LIMIT 5`, [q0, qid, 주소, q, p]),
+      /* 5 신축 */
+      Q(`SELECT kapt_code, kapt_name, lawd_nm, "세대", centroid_lat, centroid_lng, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_newbuild WHERE name_ns ILIKE $1
+          ORDER BY CASE WHEN kapt_name ILIKE $2 THEN 0 ELSE 1 END, "세대" DESC NULLS LAST, kapt_code LIMIT 3`, [q0, p]),
+      /* 6 재개발 · 정비 */
+      Q(`SELECT present_sn, zone_nm, biz_nm, propel_nm, centroid_lat, centroid_lng, minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_redev WHERE zone_ns ILIKE $1 OR biz_ns ILIKE $1
+          ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, zone_nm ${K} NULLS FIRST, present_sn LIMIT 4`, [q0, p]),
+      /* 7 지하철역 */
+      Q(`SELECT sttn_nm, "노선", lat, lon, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_subway WHERE sttn_nm ILIKE $2
+          ORDER BY CASE WHEN lower(sttn_nm) = lower($1) OR lower(sttn_nm) = lower($1 || '역') THEN 0 WHEN sttn_nm ILIKE $3 THEN 1 ELSE 2 END,
+                   sttn_nm ${K} NULLS FIRST LIMIT 4`, [raw, q, p]),
+      /* 8 학교 */
+      Q(`SELECT school_nm, school_se, "주소", lat, lon, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_school WHERE school_nm ILIKE $1
+          ORDER BY CASE WHEN school_nm ILIKE $2 THEN 0 ELSE 1 END, school_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST, school_se ${K} NULLS FIRST LIMIT 4`, [q, p]),
+      /* 9 유치원 */
+      Q(`SELECT kinder_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_kinder WHERE kinder_nm ILIKE $1
+          ORDER BY CASE WHEN kinder_nm ILIKE $2 THEN 0 ELSE 1 END, kinder_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST LIMIT 3`, [q, p]),
+      /* 10 학원 */
+      Q(`SELECT aca_nm, realm_sc_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체,
+                (SELECT count(*)::int FROM svc.lyr_sg_academy x WHERE x.lat IS NULL AND x.aca_nm ILIKE $1) AS 좌표없음
+           FROM svc.lyr_sg_academy WHERE lat IS NOT NULL AND aca_nm ILIKE $1
+          ORDER BY CASE WHEN aca_nm ILIKE $2 THEN 0 ELSE 1 END, aca_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST, realm_sc_nm ${K} NULLS FIRST LIMIT 4`, [q, p]),
+      /* 11 상가 — 앞부분 일치 */
+      /* 적재DB 처럼 너비도 무시: nm_key = lower(NFKC(이름)) · 검색어도 같게 */
+      Q(`SELECT bizes_nm, brch_nm, inds_scls_nm, "주소", lat, lon, adong_nm, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_semas WHERE nm_key LIKE $2
+          ORDER BY CASE WHEN nm_key = $1 THEN 0 ELSE 1 END, bizes_nm ${K} NULLS FIRST, brch_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST, bizes_id LIMIT 5`,
+        [raw.normalize('NFKC').toLowerCase(), 같이(글자.normalize('NFKC').toLowerCase()) + '%']),
+      /* 12 폐쇄 · 말소 대장 */
+      Q(`SELECT site_key, "이름", "폐쇄구분", shter_day, "주용도", "총괄세대", plat_plc, lat, lng, now_complex_id, "동수",
+                CASE WHEN "이름" ILIKE $2 THEN 0 ELSE 1 END AS 주소로, count(*) OVER ()::int AS 전체
+           FROM svc.lyr_sg_closed
+          WHERE "이름_ns" ILIKE $1
+             OR ($4::text IS NOT NULL AND ("지번짧게" = $4 OR "지번짧게" LIKE $5 || '-%' OR "도로짧게" = $4 OR "도로짧게" LIKE $5 || '-%'))
+          ORDER BY CASE WHEN "이름" ILIKE $3 THEN 0 WHEN "이름" ILIKE $2 THEN 1 ELSE 2 END, "총괄세대" DESC NULLS LAST, "동수" DESC NULLS LAST,
+                   "이름" ${K} NULLS FIRST, site_key LIMIT 4`, [q0, q, p, 짧은, 같이(짧은)]),
+      /* 13 청약 공고 */
+      Q(`WITH z AS (
+           SELECT a.*, CASE WHEN a.name_ns ILIKE $1 THEN 1 ELSE 0 END AS 이름맞음, CASE WHEN a.house_nm ILIKE $2 THEN 1 ELSE 0 END AS 앞맞음
+             FROM svc.lyr_sg_applyhome a
+            WHERE a.g IN (SELECT b.g FROM svc.lyr_sg_applyhome b WHERE b.name_ns ILIKE $1)),
+         y AS (
+           SELECT z.*, max(이름맞음) OVER w AS 맞음, max(앞맞음) OVER w AS 앞, count(*) OVER w AS 공고수,
+                  row_number() OVER (PARTITION BY g ORDER BY rcrit_pblanc_de NULLS FIRST, pblanc_no NULLS FIRST) AS 첫
+             FROM z WINDOW w AS (PARTITION BY g)),
+         k AS (SELECT g, string_agg("공고종류", ',' ORDER BY "공고종류") AS 종류들 FROM (SELECT DISTINCT g, "공고종류" FROM svc.lyr_sg_applyhome) d GROUP BY g)
+         SELECT y.house_manage_no, y.house_nm, y."공고종류", k.종류들, y.공고수::int AS 공고수, y.rcrit_pblanc_de, y.hssply_adres, y.lat, y.lng,
+                count(*) OVER ()::int AS 전체
+           FROM y JOIN k ON k.g = y.g WHERE y.첫 = 1 AND y.맞음 = 1
+          ORDER BY y.앞 DESC, y.rcrit_pblanc_de DESC NULLS LAST, y.house_manage_no LIMIT 4`, [q0, p]),
+      /* 14 바뀐 행정동 — 날짜는 글자로 담았다: 옛 경로(tedious)처럼 UTC 자정 Date 로 */
+      Q(`SELECT *, count(*) OVER ()::int AS 전체 FROM svc.lyr_sg_hdong_old WHERE "행정동명" ILIKE $2
+          ORDER BY CASE WHEN lower("행정동명") = lower($1) THEN 0 WHEN "행정동명" ILIKE $3 THEN 1 ELSE 2 END, "행정동명" ${K} NULLS FIRST, "행정동코드" LIMIT 4`, [raw, q, p])
+        .then(rows => rows.map(x => ({ ...x, 마지막: x.마지막 && new Date(x.마지막 + 'T00:00:00Z'), 후분기: x.후분기 && new Date(x.후분기 + 'T00:00:00Z') }))),
+    ]);
+    const 묶음 = 묶음만들기(rs, 길이);
+    실패 = 0; 세기('suggest', 'hit'); res.set('X-Svc', 'hit');
+    return res.json({ q: raw, ms: Date.now() - t0, 묶음, ...(뗀말 ? { 꼬리뗌: { 원래: raw, 찾은말: 뗀말 } } : {}) });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('suggest', 'fallback'); return next();
+  }
+}
+
+
+/* ---------- 목록 검색 /api/complexes?q= (2단계 둘째 묶음, 2026-10-25) ----------
+   옛 처리(server.js '검색')와 같은 갈래 · 같은 조건 · 같은 순서 · 같은 JS 마무리. 원천은 svc.lyr_sg_cmap(단지 목록 칸) · sg_atch(부속지번) ·
+   sg_complex_name(K-apt · 실거래 이름) · lyr_lawd_stat · sg_newbuild · sg_redev · sg_applyhome · sg_hdong_pair/plaw.
+   ★ 켜고 끄기: svc_mode.json "search". 물음표는 q · limit · recap 만(그 밖은 옛 경로). */
+const 목록칸 = `v.complex_id, v.complex_nm, v.grouping_rule, v.has_recap, v.rep_jibun, v.rep_plat_plc, v.rep_road_addr, v.lawd_nm,
+                v.dong_cnt, v.pnu_cnt, v.parcel_hit, v.hhld_cnt_sum, v.tot_area_sum, v.oldest_use_apr, v.jiga_avg, v.centroid_lat, v.centroid_lng`;
+async function 목록검색(req, res, next) {
+  const 강제 = req.query._svc === '1';
+  if (!지금설정().read || !(지금설정().search || 강제) || Date.now() < 쉬는끝) return next();
+  if (Object.keys(req.query).some(k => !['q', 'limit', 'recap', '_svc'].includes(k))) return next();
+  let q = 도로명맞춤(String(req.query.q || '').trim().slice(0, 200));
+  if (/^\d{10,}$/.test(q)) return next();   // 옛 경로는 sql.Int 로 넘긴다 — 아주 긴 숫자는 그쪽에 맡긴다
+  const limit = 상한(req.query.limit, 50, 300);
+  const onlyRecap = req.query.recap === '1';
+  let 꼬리뗌 = null;
+  try {
+    const Q = (sql, v) => pg().query(sql, v).then(r => r.rows);
+    { const 뗀 = await 꼬리떼기PG(q); if (뗀) { 꼬리뗌 = { 원래: q, 찾은말: 뗀 }; q = 뗀; } }
+    const e = 같이(q);
+    const qq = q ? `%${e}%` : null, q0 = `%${e.replace(/\s+/g, '')}%`;
+    const qid = /^\d+$/.test(q) ? Number(q) : null;
+    const 본 = Q(`
+      WITH am AS (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id),
+           g AS (SELECT complex_id FROM svc.lyr_sg_cmap WHERE $1::text IS NOT NULL AND (complex_nm ILIKE $1 OR rep_plat_plc ILIKE $1 OR rep_road_addr ILIKE $1)
+                 UNION SELECT complex_id FROM am
+                 UNION SELECT $2::int WHERE $2::int IS NOT NULL)
+      SELECT ${목록칸},
+             CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1) THEN am.부속지번 END AS 부속지번,
+             v."폐쇄"
+        FROM svc.lyr_sg_cmap v LEFT JOIN am ON am.complex_id = v.complex_id
+       WHERE (($1::text IS NULL AND $2::int IS NULL) OR v.complex_id IN (SELECT complex_id FROM g))
+         AND ($3::boolean = false OR v.has_recap)
+       ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id
+       LIMIT $4`, [qq, qid, onlyRecap, limit + 1]);
+    const 법정동들 = q ? Q(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
+                                 complex_cnt, trade_cnt, max_amount
+                            FROM svc.lyr_lawd_stat WHERE emd_nm ILIKE $1 OR full_nm ILIKE $1 OR lawd_cd ILIKE $1
+                           ORDER BY complex_cnt DESC NULLS LAST, emd_nm ${K} NULLS FIRST, lawd_cd LIMIT 8`, [qq]) : [];
+    const 신축들 = q ? Q(`SELECT kapt_code, kapt_name, lawd_nm, pnu, "세대", "동수", "사용승인", "거래", centroid_lat, centroid_lng, kapt_addr
+                           FROM svc.lyr_sg_newbuild WHERE name_ns ILIKE $1 OR kapt_addr ILIKE $2 OR doro_juso ILIKE $2
+                          ORDER BY "거래" DESC NULLS LAST, "세대" DESC NULLS LAST, kapt_code LIMIT 8`, [q0, qq]) : [];
+    const 이름들 = q ? Q(`SELECT complex_id, min(name ${K}) AS 걸린이름 FROM (
+                             SELECT complex_id, name FROM svc.lyr_sg_complex_name WHERE src IN ('kapt', 'kaptpnu') AND name_ns ILIKE $1
+                             UNION ALL SELECT complex_id, NULL FROM svc.lyr_sg_complex_name WHERE src = 'alias' AND name_ns ILIKE $1
+                             UNION ALL SELECT complex_id, NULL FROM svc.lyr_sg_complex WHERE nm_ns ILIKE $1) x
+                          GROUP BY complex_id ORDER BY complex_id`, [q0]) : [];
+    const 정비들 = q ? Q(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2
+                           FROM svc.lyr_sg_redev WHERE has_geo = 1 AND (zone_ns ILIKE $1 OR biz_ns ILIKE $1)
+                          ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, area_m2 DESC NULLS LAST, present_sn LIMIT 8`, [q0, qq]) : [];
+    const 공고들 = q ? Q(`SELECT house_manage_no, house_nm, "공고종류", rcrit_pblanc_de, hssply_adres, tot_suply, lat, lng FROM (
+                             SELECT a.*, row_number() OVER (PARTITION BY house_manage_no ORDER BY rcrit_pblanc_de DESC NULLS LAST, pblanc_no DESC NULLS LAST) AS rn
+                               FROM svc.lyr_sg_applyhome a WHERE a.name_ns ILIKE $1) x
+                          WHERE x.rn = 1 ORDER BY x.rcrit_pblanc_de DESC NULLS LAST, x.house_manage_no LIMIT 8`, [q0]) : [];
+    const [r0, lawds0, newbuilds, kr, redevs, applyhomes] = await Promise.all([본, 법정동들, 신축들, 이름들, 정비들, 공고들]);
+    let lawds = lawds0;
+    let 행들 = r0;
+    if (q) {
+      const 있음 = new Set(행들.map(x => x.complex_id));
+      const 더 = kr.filter(x => !있음.has(x.complex_id)).slice(0, 20);
+      if (더.length) {
+        const er = await Q(`SELECT ${목록칸}, NULL AS 부속지번 FROM svc.lyr_sg_cmap v
+                             WHERE v.complex_id = ANY($1::int[]) AND ($2::boolean = false OR v.has_recap)`, [더.map(x => x.complex_id), onlyRecap]);
+        const 이름 = new Map(더.map(x => [x.complex_id, x.걸린이름]));
+        행들 = 행들.concat(er.map(x => ({ ...x, 'K-apt이름': 이름.get(x.complex_id) || undefined })))
+          .sort((a, b) => (b.dong_cnt - a.dong_cnt) || (b.pnu_cnt - a.pnu_cnt) || (a.complex_id - b.complex_id));
+      }
+    }
+    const 잘림 = 행들.length > limit;
+    const _행 = 잘림 ? 행들.slice(0, limit) : 행들;
+    if (_행.length) {
+      const al = await Q(`SELECT complex_id, "실거래이름" FROM svc.lyr_sg_cmap WHERE complex_id = ANY($1::int[]) AND "실거래이름" IS NOT NULL`, [_행.map(x => x.complex_id)]);
+      const 별 = new Map(al.map(x => [x.complex_id, x.실거래이름]));
+      _행.forEach(x => { if (별.has(x.complex_id)) x.실거래이름 = 별.get(x.complex_id); });
+    }
+    let 바뀜 = null;
+    const 옛이름 = q.replace(/\s+/g, '');
+    if (옛이름 && 옛이름.length <= 20 && /동$|가$|면$|읍$/.test(옛이름)) {
+      const [쌍0, 법] = await Promise.all([
+        Q(`SELECT "행정동코드", "시군구명", "행정동명", "마지막", "후분기", "새코드", "새이름", "새현행" FROM svc.lyr_sg_hdong_pair
+            WHERE lower("행정동명") = lower($1) ORDER BY "행정동코드", "새이름" ${K} NULLS FIRST, "새코드"`, [옛이름]),
+        Q(`SELECT DISTINCT "옛코드", "법정동코드", "법정동명" FROM svc.lyr_sg_hdong_plaw WHERE lower("행정동명") = lower($1) ORDER BY "옛코드", "법정동코드"`, [옛이름])]);
+      const 쌍 = 쌍0.map(x => ({ ...x, 마지막: x.마지막 && new Date(x.마지막 + 'T00:00:00Z'), 후분기: x.후분기 && new Date(x.후분기 + 'T00:00:00Z') }));
+      if (쌍.length && 법.length) {
+        const 분기 = d => { const t = new Date(d); return `${t.getUTCFullYear()}.${String(t.getUTCMonth() + 1).padStart(2, '0')}`; };
+        const 옛 = [...new Map(쌍.map(x => [x.행정동코드, x])).values()];
+        바뀜 = 옛.map(o => ({
+          옛: o.행정동명, 시군구: o.시군구명, 전: 분기(o.마지막), 후: 분기(o.후분기),
+          지금: [...new Set(쌍.filter(x => x.행정동코드 === o.행정동코드).map(x => x.새이름 + (x.새현행 ? '' : '(그 뒤 또 바뀜)')))],
+          법정동: [...new Map(법.filter(x => x.옛코드 === o.행정동코드).map(x => [x.법정동코드, x.법정동명])).entries()].map(([cd, nm]) => ({ cd, nm })),
+        }));
+        const 코드 = [...new Set(법.map(x => x.법정동코드))].filter(c => /^\d{10}$/.test(c)).slice(0, 20);
+        const [xl, xc] = await Promise.all([
+          Q(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
+                    complex_cnt, trade_cnt, max_amount
+               FROM svc.lyr_lawd_stat WHERE lawd_cd = ANY($1::text[])
+              ORDER BY complex_cnt DESC NULLS LAST, emd_nm ${K} NULLS FIRST, lawd_cd LIMIT 8`, [코드]),
+          Q(`SELECT ${목록칸}, NULL AS 부속지번 FROM svc.lyr_sg_cmap v
+              WHERE left(v.rep_pnu, 10) = ANY($1::text[]) AND ($2::boolean = false OR v.has_recap)
+              ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id LIMIT $3`, [코드, onlyRecap, limit + 1])]);
+        const 있는동 = new Set(lawds.map(x => x.lawd_cd));
+        lawds = lawds.concat(xl.filter(x => !있는동.has(x.lawd_cd)).map(x => ({ ...x, 옛동으로: 옛이름 })));
+        const 있는단지 = new Set(_행.map(x => x.complex_id));
+        const 더단지 = xc.filter(x => !있는단지.has(x.complex_id)).map(x => ({ ...x, 옛동으로: 옛이름 }));
+        const 남는칸 = Math.max(0, limit - _행.length);
+        _행.push(...더단지.slice(0, 남는칸));
+        if (더단지.length > 남는칸) 바뀜.forEach(b => { b.잘림 = true; });
+      }
+    }
+    실패 = 0; 세기('search', 'hit'); res.set('X-Svc', 'hit');
+    return res.json({ count: _행.length, 상한: limit, 잘림: 잘림 || !!(바뀜 && 바뀜.some(b => b.잘림)), items: _행, lawds, newbuilds, redevs, applyhomes, 바뀜, 꼬리뗌 });
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('search', 'fallback'); return next();
+  }
+}
+
+module.exports = { 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, pg, 지금설정 };

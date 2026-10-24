@@ -117,30 +117,7 @@ function 상한(값, 기본, 최대) {
 /* ★ 2026-10-22 사장님 "'서울 마포구 서교동 445-4' 는 안 나오고 '서교동 445-4' 는 나와":
    대장 주소는 '서울특별시 마포구 …' 처럼 **시도 정식 이름**으로 적혀 있어 '서울 ' 로 시작하면 LIKE 가 안 걸린다.
    맨 앞 시도 줄임말만 정식 이름으로 바꾼다(중간 글자는 안 건드린다 — '서울대입구' 같은 이름이 있다). 뒤에 빈칸이 있을 때만. */
-const 시도이름 = [
-  [/^서울(?:시|특별시)?\s/, '서울특별시 '], [/^부산(?:시|광역시)?\s/, '부산광역시 '], [/^대구(?:시|광역시)?\s/, '대구광역시 '],
-  [/^인천(?:시|광역시)?\s/, '인천광역시 '], [/^광주(?:시|광역시)?\s(?=[가-힣]+구(?:\s|$))/, '광주광역시 '], [/^대전(?:시|광역시)?\s/, '대전광역시 '],
-  [/^울산(?:시|광역시)?\s/, '울산광역시 '], [/^세종(?:시|특별자치시)?\s/, '세종특별자치시 '], [/^경기(?:도)?\s/, '경기도 '],
-  [/^강원(?:도|특별자치도)?\s/, '강원특별자치도 '], [/^충북\s/, '충청북도 '], [/^충남\s/, '충청남도 '],
-  [/^전북(?:특별자치도)?\s/, '전북특별자치도 '], [/^경북\s/, '경상북도 '], [/^경남\s/, '경상남도 '],
-  [/^제주(?:도|특별자치도)?\s/, '제주특별자치도 '],
-];
-function 시도맞춤(s) {
-  for (const [re, to] of 시도이름) if (re.test(s)) return s.replace(re, to);
-  return s;
-}
-function 도로명맞춤(q) {
-  let s = 시도맞춤(String(q || '').trim().replace(/\s+/g, ' '));
-  if (!/[가-힣](대로|로|길)\s*\d/.test(s)) return s;
-  s = s.replace(/([가-힣A-Za-z0-9]+(?:대로|로|길))\s+(\d+(?:번)?(?:가)?길)/g, '$1$2');      // …로 25길 → …로25길
-  s = s.replace(/((?:대로|로|길))(\d+(?:-\d+)?)$/, '$1 $2');                                // …길40-5 → …길 40-5 (끝 번호)
-  s = s.replace(/((?:대로|로|길))\s*(\d+(?:-\d+)?)\s*$/, '$1 $2');
-  return s;
-}
-
-function 글자그대로(s) {
-  return String(s == null ? '' : s).replace(/[%_[]/g, m => '[' + m + ']');
-}
+const { 시도맞춤, 도로명맞춤, 글자그대로, 묶음만들기, 종류꼬리 } = require('./suggest_shape');   /* 10-25: 서비스DB 경로와 같이 쓰려고 옮김 */
 
 /* ---------- 이용현황: 어떤 동작이 몇 번 쓰였나 (2026-10-20) ----------
    사용자 요청으로 만든 공개 화면의 밑감이다.
@@ -445,7 +422,8 @@ app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지�
 /* 2026-10-25 2단계: 지도 층도 서비스DB 에서(svc_mode.json "map" 이 켜졌을 때만 · 실패면 아래 기존 경로) */
 { const s = require('./svc');
   app.get('/api/parcels', s.필지); app.get('/api/buildings', s.건물); app.get('/api/lawds', s.법정동); app.get('/api/adms', s.행정동);
-  app.get('/api/closed/pins', s.닫힌핀); app.get('/api/newbuilds', s.신축핀); }
+  app.get('/api/closed/pins', s.닫힌핀); app.get('/api/newbuilds', s.신축핀);
+  app.get('/api/suggest', s.자동완성); app.get('/api/complexes', s.목록검색); }   /* 자동완성 · 목록 검색 — svc_mode "suggest" · "search" */   /* 자동완성 — svc_mode "suggest" */
 
 app.get('/api/usage', async (req, res) => {
   try {
@@ -1670,7 +1648,6 @@ app.get('/api/_perf/:id', async (req, res) => {
 /* ★ 2026-10-22 사장님 "'드림아트빌' 은 나오는데 '드림아트빌라' 까지 적으면 안 나와":
    이름(대장·실거래·K-apt) 어디에도 **그 글자 그대로는 없고**, 끝의 건물 종류 말('빌라·아파트·맨션…')을 떼면 있을 때만 뗀 말로 찾는다.
    ★ 뗀 사실을 화면에 적는다(조용히 바꾸지 않는다). 그대로 있는 이름은 건드리지 않는다. */
-const 종류꼬리 = /(빌라|아파트|맨션|타운|하우스|빌리지|주택|오피스텔|빌딩|apt|APT)$/;
 async function 이름꼬리떼기(pool, q) {
   if (!q || /\d/.test(q) || !종류꼬리.test(q)) return null;
   /* '빌라' 는 이름이 '…빌' 로 끝나는 경우가 많다(드림아트빌) — '라' 만 뗀 것을 먼저 본다 */
@@ -1795,7 +1772,7 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
                complex_cnt, trade_cnt, max_amount
         FROM gold.v_lawd_map
         WHERE emd_nm LIKE @q OR full_nm LIKE @q OR lawd_cd LIKE @q
-        ORDER BY complex_cnt DESC, emd_nm`);
+        ORDER BY complex_cnt DESC, emd_nm, lawd_cd`);   /* 10-25: 동점 순서(서비스DB 와 같게) */
       lawds = lr.recordset;
     }
     /* 대장이 아직 없는 신축(K-apt 유래)도 같이 찾는다. gold.complex 에 없으므로
@@ -1808,7 +1785,7 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
                거래, centroid_lat, centroid_lng, kapt_addr
         FROM gold.v_newbuild
         WHERE REPLACE(kapt_name, ' ', '') LIKE @q0 OR kapt_addr LIKE @q OR doro_juso LIKE @q
-        ORDER BY 거래 DESC, 세대 DESC`);
+        ORDER BY 거래 DESC, 세대 DESC, kapt_code`);
       newbuilds = nb.recordset;
     }
     /* ★ 상한에 걸렸는지 **정확히** 알려면 한 줄 더 받아 본다 (2026-10-20).
@@ -1835,7 +1812,8 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
           /* 2026-10-23: 대장 이름 띄어쓰기 빼고 — 위 큰 쿼리에 넣으면 계획이 바뀌므로 여기(작은 쿼리) */
           UNION ALL
           SELECT complex_id, NULL FROM gold.complex WHERE complex_nm_src <> 'ADDR' AND merged_into IS NULL AND complex_nm_ns LIKE @q0) x   /* 327 */
-        GROUP BY complex_id`);
+        GROUP BY complex_id
+        ORDER BY complex_id`);   /* 10-25: 아래 slice(0, 20) 이 어느 20 을 고르는지 정함(전에는 GROUP BY 가 내놓는 순서 그대로) */
       const 있음 = new Set(행들.map(x => x.complex_id));
       const 더 = kr.recordset.filter(x => !있음.has(x.complex_id)).slice(0, 20);
       if (더.length) {
@@ -1873,7 +1851,7 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
         SELECT TOP 8 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2
           FROM silver.redev_zone
          WHERE is_current = 1 AND geojson IS NOT NULL AND (REPLACE(zone_nm, ' ', '') LIKE @q0 OR REPLACE(biz_nm, ' ', '') LIKE @q0)
-         ORDER BY CASE WHEN zone_nm LIKE @q THEN 0 ELSE 1 END, area_m2 DESC`);
+         ORDER BY CASE WHEN zone_nm LIKE @q THEN 0 ELSE 1 END, area_m2 DESC, present_sn`);
       redevs = rz.recordset;
     }
     /* 2026-10-23 사장님 "청약 공고 Enter 목록에도" — 단지에 **아직 안 이어진** 공고(이어진 것은 단지로 나온다). 자동완성 13 과 같은 기준 · 주택마다 최근 공고 1줄 */
@@ -1890,7 +1868,7 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
                  WHERE REPLACE(p.house_nm, ' ', '') LIKE @q0
                    AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) x
          WHERE x.rn = 1
-         ORDER BY x.rcrit_pblanc_de DESC`);
+         ORDER BY x.rcrit_pblanc_de DESC, x.house_manage_no`);
       applyhomes = ar.recordset;
     }
     /* ★ 308 (2026-10-22 사장님 "용신동 → 용두동이니 용두동 결과가 나와야지"):
@@ -1910,13 +1888,14 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
           JOIN gold.region_hdong n ON n.행정동코드 = c.새코드
          WHERE o.현행 = 0 AND o.행정동명 = @nm AND LEFT(o.행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지')
            AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명)
-         ORDER BY o.행정동코드, n.행정동명;
+         ORDER BY o.행정동코드, n.행정동명, c.새코드;
         SELECT DISTINCT c.옛코드, l.법정동코드, l.법정동명
           FROM gold.region_hdong o
           JOIN gold.region_hdong_change c ON c.옛코드 = o.행정동코드 AND c.새코드 IS NOT NULL
           JOIN silver.region_link l ON l.행정동코드 = c.새코드 AND l.개정일자 = @최신분기
          WHERE o.현행 = 0 AND o.행정동명 = @nm AND LEFT(o.행정동코드, 5) IN (SELECT sgg_cd FROM meta.coverage WHERE 자료 = N'단지')
-           AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명);`);
+           AND NOT EXISTS (SELECT 1 FROM gold.region_hdong z WHERE z.현행 = 1 AND z.시군구명 = o.시군구명 AND z.행정동명 = o.행정동명)
+         ORDER BY c.옛코드, l.법정동코드;`);
       const 쌍 = br.recordsets[0], 법 = br.recordsets[1];
       if (쌍.length && 법.length) {
         const 분기 = d => { const t = new Date(d); return `${t.getUTCFullYear()}.${String(t.getUTCMonth() + 1).padStart(2, '0')}`; };
@@ -1935,7 +1914,7 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
           SELECT TOP 8 lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, bbox_minx, bbox_miny, bbox_maxx, bbox_maxy,
                  complex_cnt, trade_cnt, max_amount
             FROM gold.v_lawd_map WHERE lawd_cd IN (${코드.map((_, j) => '@l' + j).join(',')})
-           ORDER BY complex_cnt DESC, emd_nm;
+           ORDER BY complex_cnt DESC, emd_nm, lawd_cd;
           SELECT TOP (@lim) v.complex_id, v.complex_nm, v.grouping_rule, v.has_recap,
                  v.rep_jibun, v.rep_plat_plc, v.rep_road_addr, v.lawd_nm,
                  v.dong_cnt, v.pnu_cnt, v.parcel_hit, v.hhld_cnt_sum, v.tot_area_sum,
@@ -2011,7 +1990,7 @@ app.get('/api/suggest', async (req, res) => {
                          FROM gold.complex c
                         WHERE c.rep_pnu >= CAST(g.sgg_cd + '00000000000000' AS CHAR(19))
                           AND c.rep_pnu <= CAST(g.sgg_cd + '99999999999999' AS CHAR(19))) b
-         ORDER BY g.순, g.sgg_nm;
+         ORDER BY g.순, g.sgg_nm, g.sgg_cd;   /* 10-25: 동점은 코드로(서비스DB 와 같게) */
         /* 2 법정동 */
         SELECT TOP 6 d.lawd_cd, d.emd_nm, d.full_nm, d.전체, d.경계있음,
                minx = COALESCE(lb.bbox_minx, b.minx), miny = COALESCE(lb.bbox_miny, b.miny),
@@ -2031,7 +2010,7 @@ app.get('/api/suggest', async (req, res) => {
                         WHERE lb.lawd_cd IS NULL
                           AND c.rep_pnu >= CAST(d.lawd_cd + '000000000' AS CHAR(19))
                           AND c.rep_pnu <= CAST(d.lawd_cd + '999999999' AS CHAR(19))) b
-         ORDER BY d.순, d.emd_nm;
+         ORDER BY d.순, d.emd_nm, d.lawd_cd;
         /* 3 행정동 */
         SELECT TOP 5 a.adm_cd_sgis, a.year, a.adm_nm, a.emd_nm, a.mois_nm, a.연결비율,
                minx = a.bbox_minx, miny = a.bbox_miny, maxx = a.bbox_maxx, maxy = a.bbox_maxy,
@@ -2043,7 +2022,7 @@ app.get('/api/suggest', async (req, res) => {
           FROM silver.adm_boundary a
          WHERE a.year = (SELECT MAX(year) FROM silver.adm_boundary)
            AND (a.emd_nm LIKE @q OR a.mois_nm LIKE @q)
-         ORDER BY CASE WHEN a.emd_nm = @raw OR a.mois_nm = @raw THEN 0 WHEN a.emd_nm LIKE @p THEN 1 ELSE 2 END, a.emd_nm;
+         ORDER BY CASE WHEN a.emd_nm = @raw OR a.mois_nm = @raw THEN 0 WHEN a.emd_nm LIKE @p THEN 1 ELSE 2 END, a.emd_nm, a.adm_cd_sgis;
         /* 4 단지 — 이름이 진짜 이름인 것만(주소로 대신한 이름은 뺀다). 단지코드 숫자면 그것도 */
         /* ★ OR 로 엮으면 거른 색인(ix_complex_nm_real)을 못 탄다 - 둘로 나눠 UNION ALL */
         SELECT TOP 5 c.complex_id, c.complex_nm, c.rep_plat_plc, c.hhld_cnt_sum, c.dong_cnt,
@@ -2092,15 +2071,15 @@ app.get('/api/suggest', async (req, res) => {
         /* 5 신축 (대장 없는 K-apt 단지) */
         SELECT TOP 3 n.kapt_code, n.kapt_name, n.lawd_nm, n.세대, n.centroid_lat, n.centroid_lng, 전체 = COUNT(*) OVER ()
           FROM gold.v_newbuild n WHERE REPLACE(n.kapt_name, ' ', '') LIKE @q0
-         ORDER BY CASE WHEN n.kapt_name LIKE @p THEN 0 ELSE 1 END, n.세대 DESC;
+         ORDER BY CASE WHEN n.kapt_name LIKE @p THEN 0 ELSE 1 END, n.세대 DESC, n.kapt_code;
         /* 6 재개발·정비사업 구역 */
         SELECT TOP 4 z.present_sn, z.zone_nm, z.biz_nm, z.propel_nm, z.centroid_lat, z.centroid_lng,
                minx = z.bbox_minx, miny = z.bbox_miny, maxx = z.bbox_maxx, maxy = z.bbox_maxy, 전체 = COUNT(*) OVER ()
           FROM silver.redev_zone z
          WHERE z.is_current = 1 AND (REPLACE(z.zone_nm, ' ', '') LIKE @q0 OR REPLACE(z.biz_nm, ' ', '') LIKE @q0)
-         ORDER BY CASE WHEN z.zone_nm LIKE @p THEN 0 ELSE 1 END, z.zone_nm;
+         ORDER BY CASE WHEN z.zone_nm LIKE @p THEN 0 ELSE 1 END, z.zone_nm, z.present_sn;
         /* 7 지하철역 — 한 역에 노선이 여럿이면 한 줄로 */
-        SELECT TOP 4 s.sttn_nm, 노선 = STRING_AGG(s.line_nm, N' · '), lat = AVG(s.lat), lon = AVG(s.lon),
+        SELECT TOP 4 s.sttn_nm, 노선 = STRING_AGG(s.line_nm, N' · ') WITHIN GROUP (ORDER BY s.line_nm), lat = AVG(s.lat), lon = AVG(s.lon),
                전체 = COUNT(*) OVER ()
           FROM silver.subway_station s
          WHERE s.is_current = 1 AND s.lat IS NOT NULL AND s.sttn_nm LIKE @q
@@ -2110,12 +2089,12 @@ app.get('/api/suggest', async (req, res) => {
         SELECT TOP 4 s.school_nm, s.school_se, 주소 = COALESCE(s.rdnmadr, s.lnmadr), s.lat, s.lon, 전체 = COUNT(*) OVER ()
           FROM silver.school s
          WHERE s.is_current = 1 AND s.lat IS NOT NULL AND s.school_nm LIKE @q
-         ORDER BY CASE WHEN s.school_nm LIKE @p THEN 0 ELSE 1 END, s.school_nm;
+         ORDER BY CASE WHEN s.school_nm LIKE @p THEN 0 ELSE 1 END, s.school_nm, COALESCE(s.rdnmadr, s.lnmadr), s.school_se;
         /* 9 유치원 */
         SELECT TOP 3 k.kinder_nm, 주소 = k.addr, lat = k.lat, lon = k.lng, 전체 = COUNT(*) OVER ()
           FROM silver.kindergarten k
          WHERE k.lat IS NOT NULL AND k.kinder_nm LIKE @q
-         ORDER BY CASE WHEN k.kinder_nm LIKE @p THEN 0 ELSE 1 END, k.kinder_nm;
+         ORDER BY CASE WHEN k.kinder_nm LIKE @p THEN 0 ELSE 1 END, k.kinder_nm, k.addr;
         /* 10 학원 (교육청 등록) — 좌표를 붙인 것만 지도로 갈 수 있다. 못 붙인 수도 같이 센다 */
         SELECT TOP 4 a.aca_nm, a.realm_sc_nm, 주소 = a.road_addr, a.lat, a.lon,
                전체 = COUNT(*) OVER (),
@@ -2123,13 +2102,13 @@ app.get('/api/suggest', async (req, res) => {
                            WHERE x.is_current = 1 AND x.lat IS NULL AND x.aca_nm LIKE @q)
           FROM silver.academy a
          WHERE a.is_current = 1 AND a.lat IS NOT NULL AND a.aca_nm LIKE @q
-         ORDER BY CASE WHEN a.aca_nm LIKE @p THEN 0 ELSE 1 END, a.aca_nm;
+         ORDER BY CASE WHEN a.aca_nm LIKE @p THEN 0 ELSE 1 END, a.aca_nm, a.road_addr, a.realm_sc_nm;
         /* 11 상가 — 앞부분 일치 · 두 글자부터 */
         SELECT TOP 5 m.bizes_nm, m.brch_nm, m.inds_scls_nm, 주소 = m.rdnm_adr, m.lat, m.lon, m.adong_nm,
                전체 = COUNT(*) OVER ()
           FROM silver.semas_store m
          WHERE @상가 = 1 AND m.is_current = 1 AND m.lat IS NOT NULL AND m.bizes_nm LIKE @p
-         ORDER BY CASE WHEN m.bizes_nm = @raw THEN 0 ELSE 1 END, m.bizes_nm, m.brch_nm;
+         ORDER BY CASE WHEN m.bizes_nm = @raw THEN 0 ELSE 1 END, m.bizes_nm, m.brch_nm, m.rdnm_adr, m.bizes_id;
         /* 12 폐쇄·말소 대장 (2026-10-22) — 지금 단지와 섞지 않고 따로 묶음. 이름이 원문에 있는 것만 */
         /* 2026-10-23 사장님 "지도에 보이고 검색에 보이면 붙은 것" — 이름이 없는 옛 건물도 **주소(지번 · 도로명)로** 찾는다.
            주소 검색은 검색어에 숫자가 있을 때만(번지·건물번호) — '아파트' 같은 말로 32만 줄의 주소를 훑지 않게. */
@@ -2139,7 +2118,7 @@ app.get('/api/suggest', async (req, res) => {
          WHERE REPLACE(s.이름, ' ', '') LIKE @q0
             OR (@짧은주소 IS NOT NULL AND (s.지번짧게 = @짧은주소 OR s.지번짧게 LIKE @짧은주소 + N'-%' OR s.도로짧게 = @짧은주소 OR s.도로짧게 LIKE @짧은주소 + N'-%'))
                /* 322: 짧은 주소 칸(색인) — '479' 는 479 · 479-1 … 만(4790 은 아님) */
-         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 WHEN s.이름 LIKE @q THEN 1 ELSE 2 END, s.총괄세대 DESC, s.동수 DESC, s.이름;
+         ORDER BY CASE WHEN s.이름 LIKE @p THEN 0 WHEN s.이름 LIKE @q THEN 1 ELSE 2 END, s.총괄세대 DESC, s.동수 DESC, s.이름, s.site_key;
         /* 13 청약 공고 — 단지에 **아직 안 이어진** 것만(이어진 것은 단지로 찾는다). 주택(관리번호)마다 한 줄, 가장 최근 공고 */
         /* ★ 2026-10-23: **공고 지번(pnu)마다 한 줄** — 같은 지번의 일반·무순위·임의공급(관리번호 따로)을 한 줄로. 지번 없는 공고는 관리번호마다.
              이름 = 그 지번의 **첫 공고** 이름(보통 일반분양 · '(2차)' 같은 꼬리 없음). 자리·종류·공고 수는 그 지번의 안 이어진 공고 전부로 */
@@ -2160,11 +2139,11 @@ app.get('/api/suggest', async (req, res) => {
                                  WHERE REPLACE(q.house_nm, ' ', '') LIKE @q0
                                    AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = q.house_manage_no))
                            AND NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) z) y
-          JOIN (SELECT g2.g, 종류들 = STRING_AGG(g2.공고종류, ',') FROM
+          JOIN (SELECT g2.g, 종류들 = STRING_AGG(g2.공고종류, ',') WITHIN GROUP (ORDER BY g2.공고종류) FROM
                   (SELECT DISTINCT g = COALESCE(p.pnu, 'H' + p.house_manage_no), p.공고종류 FROM silver.applyhome_pblanc p
                     WHERE NOT EXISTS (SELECT 1 FROM gold.applyhome_link l WHERE l.house_manage_no = p.house_manage_no)) g2 GROUP BY g2.g) k ON k.g = y.g
          WHERE y.첫 = 1 AND y.맞음 = 1
-         ORDER BY y.앞 DESC, y.rcrit_pblanc_de DESC;
+         ORDER BY y.앞 DESC, y.rcrit_pblanc_de DESC, y.house_manage_no;
         /* 14 바뀐 행정동 (2026-10-22, 308) — 지금은 없는 옛 행정동 이름으로 찾으면 **지금 동**으로 안내.
            ★ 옛→새는 공식 연계정보에서 같은 법정동을 나눠 가진 쌍(이름으로 잇지 않는다). 짝이 여럿이면 모두 적는다.
            ★ 같은 구에 같은 이름의 지금 행정동이 있으면(강북 번1동처럼 코드만 다시 매긴 것) 빼다 — 위 '행정동' 묶음에 이미 나온다. */
@@ -2185,71 +2164,8 @@ app.get('/api/suggest', async (req, res) => {
                          FROM silver.region_link l JOIN silver.lawd_boundary lb ON lb.lawd_cd = l.법정동코드 AND lb.is_current = 1
                         WHERE l.개정일자 = @최신분기
                           AND l.행정동코드 IN (SELECT c2.새코드 FROM gold.region_hdong_change c2 WHERE c2.옛코드 = g.행정동코드)) b
-         ORDER BY CASE WHEN g.행정동명 = @raw THEN 0 WHEN g.행정동명 LIKE @p THEN 1 ELSE 2 END, g.행정동명;`);
-    const rs = r.recordsets;
-    const 상자 = x => (x.minx == null ? null : [Number(x.minx), Number(x.miny), Number(x.maxx), Number(x.maxy)]);
-    const 전체 = a => (a.length ? Number(a[0].전체) : 0);
-    const 묶음 = [
-      { 종류: '구', 전체: 전체(rs[0]), 항목: rs[0].map(x => ({
-          이름: x.sgg_nm, 보조: x.sido_nm, 동작: { 종류: '범위', bbox: 상자(x) } })) },
-      { 종류: '법정동', 전체: 전체(rs[1]), 항목: rs[1].map(x => ({
-          이름: x.emd_nm, 보조: x.full_nm,
-          동작: { 종류: '법정동', lawd_cd: x.lawd_cd, 경계있음: !!x.경계있음, bbox: 상자(x) } })) },
-      { 종류: '행정동', 전체: 전체(rs[2]), 항목: rs[2].map(x => ({
-          이름: x.emd_nm,
-          보조: x.adm_nm.replace(/\s*\S+$/, ''),   /* 19:36: 상가 쪽 이름은 안 보인다(사장님) */
-          표: Number(x.지금없음) ? `${x.year}년 경계 · 지금은 없는 동` : undefined,
-          동작: { 종류: '행정동', adm_cd: x.adm_cd_sgis, bbox: 상자(x) } })) },
-      /* 308: 옛 행정동 → 지금 동. 분기 사이에 바뀌었다는 것만 안다(시행일은 그 사이 어딘가) */
-      { 종류: '바뀐 행정동', 전체: 전체(rs[13] || []), 항목: (rs[13] || []).map(x => {
-          const 분기 = d => { const t = new Date(d); return `${t.getUTCFullYear()}.${String(t.getUTCMonth() + 1).padStart(2, '0')}`; };
-          const 상 = 상자(x);
-          return {
-            이름: x.행정동명,
-            보조: `${x.시군구명} · 옛 행정동 → 지금 ${x.새이름}${Number(x.새현행아님) ? ' (그 뒤 또 바뀜)' : ''} · ${분기(x.마지막)}~${분기(x.후분기)} 사이에 바뀜`,
-            표: Number(x.새수) > 1 ? `${x.새수}개 동으로` : '옛 이름',
-            동작: x.adm_cd ? { 종류: '행정동', adm_cd: x.adm_cd, bbox: 상 } : { 종류: '범위', bbox: 상 } }; }) },
-      { 종류: '단지', 전체: 전체(rs[3]), 항목: rs[3].map(x => ({
-          /* 20:19: 이름이 주소뿐이면 실거래 이름을 이름으로(화면 app.js 표시이름 과 같은 규칙) */
-          이름: (x.complex_nm === x.rep_plat_plc && x.실거래이름) ? x.실거래이름 : x.complex_nm,
-          보조: [x.실거래이름 && !(x.complex_nm === x.rep_plat_plc) ? `실거래 '${x.실거래이름}'` : null, x.rep_plat_plc,
-                 x.hhld_cnt_sum ? `${x.hhld_cnt_sum}세대` : null].filter(Boolean).join(' · '),
-          /* 13:11: 현재 단지에는 옛 대장 표를 달지 않는다(토지·허가 탭에만 기록) */
-          동작: { 종류: '단지', id: x.complex_id } })) },
-      { 종류: '폐쇄·말소 대장', 전체: 전체(rs[11] || []), 항목: (rs[11] || []).map(x => ({
-          이름: x.이름 || x.plat_plc,
-          보조: [x.폐쇄구분 && x.shter_day ? `${x.폐쇄구분} ${x.shter_day.slice(0, 4)}.${x.shter_day.slice(4, 6)}.${x.shter_day.slice(6, 8)}` : x.폐쇄구분,
-                 x.주용도, x.총괄세대 ? `${x.총괄세대}세대(총괄표제부)` : null, x.이름 ? x.plat_plc : null,
-                 x.lat == null ? '지도 자리 없음' : null].filter(Boolean).join(' · '),
-          표: '닫힌 대장',
-          동작: { 종류: '폐쇄', key: x.site_key, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng),
-                  now: x.now_complex_id || null } })) },
-      { 종류: '청약 공고', 전체: 전체(rs[12] || []), 항목: (rs[12] || []).map(x => ({
-          이름: x.house_nm,
-          보조: [[...new Set(String(x.종류들 || x.공고종류 || '').split(',').filter(Boolean))]
-                   .map(k => ({ APT: '분양', URBTY: '오피스텔·도시형', REMNDR: '무순위·재공급', PBLPVT: '공공지원민간임대', OPT: '임의공급' }[k] || k)).join(' · '),
-                 Number(x.공고수) > 1 ? `공고 ${x.공고수}건` : null,
-                 x.rcrit_pblanc_de ? `${Number(x.공고수) > 1 ? '첫 공고' : '공고'} ${String(x.rcrit_pblanc_de).replace(/[^0-9]/g, '').replace(/^(\d{4})(\d{2})(\d{2}).*/, '$1.$2.$3')}` : null, x.hssply_adres].filter(Boolean).join(' · '),
-          표: x.lat == null ? '단지 미연결 · 자리 없음' : '단지 미연결',
-          동작: { 종류: '공고', house: x.house_manage_no, lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng) } })) },
-      { 종류: '신축', 전체: 전체(rs[4]), 항목: rs[4].map(x => ({
-          이름: x.kapt_name, 보조: [x.lawd_nm, x.세대 ? `${x.세대}세대` : null].filter(Boolean).join(' · '),
-          동작: { 종류: '신축', code: x.kapt_code } })) },
-      { 종류: '재개발·정비', 전체: 전체(rs[5]), 항목: rs[5].map(x => ({
-          이름: x.zone_nm, 보조: [x.biz_nm, x.propel_nm].filter(Boolean).join(' · '),
-          동작: { 종류: '정비', sn: x.present_sn, bbox: 상자(x), lat: x.centroid_lat, lng: x.centroid_lng } })) },
-      { 종류: '지하철역', 전체: 전체(rs[6]), 항목: rs[6].map(x => ({
-          이름: x.sttn_nm, 보조: x.노선, 동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
-      { 종류: '학교', 전체: 전체(rs[7]), 항목: rs[7].map(x => ({
-          이름: x.school_nm, 보조: [x.school_se, x.주소].filter(Boolean).join(' · '), 동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
-      { 종류: '유치원', 전체: 전체(rs[8]), 항목: rs[8].map(x => ({
-          이름: x.kinder_nm, 보조: x.주소, 동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
-      { 종류: '학원', 전체: 전체(rs[9]), 좌표없음: rs[9].length ? Number(rs[9][0].좌표없음) : 0, 항목: rs[9].map(x => ({
-          이름: x.aca_nm, 보조: [x.realm_sc_nm, x.주소].filter(Boolean).join(' · '), 동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
-      { 종류: '상가', 전체: 전체(rs[10]), 앞부분만: true, 두글자부터: 길이 < 2, 항목: rs[10].map(x => ({
-          이름: x.bizes_nm + (x.brch_nm ? ` ${x.brch_nm}` : ''), 보조: [x.inds_scls_nm, x.adong_nm, x.주소].filter(Boolean).join(' · '),
-          동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
-    ].filter(g => g.항목.length);
+         ORDER BY CASE WHEN g.행정동명 = @raw THEN 0 WHEN g.행정동명 LIKE @p THEN 1 ELSE 2 END, g.행정동명, g.행정동코드;`);
+    const 묶음 = 묶음만들기(r.recordsets, 길이);
     res.json({ q: raw, ms: Date.now() - t0, 묶음, ...(뗀말 ? { 꼬리뗌: { 원래: raw, 찾은말: 뗀말 } } : {}) });
   } catch (e) { fail(res, e, 'suggest'); }
 });
