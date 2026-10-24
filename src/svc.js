@@ -346,6 +346,9 @@ const 같이 = s => String(s == null ? '' : s).replace(/[\\%_]/g, m => '\\' + m)
 const K = 'COLLATE svc.ko_ci';
 /* 청약 공고일(rcrit_pblanc_de)은 '2026-10-14' 와 '20261014  ' 가 섞여 있다. 적재DB(Windows 콜레이션)는 하이픈을 1단계에서 무시하고
    (같은 날로 보고) 마지막에 하이픈 있는 쪽을 크게 친다 · 끝 빈칸은 무시 — 같게 맞춘다(10-25 청약 핀 대조에서 13건) */
+/* 이름 정렬: 적재DB(Windows 콜레이션 '단어 정렬')는 하이픈(전각 포함)과 작은따옴표를 1단계에서 무시하고, 같으면 그것이 든 쪽을 크게 친다
+   ('중구－가로가판대－37' 이 '중구24시…' 뒤로 — 10-25 자동완성 대조 1건). ICU 는 문장부호를 숫자 앞에 둬서 따로 맞춘다 */
+const 이름순 = c => `translate(${c}, '-－‐‑''', '') ${K} NULLS FIRST, coalesce(${c} ~ '[-－‐‑'']', false)`;
 const 날오름 = c => `replace(rtrim(${c}), '-', '') NULLS FIRST, coalesce(${c} LIKE '%-%', false)`;
 const 날내림 = c => `replace(rtrim(${c}), '-', '') DESC NULLS LAST, coalesce(${c} LIKE '%-%', false) DESC`;
 async function 꼬리떼기PG(q) {
@@ -385,18 +388,18 @@ async function 자동완성(req, res, next) {
       Q(`SELECT sgg_cd, sgg_nm, sido_nm, 전체, minx, miny, maxx, maxy FROM (
            SELECT *, count(*) OVER ()::int AS 전체, CASE WHEN lower(sgg_nm) = lower($1) THEN 0 WHEN sgg_nm ILIKE $3 THEN 1 ELSE 2 END AS 순
              FROM svc.lyr_sg_sgg WHERE sgg_nm ILIKE $2) g
-         ORDER BY 순, sgg_nm ${K} NULLS FIRST, sgg_cd LIMIT 3`, [raw, q, p]),
+         ORDER BY 순, ${이름순('sgg_nm')}, sgg_cd LIMIT 3`, [raw, q, p]),
       /* 2 법정동 */
       Q(`SELECT lawd_cd, emd_nm, full_nm, 전체, "경계있음", minx, miny, maxx, maxy FROM (
            SELECT *, count(*) OVER ()::int AS 전체, CASE WHEN lower(emd_nm) = lower($1) THEN 0 WHEN emd_nm ILIKE $3 THEN 1 ELSE 2 END AS 순
              FROM svc.lyr_sg_lawd WHERE emd_nm ILIKE $2) d
-         ORDER BY 순, emd_nm ${K} NULLS FIRST, lawd_cd LIMIT 6`, [raw, q, p]),
+         ORDER BY 순, ${이름순('emd_nm')}, lawd_cd LIMIT 6`, [raw, q, p]),
       /* 3 행정동 */
       Q(`SELECT adm_cd_sgis, year, adm_nm, emd_nm, mois_nm, "연결비율", minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체,
                 CASE WHEN emd_nm ILIKE $2 THEN emd_nm ELSE mois_nm END AS 걸린이름, "지금없음"
            FROM svc.lyr_sg_adm WHERE emd_nm ILIKE $2 OR mois_nm ILIKE $2
           ORDER BY CASE WHEN lower(emd_nm) = lower($1) OR lower(mois_nm) = lower($1) THEN 0 WHEN emd_nm ILIKE $3 THEN 1 ELSE 2 END,
-                   emd_nm ${K} NULLS FIRST, adm_cd_sgis LIMIT 5`, [raw, q, p]),
+                   ${이름순('emd_nm')}, adm_cd_sgis LIMIT 5`, [raw, q, p]),
       /* 4 단지 */
       Q(`WITH c AS (
            SELECT complex_id FROM svc.lyr_sg_complex WHERE nm_ns ILIKE $1
@@ -415,30 +418,30 @@ async function 자동완성(req, res, next) {
       /* 6 재개발 · 정비 */
       Q(`SELECT present_sn, zone_nm, biz_nm, propel_nm, centroid_lat, centroid_lng, minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체
            FROM svc.lyr_sg_redev WHERE zone_ns ILIKE $1 OR biz_ns ILIKE $1
-          ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, zone_nm ${K} NULLS FIRST, present_sn LIMIT 4`, [q0, p]),
+          ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('zone_nm')}, present_sn LIMIT 4`, [q0, p]),
       /* 7 지하철역 */
       Q(`SELECT sttn_nm, "노선", lat, lon, count(*) OVER ()::int AS 전체
            FROM svc.lyr_sg_subway WHERE sttn_nm ILIKE $2
           ORDER BY CASE WHEN lower(sttn_nm) = lower($1) OR lower(sttn_nm) = lower($1 || '역') THEN 0 WHEN sttn_nm ILIKE $3 THEN 1 ELSE 2 END,
-                   sttn_nm ${K} NULLS FIRST LIMIT 4`, [raw, q, p]),
+                   ${이름순('sttn_nm')} LIMIT 4`, [raw, q, p]),
       /* 8 학교 */
       Q(`SELECT school_nm, school_se, "주소", lat, lon, count(*) OVER ()::int AS 전체
            FROM svc.lyr_sg_school WHERE school_nm ILIKE $1
-          ORDER BY CASE WHEN school_nm ILIKE $2 THEN 0 ELSE 1 END, school_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST, school_se ${K} NULLS FIRST LIMIT 4`, [q, p]),
+          ORDER BY CASE WHEN school_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('school_nm')}, ${이름순('"주소"')}, ${이름순('school_se')} LIMIT 4`, [q, p]),
       /* 9 유치원 */
       Q(`SELECT kinder_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체
            FROM svc.lyr_sg_kinder WHERE kinder_nm ILIKE $1
-          ORDER BY CASE WHEN kinder_nm ILIKE $2 THEN 0 ELSE 1 END, kinder_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST LIMIT 3`, [q, p]),
+          ORDER BY CASE WHEN kinder_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('kinder_nm')}, ${이름순('"주소"')} LIMIT 3`, [q, p]),
       /* 10 학원 */
       Q(`SELECT aca_nm, realm_sc_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체,
                 (SELECT count(*)::int FROM svc.lyr_sg_academy x WHERE x.lat IS NULL AND x.aca_nm ILIKE $1) AS 좌표없음
            FROM svc.lyr_sg_academy WHERE lat IS NOT NULL AND aca_nm ILIKE $1
-          ORDER BY CASE WHEN aca_nm ILIKE $2 THEN 0 ELSE 1 END, aca_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST, realm_sc_nm ${K} NULLS FIRST LIMIT 4`, [q, p]),
+          ORDER BY CASE WHEN aca_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('aca_nm')}, ${이름순('"주소"')}, ${이름순('realm_sc_nm')} LIMIT 4`, [q, p]),
       /* 11 상가 — 앞부분 일치 */
       /* 적재DB 처럼 너비도 무시: nm_key = lower(NFKC(이름)) · 검색어도 같게 */
       Q(`SELECT bizes_nm, brch_nm, inds_scls_nm, "주소", lat, lon, adong_nm, count(*) OVER ()::int AS 전체
            FROM svc.lyr_sg_semas WHERE nm_key LIKE $2
-          ORDER BY CASE WHEN nm_key = $1 THEN 0 ELSE 1 END, bizes_nm ${K} NULLS FIRST, brch_nm ${K} NULLS FIRST, "주소" ${K} NULLS FIRST, bizes_id LIMIT 5`,
+          ORDER BY CASE WHEN nm_key = $1 THEN 0 ELSE 1 END, ${이름순('bizes_nm')}, ${이름순('brch_nm')}, ${이름순('"주소"')}, bizes_id LIMIT 5`,
         [raw.normalize('NFKC').toLowerCase(), 같이(글자.normalize('NFKC').toLowerCase()) + '%']),
       /* 12 폐쇄 · 말소 대장 */
       Q(`SELECT site_key, "이름", "폐쇄구분", shter_day, "주용도", "총괄세대", plat_plc, lat, lng, now_complex_id, "동수",
@@ -447,7 +450,7 @@ async function 자동완성(req, res, next) {
           WHERE "이름_ns" ILIKE $1
              OR ($4::text IS NOT NULL AND ("지번짧게" = $4 OR "지번짧게" LIKE $5 || '-%' OR "도로짧게" = $4 OR "도로짧게" LIKE $5 || '-%'))
           ORDER BY CASE WHEN "이름" ILIKE $3 THEN 0 WHEN "이름" ILIKE $2 THEN 1 ELSE 2 END, "총괄세대" DESC NULLS LAST, "동수" DESC NULLS LAST,
-                   "이름" ${K} NULLS FIRST, site_key LIMIT 4`, [q0, q, p, 짧은, 같이(짧은)]),
+                   ${이름순('"이름"')}, site_key LIMIT 4`, [q0, q, p, 짧은, 같이(짧은)]),
       /* 13 청약 공고 */
       Q(`WITH z AS (
            SELECT a.*, CASE WHEN a.name_ns ILIKE $1 THEN 1 ELSE 0 END AS 이름맞음, CASE WHEN a.house_nm ILIKE $2 THEN 1 ELSE 0 END AS 앞맞음
@@ -464,7 +467,7 @@ async function 자동완성(req, res, next) {
           ORDER BY y.앞 DESC, ${날내림('y.rcrit_pblanc_de')}, y.house_manage_no LIMIT 4`, [q0, p]),
       /* 14 바뀐 행정동 — 날짜는 글자로 담았다: 옛 경로(tedious)처럼 UTC 자정 Date 로 */
       Q(`SELECT *, count(*) OVER ()::int AS 전체 FROM svc.lyr_sg_hdong_old WHERE "행정동명" ILIKE $2
-          ORDER BY CASE WHEN lower("행정동명") = lower($1) THEN 0 WHEN "행정동명" ILIKE $3 THEN 1 ELSE 2 END, "행정동명" ${K} NULLS FIRST, "행정동코드" LIMIT 4`, [raw, q, p])
+          ORDER BY CASE WHEN lower("행정동명") = lower($1) THEN 0 WHEN "행정동명" ILIKE $3 THEN 1 ELSE 2 END, ${이름순('"행정동명"')}, "행정동코드" LIMIT 4`, [raw, q, p])
         .then(rows => rows.map(x => ({ ...x, 마지막: x.마지막 && new Date(x.마지막 + 'T00:00:00Z'), 후분기: x.후분기 && new Date(x.후분기 + 'T00:00:00Z') }))),
     ]);
     const 묶음 = 묶음만들기(rs, 길이);
@@ -498,23 +501,28 @@ async function 목록검색(req, res, next) {
     const e = 같이(q);
     const qq = q ? `%${e}%` : null, q0 = `%${e.replace(/\s+/g, '')}%`;
     const qid = /^\d+$/.test(q) ? Number(q) : null;
+    /* 10-25: 이름 · 지번 · 도로명 세 칸 ILIKE 대신 s_all(소문자 한 칸) LIKE — 두 글자 검색(trigram 못 씀)이 2.6초 → 아래.
+       부속지번 맞음(am)은 해시 반조인으로 · 보여 줄 줄의 부속지번만 따로 꺼낸다(정렬 색인 순으로 읽다가 상한에서 멈출 수 있게) */
     const 본 = Q(`
-      WITH am AS (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id),
-           g AS (SELECT complex_id FROM svc.lyr_sg_cmap WHERE $1::text IS NOT NULL AND (complex_nm ILIKE $1 OR rep_plat_plc ILIKE $1 OR rep_road_addr ILIKE $1)
-                 UNION SELECT complex_id FROM am
-                 UNION SELECT $2::int WHERE $2::int IS NOT NULL)
+      WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id)
       SELECT ${목록칸},
-             CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1) THEN am.부속지번 END AS 부속지번,
+             CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1)
+                  THEN (SELECT am.부속지번 FROM am WHERE am.complex_id = v.complex_id) END AS 부속지번,
              v."폐쇄"
-        FROM svc.lyr_sg_cmap v LEFT JOIN am ON am.complex_id = v.complex_id
-       WHERE (($1::text IS NULL AND $2::int IS NULL) OR v.complex_id IN (SELECT complex_id FROM g))
+        FROM svc.lyr_sg_cmap v
+       WHERE ${[...q].length >= 3
+               /* 세 글자 이상: trigram 색인으로 맞는 번호를 먼저 모은다(드문 말도 빠르다) */
+               ? `v.complex_id IN (SELECT complex_id FROM svc.lyr_sg_cmap WHERE s_all LIKE lower($1) UNION SELECT complex_id FROM am UNION SELECT $2::int WHERE $2::int IS NOT NULL)`
+               /* 두 글자 이하 · 빈 검색: 색인이 못 받치니 정렬 순으로 읽다가 상한에서 멈춘다(흔한 말이 대부분) */
+               : `(($1::text IS NULL AND $2::int IS NULL) OR ($1::text IS NOT NULL AND v.s_all LIKE lower($1))
+                   OR v.complex_id IN (SELECT complex_id FROM am) OR v.complex_id = $2::int)`}
          AND ($3::boolean = false OR v.has_recap)
        ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id
        LIMIT $4`, [qq, qid, onlyRecap, limit + 1]);
     const 법정동들 = q ? Q(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
                                  complex_cnt, trade_cnt, max_amount
                             FROM svc.lyr_lawd_stat WHERE emd_nm ILIKE $1 OR full_nm ILIKE $1 OR lawd_cd ILIKE $1
-                           ORDER BY complex_cnt DESC NULLS LAST, emd_nm ${K} NULLS FIRST, lawd_cd LIMIT 8`, [qq]) : [];
+                           ORDER BY complex_cnt DESC NULLS LAST, ${이름순('emd_nm')}, lawd_cd LIMIT 8`, [qq]) : [];
     const 신축들 = q ? Q(`SELECT kapt_code, kapt_name, lawd_nm, pnu, "세대", "동수", "사용승인", "거래", centroid_lat, centroid_lng, kapt_addr
                            FROM svc.lyr_sg_newbuild WHERE name_ns ILIKE $1 OR kapt_addr ILIKE $2 OR doro_juso ILIKE $2
                           ORDER BY "거래" DESC NULLS LAST, "세대" DESC NULLS LAST, kapt_code LIMIT 8`, [q0, qq]) : [];
@@ -556,7 +564,7 @@ async function 목록검색(req, res, next) {
     if (옛이름 && 옛이름.length <= 20 && /동$|가$|면$|읍$/.test(옛이름)) {
       const [쌍0, 법] = await Promise.all([
         Q(`SELECT "행정동코드", "시군구명", "행정동명", "마지막", "후분기", "새코드", "새이름", "새현행" FROM svc.lyr_sg_hdong_pair
-            WHERE lower("행정동명") = lower($1) ORDER BY "행정동코드", "새이름" ${K} NULLS FIRST, "새코드"`, [옛이름]),
+            WHERE lower("행정동명") = lower($1) ORDER BY "행정동코드", ${이름순('"새이름"')}, "새코드"`, [옛이름]),
         Q(`SELECT DISTINCT "옛코드", "법정동코드", "법정동명" FROM svc.lyr_sg_hdong_plaw WHERE lower("행정동명") = lower($1) ORDER BY "옛코드", "법정동코드"`, [옛이름])]);
       const 쌍 = 쌍0.map(x => ({ ...x, 마지막: x.마지막 && new Date(x.마지막 + 'T00:00:00Z'), 후분기: x.후분기 && new Date(x.후분기 + 'T00:00:00Z') }));
       if (쌍.length && 법.length) {
@@ -572,7 +580,7 @@ async function 목록검색(req, res, next) {
           Q(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
                     complex_cnt, trade_cnt, max_amount
                FROM svc.lyr_lawd_stat WHERE lawd_cd = ANY($1::text[])
-              ORDER BY complex_cnt DESC NULLS LAST, emd_nm ${K} NULLS FIRST, lawd_cd LIMIT 8`, [코드]),
+              ORDER BY complex_cnt DESC NULLS LAST, ${이름순('emd_nm')}, lawd_cd LIMIT 8`, [코드]),
           Q(`SELECT ${목록칸}, NULL AS 부속지번 FROM svc.lyr_sg_cmap v
               WHERE left(v.rep_pnu, 10) = ANY($1::text[]) AND ($2::boolean = false OR v.has_recap)
               ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id LIMIT $3`, [코드, onlyRecap, limit + 1])]);
