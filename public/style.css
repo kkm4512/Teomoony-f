@@ -1939,3 +1939,12 @@ table.cned td.sm { line-height: 1.6; }
 .tipbub{position:fixed;z-index:9999;padding:7px 10px;border-radius:8px;background:var(--band);color:var(--band-ink);font-size:12px;line-height:1.5;box-shadow:0 2px 10px rgba(0,0,0,.25);pointer-events:none}
 .detail span[title],.detail p[title]{cursor:help}
 .detail a[title],.detail button[title]{cursor:pointer}
+
+/* 2026-10-24 동 고르기: 단추 하나 → 펼치면 동 목록 */
+.dsel{margin:4px 0 8px}
+.dtog{display:inline-flex;align-items:center;gap:2px;padding:6px 12px;border:1px solid var(--mark);border-radius:99px;background:var(--mark-soft);color:var(--ink);font:inherit;font-weight:700;font-size:13px;cursor:pointer}
+.dtog .muted{font-weight:400;font-size:12px}
+.dsel .dpick{margin-top:6px}
+.dinfo{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0 0 10px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:13px}
+.dinfo dt{color:var(--ink-3)}
+.dinfo dd{margin:0}

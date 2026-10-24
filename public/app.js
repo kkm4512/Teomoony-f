@@ -3043,14 +3043,16 @@ function structureBlock(dongs, floors, hos, scope, hoTotal) {
      게다가 실거래는 **동을 특정할 수 없다** - 아파트 매매 말고는 API 에
      동 정보가 아예 없다(../Teomoony/CONTEXT.md 4절). 그러니 동 옆의 금액은
      무엇으로 읽히든 틀린다. 동을 고르는 데 필요한 건 규모(층·호)뿐이다. */
-  const picker = real.length > 1 ? `<div class="dpick" role="tablist">${
+  /* 2026-10-24 22:17 사장님 "동은 이름만 · 단추 하나를 누르면 동들이 쫙 나오고, 동을 누르면 그 동 정보가 밑에" —
+     칩에서 층 · 호를 뺐다. 평소엔 **고른 동 단추 하나**만 보이고, 누르면 동 목록이 펼쳐진다. 동을 고르면 다시 접힌다. */
+  const selNm = (dongStat.get(sel) || {}).nm || '—';
+  const picker = real.length > 1 ? `<div class="dsel">
+      <button type="button" class="dtog" data-dong-toggle aria-expanded="false">${esc(selNm)}<span class="muted"> · ${fmt(real.length)}동 중</span> ▾</button>
+      <div class="dpick" role="tablist" hidden>${
       real.map(d => { const pk = d.mgm_bldrgst_pk, s = dongStat.get(pk) || {};
-        const sub = [ (s.flr && s.flr.size) ? `${fmt(s.flr.size)}층` : '',
-                      s.ho ? `${fmt(s.ho)}호` : '' ].filter(Boolean).join(' · ');
         return `<button type="button" class="dchip" role="tab" data-ho-dong="${esc(String(pk))}"
-                 aria-selected="${pk === sel}">${esc(s.nm || '—')}${
-                 sub ? `<b>${sub}</b>` : ''}</button>`;
-      }).join('')}</div>` : '';
+                 aria-selected="${pk === sel}">${esc(s.nm || '—')}</button>`;
+      }).join('')}</div></div>` : '';
 
   /* ---- 평형 고르기 (2026-10-18) ----
      전유공용면적을 올리면서 **호마다 전용면적이 생겼다.** 전에는 평형이
@@ -3116,7 +3118,18 @@ function structureBlock(dongs, floors, hos, scope, hoTotal) {
   /* 격자 한 장으로 끝난다. 층·호가 둘 다 없으면 입면으로 내려간다.
      입면은 단지 전체를 한 장에 그리므로 동 선택과 무관하다. */
   const grid = gridBlock(real, floors, hos, scope, sel, areaOn);
-  const body = grid ? picker + apick + xpick + aMiss + aNone + grid
+  /* 2026-10-24 22:17: 고른 동의 정보(대장 표제부)를 단추 바로 밑에 — 전엔 맨 아래 '동' 표에 30줄이 다 있었다(중복 · 압축) */
+  const 고른동 = real.find(d => d.mgm_bldrgst_pk === sel);
+  const 동정보 = 고른동 ? `<dl class="dinfo">${[
+      ['용도', esc(고른동.main_purps_nm || 고른동.regstr_kind_nm || '')],
+      ['세대', 고른동.hhld_cnt ? fmt(고른동.hhld_cnt) + '세대' : ''],
+      ['층', [고른동.grnd_flr_cnt ? `지상 ${fmt(고른동.grnd_flr_cnt)}층` : '', 고른동.ugrnd_flr_cnt ? `지하 ${fmt(고른동.ugrnd_flr_cnt)}층` : ''].filter(Boolean).join(' · ')],
+      ['연면적', 고른동.tot_area ? fmt(Math.round(고른동.tot_area)) + '㎡' : ''],
+      ['구조', esc(고른동.strct_nm || '')],
+      ['사용승인', 고른동.use_apr_day ? 날짜(고른동.use_apr_day) : ''],
+      ['위반건축물', 고른동.위반 === 'Y' ? '<span class="pill r">위반건축물 표시</span>' : ''],
+    ].filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : '';
+  const body = grid ? picker + 동정보 + apick + xpick + aMiss + aNone + grid
 
                     : elevationBlock(real, sel);
 
@@ -3761,6 +3774,15 @@ document.addEventListener('click', e => {
   b.style.left = Math.max(12, Math.min(innerWidth - w - 12, r.left)) + 'px';
   b.style.top = (r.bottom + 6 + b.offsetHeight > innerHeight ? r.top - b.offsetHeight - 6 : r.bottom + 6) + 'px';
   setTimeout(() => b.remove(), 3500);
+});
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-dong-toggle]');
+  if (!t) return;
+  const list = t.parentElement.querySelector('.dpick');
+  if (!list) return;
+  list.hidden = !list.hidden;
+  t.setAttribute('aria-expanded', String(!list.hidden));
 });
 
 /* 2026-10-24: 짐작으로 이은 값 옆의 작은 '추정' 칩 — 누르면 그 정책 항목으로 */
@@ -4719,17 +4741,9 @@ function renderDetail(payload) {
   const paneD = `
     ${structureBlock(dongs, floors, hos, scope, 호총수)}
     ${/* 2026-10-23: 공시가격 추이는 실거래 탭에서 여기로 — 호마다 매기는 값이라 동·호 배치도(호 칸 · 호 상세)와 한 자리 */''}
-    ${prcBlock(호공시, scope, 공시적재, dongs)}
+    ${/* 2026-10-24 사장님: 공시가격 추이는 호 상세(호 칸 누르면)와 중복 — 동·호 탭에서 뺐다 */''}
 
-    ${sect('동', 'bld', ` ${fmt(dongN)}`)}
-    <table><thead><tr><th>동</th><th>용도</th><th class="n">세대</th><th class="n">연면적</th></tr></thead><tbody>
-      ${dongs.filter(d => !d.is_recap).map((d, i2, arr) => `<tr>
-        <td title="관리번호 ${esc(d.mgm_bldrgst_pk)}">${dongLabel(d, arr.length)}${d.위반 === 'Y' ? ' <span class="pill r" title="건축물대장 위반건축물 표시 (GIS건물통합정보)">위반</span>' : ''}</td>
-        <td>${esc(d.main_purps_nm || d.regstr_kind_nm || '—')}</td>
-        <td class="n">${fmt(d.hhld_cnt)}</td>
-        <td class="n">${d.tot_area ? fmt(Math.round(d.tot_area)) : '—'}</td>
-      </tr>`).join('') || '<tr><td colspan="4">—</td></tr>'}
-    </tbody></table>
+    ${/* 2026-10-24: 동 표(30줄)는 뺐다 — 위 동 단추로 고른 동의 정보가 단추 밑에 나온다 */''}
     ${/* 2026-10-23: '세대수가 축마다 다릅니다' 는 단지정보 제원의 세대 줄(총괄표제부 · K-apt 값을 같은 칸에)이 맡는다 — 중복 없음 */''}`;
 
   /* 이 땅은 무엇인가 — 전부 **PNU 로 떨어지는** 축이다(필지·건물외곽선·인허가). */
