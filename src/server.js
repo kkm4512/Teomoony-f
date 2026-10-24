@@ -439,6 +439,9 @@ setInterval(기록_정리, 6 * 3600 * 1000).unref();
 setTimeout(기록_정리, 5 * 60 * 1000).unref();   /* 뜨고 5분 뒤 한 번 */
 
 /* 이용현황 조회 — 누구나 본다 */
+/* 2026-10-24 서비스DB(PostgreSQL) 읽기 — 발행된 단지 응답이 있으면 그걸 보내고, 없으면 아래 기존 경로(적재DB). 끄기: svc_mode.json read:false (src/svc.js) */
+app.use(require('./svc').단지응답);
+
 app.get('/api/usage', async (req, res) => {
   try {
     await 이용_내보내기();          /* 방금 것까지 보이게 하고 센다 */
