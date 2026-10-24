@@ -693,7 +693,9 @@ function initMap() {
     /* 2026-10-23 사장님 "지도를 360도로 회전 가능하게" — leaflet-rotate(Leaflet 1.9 플러그인).
        폰: 두 손가락 비틀기 · PC: 빈 곳을 꾹 누른 채 끌기(길게눌러돌리기) 또는 Shift + 끌기 · 나침반 단추를 누르면 북쪽이 위로. */
     rotate: true, bearing: 0, touchRotate: true, shiftKeyRotate: true,
-    rotateControl: { closeOnZeroBearing: false, position: 'topleft' },
+    /* 2026-10-24 21:53 사장님 "화살표 위아래(나침반 단추) 없애줘 — 보통 스크롤 · 터치로 하니까" — 평소엔 안 보인다(closeOnZeroBearing).
+       지도가 돌아가 있을 때만 나타나 누르면 북쪽이 위로 — 아예 없으면 두 손가락으로 잘못 돌린 지도를 되돌릴 길이 없다. */
+    rotateControl: { closeOnZeroBearing: true, position: 'topleft' },
     /* ★ 아래에서 Leaflet 의 휠 확대를 **끄고 직접 돌린다.** 이 값은 남겨 두지만
        실제로는 안 쓰인다(되돌릴 때 기준이 되라고 남긴다). */
   }).setView([37.5885, 126.9680], 16);   // 종로구 청운동
@@ -707,6 +709,11 @@ function initMap() {
      연속해서 굴리면 쿨다운(220ms)마다 한 단계씩 — 예측 가능하고 절대 안 튄다.
      ★ 커서 위치를 중심으로 확대한다(setZoomAround) — 지도에서 그게 기본 기대다. */
   길게눌러돌리기();
+  /* 나침반 단추: 돌아가 있을 때만 보인다 — 손으로 북쪽에 다시 맞춘 경우에도 숨긴다(플러그인은 단추를 눌렀을 때만 숨김) */
+  map.on('rotate', () => {
+    const el = document.querySelector('#map .leaflet-control-rotate');
+    if (el) el.style.display = Math.abs(((map.getBearing() % 360) + 360) % 360) < 1 || Math.abs(((map.getBearing() % 360) + 360) % 360 - 360) < 1 ? 'none' : '';
+  });
   map.scrollWheelZoom.disable();
   /* ★ 2차 수정 (사용자 재신고). 처음엔 **고정 쿨다운 220ms** 로 막았다 —
      "한 번 굴림" 과 "한 제스처에 10번" 은 둘 다 1회로 막혔는데도 실기기에서는
@@ -2638,7 +2645,9 @@ function miniMap(elId, bounds, center, zoomOut) {
     zoomControl: false, attributionControl: false, dragging: false,
     scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
     keyboard: false, touchZoom: false, preferCanvas: true,
-    zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false, inertia: false
+    zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false, inertia: false,
+    /* 2026-10-24: 회전 플러그인이 미리보기 지도에도 나침반 단추(▲▼)를 붙여 검색 제안 위로 비쳤다 — 미리보기는 돌릴 일이 없다 */
+    rotate: false, rotateControl: false, touchRotate: false, shiftKeyRotate: false
   });
   vworldLayer('Satellite', 'jpeg').addTo(mm);
   vworldLayer('Hybrid', 'png').addTo(mm);
