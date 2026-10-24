@@ -4875,11 +4875,28 @@ async function boot() {
       else 제안닫기();                        /* 안 고르고 Enter - 목록 검색 결과를 본다 */
     } else if (e.key === 'Escape') 제안닫기();
   });
-  /* 누르는 순간 입력창이 포커스를 잃어 제안이 닫히지 않게 pointerdown 에서 고른다 */
+  /* 누르는 순간 입력창이 포커스를 잃어 제안이 닫히지 않게 — 마우스는 pointerdown 에서 바로 고른다.
+     ★ 2026-10-24 사장님 "모바일에서 스크롤 내리려 하면 그 단지가 눌려 들어가져" — 손가락은 **누르는 순간이 스크롤의 시작**이기도 하다.
+       터치 · 펜은 떼는 순간(pointerup)에, 누른 자리에서 10px 안으로만 움직였을 때만 고른다. 스크롤이 시작되면 브라우저가 pointercancel 을 보낸다. */
+  let 제안누름 = null;
   $('#sugg').addEventListener('pointerdown', e => {
     const x = e.target.closest('.sg-it'); if (!x) return;
-    e.preventDefault(); 제안고르기(제안.항목[Number(x.dataset.k)]);
+    if (e.pointerType === 'mouse') { e.preventDefault(); 제안고르기(제안.항목[Number(x.dataset.k)]); return; }
+    제안누름 = { id: e.pointerId, x: e.clientX, y: e.clientY, k: Number(x.dataset.k) };
   });
+  $('#sugg').addEventListener('pointermove', e => {
+    if (제안누름 && e.pointerId === 제안누름.id && Math.hypot(e.clientX - 제안누름.x, e.clientY - 제안누름.y) > 10) 제안누름 = null;
+  });
+  $('#sugg').addEventListener('pointercancel', () => { 제안누름 = null; });
+  $('#sugg').addEventListener('pointerup', e => {
+    const p = 제안누름; 제안누름 = null;
+    if (!p || e.pointerId !== p.id || e.pointerType === 'mouse') return;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) return;
+    const x = e.target.closest('.sg-it'); if (!x || Number(x.dataset.k) !== p.k) return;
+    e.preventDefault(); 제안고르기(제안.항목[p.k]);
+  });
+  /* 터치를 떼면 뒤따르는 mousedown 이 입력창 포커스를 빼앗아 목록을 닫는다 — 목록 안에서는 막는다(스크롤은 그대로) */
+  $('#sugg').addEventListener('mousedown', e => { if (e.target.closest('.sg-it')) e.preventDefault(); });
   $('#q').addEventListener('blur', () => setTimeout(제안닫기, 120));
   $('#q').addEventListener('focus', () => {
     if (!askMode && 제안.마지막 && 제안.마지막.q === $('#q').value.trim()) 제안그리기(제안.마지막);
