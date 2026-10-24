@@ -447,10 +447,17 @@ app.get('/api/usage', async (req, res) => {
     const 오늘 = 이용_날(이제);
     const 이레 = 이용_날(이제 - 6 * 86400000);
     const 보름 = 이용_날(이제 - 13 * 86400000);
+    /* ★ 2026-10-24 11:26 사장님 "이용현황을 날짜별로 분리" — ?day=YYYY-MM-DD 면 동작 · 갈래 · 나라 · 시간대를 **그날 하루**로 센다.
+         없으면 예전처럼 전체(나라는 최근 7일). 날짜는 한국 날짜 · 접속 기록 보관(90일) 안만 받는다. */
+    const 날짜 = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? String(req.query.day) : null;
+    const 날시작 = 날짜 ? 날짜 + 'T00:00:00' : null;
+    const 날끝 = 날짜 ? 이용_날(Date.parse(날짜 + 'T00:00:00+09:00') + 86400000) : null;
     const r = pool.request()
       .input('오늘', sql.VarChar(19), 오늘)
       .input('이레', sql.VarChar(19), 이레)
-      .input('보름', sql.VarChar(19), 보름);
+      .input('보름', sql.VarChar(19), 보름)
+      .input('d0', sql.VarChar(19), 날시작)
+      .input('d1', sql.VarChar(19), 날끝);
     /* ★ 315: 맨 위 수 · 동작별 · 날짜별은 **사람**만(로봇이라고 밝히지 않은 것). 갈래별 표는 따로 — 로봇이 얼마나 오는지도 사실이다.
        ★ 운영자(사장님) 접속은 세지 않는다(셀 때 뺀다 · 지난 것은 다시 셌다). 나라는 접속 기록(req_log)의 최근 7일 — IP 는 내보내지 않는다. */
     const 결 = await r.query(`
@@ -460,6 +467,7 @@ app.get('/api/usage', async (req, res) => {
              이레 = SUM(CASE WHEN 시각 >= CAST(@이레 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
              전체 = SUM(횟수)
         FROM ops.usage_hour WHERE 갈래 IN (N'사람', N'모름')
+         AND (@d0 IS NULL OR (시각 >= CAST(@d0 AS DATETIME2(0)) AND 시각 < CAST(@d1 AS DATETIME2(0))))
        GROUP BY 동작
        ORDER BY SUM(횟수) DESC;
 
@@ -473,15 +481,24 @@ app.get('/api/usage', async (req, res) => {
              오늘 = SUM(CASE WHEN 시각 >= CAST(@오늘 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
              이레 = SUM(CASE WHEN 시각 >= CAST(@이레 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
              전체 = SUM(횟수)
-        FROM ops.usage_hour GROUP BY 갈래 ORDER BY SUM(횟수) DESC;
+        FROM ops.usage_hour
+       WHERE (@d0 IS NULL OR (시각 >= CAST(@d0 AS DATETIME2(0)) AND 시각 < CAST(@d1 AS DATETIME2(0))))
+       GROUP BY 갈래 ORDER BY SUM(횟수) DESC;
 
       SELECT 처음 = MIN(시각) FROM ops.usage_hour WHERE 갈래 <> N'모름';
 
       SELECT l.ip, l.나라, l.ua, n = COUNT(*)
         FROM ops.req_log l
-       WHERE l.때 >= CAST(@이레 AS DATETIME2(0)) AND l.내부 = 0 AND l.상태 < 400
+       WHERE l.때 >= CAST(ISNULL(@d0, @이레) AS DATETIME2(0)) AND (@d1 IS NULL OR l.때 < CAST(@d1 AS DATETIME2(0)))
+         AND l.내부 = 0 AND l.상태 < 400
          AND NOT EXISTS (SELECT 1 FROM ops.usage_owner_ip o WHERE o.ip = l.ip)
-       GROUP BY l.ip, l.나라, l.ua;`);
+       GROUP BY l.ip, l.나라, l.ua;
+
+      /* 그날의 시간대(사람) — 날짜를 골랐을 때만 */
+      SELECT 시 = DATEPART(HOUR, 시각), 횟수 = SUM(횟수)
+        FROM ops.usage_hour
+       WHERE @d0 IS NOT NULL AND 갈래 IN (N'사람', N'모름') AND 시각 >= CAST(@d0 AS DATETIME2(0)) AND 시각 < CAST(@d1 AS DATETIME2(0))
+       GROUP BY DATEPART(HOUR, 시각) ORDER BY 1;`);
     const 동작 = 결.recordsets[0] || [], 일별 = 결.recordsets[1] || [], 갈래별 = 결.recordsets[2] || [];
     /* 나라 × 갈래 — IP 수와 요청 수만(주소는 안 내보낸다) */
     const 나라표 = new Map();
@@ -498,6 +515,7 @@ app.get('/api/usage', async (req, res) => {
         전체: 동작.reduce((a, x) => a + x.전체, 0),
       },
       동작, 일별, 갈래별, 나라, 갈래시작: (결.recordsets[3][0] || {}).처음 || null,
+      날짜, 시간별: 결.recordsets[5] || [],
     });
   } catch (e) { fail(res, e, 'usage'); }
 });

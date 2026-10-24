@@ -1907,3 +1907,11 @@ table.cned td.sm { line-height: 1.6; }
 /* 2026-10-24 카드에 '자세히' 버튼이 들면 거리 줄이 첫 칸(52px)으로 밀려 아래 줄과 겹쳤다 — 버튼은 첫 줄 오른쪽, 거리 · 공시 · 보조 줄은 둘째 칸부터 끝까지 */
 .scell:has(.sdet) .sdet{grid-row:1;grid-column:3}
 .scell:has(.sdet) .sd{grid-column:2 / -1;white-space:normal}
+/* 2026-10-24 이용현황 날짜별 — 막대가 단추가 됐다(누르면 그날) · 날짜 칩 줄 · 시간대 막대 */
+.udays button.ud{border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer}
+.udays:has(.ud.on) .ud:not(.on) i{opacity:.35}
+.udays .ud.on i{outline:2px solid var(--ink-3);outline-offset:1px}
+.udays .ud.on span{color:var(--ink);font-weight:600}
+.udaypick{flex-wrap:nowrap;overflow-x:auto;margin:6px 0 4px;padding-bottom:2px}
+.udaypick .achip{flex:0 0 auto}
+.uhours .ud span{font-size:10px}

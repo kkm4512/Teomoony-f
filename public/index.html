@@ -316,16 +316,23 @@
 
       <p class="note sm" id="unote">위 숫자는 <b>사람</b>이 쓴 것만 셉니다(로봇이라고 밝힌 접속 · 운영자 접속은 뺍니다).</p>
 
-      <h3 class="vh3">누가 왔나 <span class="h3hint">사람 · 로봇 갈래별</span></h3>
-      <div id="ukinds" class="uacts"></div>
+      <!-- 2026-10-24 사장님 "날짜별로 분리 · 사람이 이용하는 게 맨 위" — 날을 고르면 아래가 모두 그날 하루로 바뀐다. 사람 동작이 맨 위 -->
+      <h3 class="vh3">날짜 <span class="h3hint">사람 · 최근 14일 — 막대나 날짜를 누르면 아래가 그날로</span></h3>
+      <div id="udays" class="udays"></div>
+      <div id="udaypick" class="apick udaypick"></div>
 
-      <h3 class="vh3">동작별 <span class="h3hint">사람</span></h3>
+      <h3 class="vh3">사람이 쓴 것 <span class="h3hint" id="uwhen1">동작별</span></h3>
       <div id="uacts" class="uacts"></div>
 
-      <h3 class="vh3">날짜별 <span class="h3hint">사람 · 최근 14일</span></h3>
-      <div id="udays" class="udays"></div>
+      <div id="uhourbox" hidden>
+        <h3 class="vh3">시간대 <span class="h3hint" id="uwhen4">사람 · 한국 시각</span></h3>
+        <div id="uhours" class="udays uhours"></div>
+      </div>
 
-      <h3 class="vh3">나라별 <span class="h3hint">최근 7일 · 접속 주소 수와 요청 수 — 주소는 보이지 않습니다</span></h3>
+      <h3 class="vh3">누가 왔나 <span class="h3hint" id="uwhen2">사람 · 로봇 갈래별</span></h3>
+      <div id="ukinds" class="uacts"></div>
+
+      <h3 class="vh3">나라별 <span class="h3hint" id="uwhen3">접속 주소 수와 요청 수 — 주소는 보이지 않습니다</span></h3>
       <div id="unations" class="uacts"></div>
 
       <p class="note sm">단지 하나를 열면 실거래 · 주변 · 건축허가가 <b>한 번에</b> 나갑니다.

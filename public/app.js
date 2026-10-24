@@ -5098,67 +5098,101 @@ async function 홈그리기() {
   }
 }
 
-/* ---- 이용현황 ---- */
-async function 이용그리기() {
+/* ---- 이용현황 ----
+   ★ 2026-10-24 11:26 사장님 "날짜별로 분리 · 사람이 이용하는 게 맨 위" — 맨 위 합계(사람) · 14일 막대(누르면 그날) · 날짜 칩(전체 · 각 날) ·
+     그 아래 **사람 동작 → 시간대 → 갈래 → 나라** 가 고른 날 하루로 바뀐다. 합계 · 14일은 /api/usage(전체), 고른 날은 /api/usage?day= 로 따로. */
+let 이용날 = null;                         // null = 전체
+const 이용캐시 = new Map();
+function 한국날(ms) { return new Date(ms + 9 * 3600000).toISOString().slice(0, 10); }
+async function 이용그리기(강제 = false) {
   const 이제 = Date.now();
-  if (이제 - 이용받음 < 20000) return;        /* 탭을 오갈 때마다 다시 묻지 않는다 */
   const 합 = $('#usum'), 액 = $('#uacts'), 날 = $('#udays');
   try {
-    const u = await fetch('/api/usage').then(r => r.json());
-    if (u.error) throw new Error(u.hint || u.error);
-    이용받음 = 이제;
+    let u = 이용캐시.get('');
+    if (!u || 강제 || 이제 - u._t > 20000) {
+      u = await fetch('/api/usage').then(r => r.json());
+      if (u.error) throw new Error(u.hint || u.error);
+      u._t = 이제; 이용캐시.set('', u);
+    }
     합.innerHTML = [['오늘', u.합계.오늘], ['최근 7일', u.합계.이레], ['전체', u.합계.전체]]
-      .map(([k, v]) => `<div class="hs lead"><div class="k">${k}</div><div class="v">${fmt(v)}</div></div>`)
-      .join('');
+      .map(([k, v]) => `<div class="hs lead"><div class="k">${k}</div><div class="v">${fmt(v)}</div></div>`).join('');
+    /* 14일 막대 — 빠진 날은 0 (한국 날짜) · 누르면 그날 */
+    const 표 = new Map((u.일별 || []).map(d => [String(d.날), d.횟수]));
+    const 칸 = []; for (let i = 13; i >= 0; i--) 칸.push(한국날(이제 - i * 86400000));
+    const 값 = 칸.map(k => 표.get(k) || 0), 큰 = Math.max(1, ...값);
+    날.innerHTML = 칸.map((k, i) => `<button type="button" class="ud${값[i] ? '' : ' zero'}${이용날 === k ? ' on' : ''}" data-uday="${k}" title="${esc(날짜(k))} · ${fmt(값[i])}회">
+        <i style="height:${값[i] ? Math.max(3, 값[i] / 큰 * 100).toFixed(1) : 2}%"></i>
+        <span>${(i % 3 === 1 || i === 13) ? esc(날짜(k).slice(5)) : ''}</span></button>`).join('');
+    $('#udaypick').innerHTML = [`<button type="button" class="achip" data-uday="" aria-selected="${이용날 == null}">전체</button>`,
+      ...칸.slice().reverse().map((k, i) => `<button type="button" class="achip" data-uday="${k}" aria-selected="${이용날 === k}">${esc(날짜(k))}${i === 0 ? ' 오늘' : ''}<b>${fmt(표.get(k) || 0)}</b></button>`)].join('');
 
-    const 최대 = Math.max(1, ...u.동작.map(x => x.전체));
-    액.innerHTML = u.동작.length ? u.동작.map(x => `
+    /* 고른 날 */
+    let d = u;
+    if (이용날) {
+      d = 이용캐시.get(이용날);
+      if (!d || (이용날 === 한국날(이제) && 이제 - d._t > 20000)) {
+        d = await fetch('/api/usage?day=' + encodeURIComponent(이용날)).then(r => r.json());
+        if (d.error) throw new Error(d.hint || d.error);
+        d._t = 이제; 이용캐시.set(이용날, d);
+      }
+    }
+    const 언제 = 이용날 ? `${날짜(이용날)} 하루` : '전체';
+    $('#uwhen1').textContent = `동작별 · ${언제}`;
+    $('#uwhen2').textContent = `사람 · 로봇 갈래별 · ${언제}`;
+    $('#uwhen3').textContent = `${이용날 ? `${날짜(이용날)} 하루` : '최근 7일'} · 접속 주소 수와 요청 수 — 주소는 보이지 않습니다`;
+    $('#uwhen4').textContent = `사람 · 한국 시각 · ${언제}`;
+
+    const 수 = x => 이용날 ? x.전체 : x.전체;     // 날을 고르면 서버가 그날만 세어 '전체' 칸에 담는다
+    const 최대 = Math.max(1, ...d.동작.map(수));
+    액.innerHTML = d.동작.length ? d.동작.map(x => `
       <div class="ua">
         <div class="nm">${esc(x.동작)}</div>
-        <div class="n">${fmt(x.전체)}<s>오늘 ${fmt(x.오늘)}</s></div>
-        <div class="bar"><i style="width:${(x.전체 / 최대 * 100).toFixed(1)}%"></i></div>
+        <div class="n">${fmt(수(x))}${이용날 ? '' : `<s>오늘 ${fmt(x.오늘)}</s>`}</div>
+        <div class="bar"><i style="width:${(수(x) / 최대 * 100).toFixed(1)}%"></i></div>
       </div>`).join('')
-      : '<p class="note sm">아직 쌓인 기록이 없습니다.</p>';
+      : `<p class="note sm">${이용날 ? '이날 사람이 쓴 기록이 없습니다.' : '아직 쌓인 기록이 없습니다.'}</p>`;
 
-    /* 315: 갈래별(사람 · 검색 로봇 · AI 수집 로봇 …) — '모름' 은 갈래를 세기 전(접속 기록이 없던 때)의 것 */
+    /* 시간대 — 날을 골랐을 때만 */
+    const hb = $('#uhourbox');
+    if (이용날) {
+      const 시 = new Map((d.시간별 || []).map(x => [Number(x.시), Number(x.횟수)]));
+      const hv = [...Array(24).keys()].map(h => 시.get(h) || 0), hm = Math.max(1, ...hv);
+      $('#uhours').innerHTML = hv.map((v, h) => `<div class="ud${v ? '' : ' zero'}" title="${h}시 · ${fmt(v)}회">
+          <i style="height:${v ? Math.max(3, v / hm * 100).toFixed(1) : 2}%"></i><span>${h % 3 === 0 ? h : ''}</span></div>`).join('');
+      hb.hidden = false;
+    } else hb.hidden = true;
+
+    /* 갈래별 — '모름' 은 갈래를 세기 전(접속 기록이 없던 때)의 것 */
     const 갈풀이 = { '사람': '로봇이라고 밝히지 않은 접속', '검색 로봇': '구글 · 네이버 · 빙 등', 'AI 수집 로봇': 'Claude · GPT 등 AI 학습·검색용 수집기',
       'SEO 수집 로봇': 'Ahrefs 등 검색 순위 분석용', '기타 로봇·미리보기': '메신저 링크 미리보기 등', '스크립트': '프로그램으로 직접 부른 것',
-      '스캐너 추정': '오래된 브라우저를 흉내 낸 데이터센터 접속', '모름': `갈래를 세기 전 기록${u.갈래시작 ? ` (${String(u.갈래시작).slice(0, 13).replace('T', ' ')}시 전)` : ''}` };
-    const 갈최대 = Math.max(1, ...(u.갈래별 || []).map(x => x.전체));
-    $('#ukinds').innerHTML = (u.갈래별 || []).map(x => `
+      '스캐너 추정': '오래된 브라우저를 흉내 낸 데이터센터 접속', '모름': `갈래를 세기 전 기록${u.갈래시작 ? ` (${esc(날짜(u.갈래시작))} 전)` : ''}` };
+    const 갈최대 = Math.max(1, ...(d.갈래별 || []).map(x => x.전체));
+    $('#ukinds').innerHTML = (d.갈래별 || []).map(x => `
       <div class="ua">
         <div class="nm">${esc(x.갈래)} <s>${esc(갈풀이[x.갈래] || '')}</s></div>
-        <div class="n">${fmt(x.전체)}<s>오늘 ${fmt(x.오늘)}</s></div>
+        <div class="n">${fmt(x.전체)}${이용날 ? '' : `<s>오늘 ${fmt(x.오늘)}</s>`}</div>
         <div class="bar"><i style="width:${(x.전체 / 갈최대 * 100).toFixed(1)}%"></i></div>
       </div>`).join('') || '<p class="note sm">아직 없습니다.</p>';
     const 나라이름 = { KR: '한국', US: '미국', FR: '프랑스', JP: '일본', SG: '싱가포르', NL: '네덜란드', PL: '폴란드', CA: '캐나다', DE: '독일',
       GB: '영국', RU: '러시아', AU: '호주', TW: '대만', CN: '중국', IN: '인도', BE: '벨기에', BD: '방글라데시', ID: '인도네시아', '??': '모름' };
-    const 나최대 = Math.max(1, ...(u.나라 || []).map(x => x.요청));
-    $('#unations').innerHTML = (u.나라 || []).map(x => `
+    const 나최대 = Math.max(1, ...(d.나라 || []).map(x => x.요청));
+    $('#unations').innerHTML = (d.나라 || []).map(x => `
       <div class="ua">
         <div class="nm">${esc(나라이름[x.나라] || x.나라)} · ${esc(x.갈래)}</div>
         <div class="n">${fmt(x.요청)}<s>주소 ${fmt(x.IP수)}곳</s></div>
         <div class="bar"><i style="width:${(x.요청 / 나최대 * 100).toFixed(1)}%"></i></div>
       </div>`).join('') || '<p class="note sm">아직 없습니다.</p>';
-
-    /* 빠진 날은 0 으로 채운다 - 줄이 비면 '그날은 안 쌓였다' 가 아니라
-       '그날이 없다' 로 읽힌다. 한국 날짜로 센다(9시간 더하고 UTC 칸을 읽는다). */
-    const 표 = new Map((u.일별 || []).map(d => [String(d.날), d.횟수]));
-    const 칸 = [];
-    for (let i = 13; i >= 0; i--)
-      칸.push(new Date(이제 + 9 * 3600000 - i * 86400000).toISOString().slice(0, 10));
-    const 값 = 칸.map(k => 표.get(k) || 0), 큰 = Math.max(1, ...값);
-    날.innerHTML = 칸.map((k, i) => {
-      const v = 값[i];
-      return `<div class="ud${v ? '' : ' zero'}" title="${k} · ${fmt(v)}회">
-          <i style="height:${v ? Math.max(3, v / 큰 * 100).toFixed(1) : 2}%"></i>
-          <span>${(i % 3 === 1 || i === 13) ? k.slice(5).replace('-', '.') : ''}</span>
-        </div>`;
-    }).join('');
   } catch (e) {
     액.innerHTML = `<p class="note sm">이용현황을 읽지 못했습니다 — ${esc(e.message)}</p>`;
   }
 }
+document.addEventListener('click', e => {
+  const b = e.target.closest('#view-usage [data-uday]');
+  if (!b) return;
+  const k = b.dataset.uday || null;
+  이용날 = (이용날 === k && k) ? null : k;      // 같은 날을 다시 누르면 전체
+  이용그리기();
+});
 
 /* ===================== 정책 (2026-10-22 사장님 "단지정보 안 부가 설명들을 '정책' 에 전부 정리") =====================
    ★ 화면 칸마다 붙어 있던 '어떻게 셌나 · 왜 이렇게 보이나' 설명을 여기 한 곳에 모았다.
