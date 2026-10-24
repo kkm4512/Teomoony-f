@@ -5660,12 +5660,37 @@ app.get('/api/complexes/markers', async (req, res) => {
 });
 
 /* ---------- 단지 상세 ---------- */
+/* ★ 2026-10-24 전국 넓히기 전 진단 — 큰 단지(헬리오시티 9,510세대) 상세가 4~9초다(호 목록 · 전용면적 · 거래가 단지 크기에 비례).
+   같은 단지를 여러 사람이 보는 일이 잦으니 **완성된 응답을 잠깐 들고 있는다**(10분 · 최근 150개 · 3MB 넘는 응답은 안 든다).
+   ★ 자료가 바뀌는 주기(하루~분기)에 비해 10분은 짧다. 진단(?_t · ?_only)은 늘 새로 센다. */
+const _상세캐시 = new Map();
+const 상세캐시TTL = 10 * 60 * 1000, 상세캐시최대 = 150;
+function 상세캐시꺼냄(id) {
+  const x = _상세캐시.get(id);
+  if (!x) return null;
+  if (Date.now() - x.t > 상세캐시TTL) { _상세캐시.delete(id); return null; }
+  _상세캐시.delete(id); _상세캐시.set(id, x);          /* 최근 쓴 것을 뒤로 — 오래 안 쓴 것부터 버린다 */
+  return x.body;
+}
+function 상세캐시넣음(id, 몸) {
+  const body = JSON.stringify(몸);
+  if (body.length > 3 * 1024 * 1024) return body;
+  _상세캐시.set(id, { t: Date.now(), body });
+  while (_상세캐시.size > 상세캐시최대) _상세캐시.delete(_상세캐시.keys().next().value);
+  return body;
+}
+
 app.get('/api/complexes/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
   /* ★ 2026-10-21: INT 칸을 넘는 수(99999999999)는 sql.Int 검증에서 터져 **500** 이 났다.
      그런 단지는 있을 수 없으므로 '없다' 가 맞는 답이다 */
   if (id < 1 || id > 2147483647) return res.status(404).json({ error: 'not found' });
+  const _캐시씀 = !req.query._t && !req.query._only;
+  if (_캐시씀) {
+    const c = 상세캐시꺼냄(id);
+    if (c) { res.set('X-Cache', 'hit'); return res.type('application/json').send(c); }
+  }
   try {
     const pool = await getPool();
     /* ★ 2026-10-21 (287): 쪼개진 조각을 묶었다. 옛 코드로 오면 **어디로 갔는지** 알려 준다(최근 본 단지 · 공유 링크) */
@@ -6937,7 +6962,7 @@ app.get('/api/complexes/:id', async (req, res) => {
 
     /* ★ 진단용. 공개 주소에서는 켜지지 않는다 — localhost 에서만. */
     const _보여줘 = (req.query._t || _하나만) && 집안에서(req);
-    res.json({ 좌표없음,
+    const 몸 = ({ 좌표없음,
                받은자료: 이시군구자료 ? Object.fromEntries(Object.entries(이시군구자료).map(([k, v]) => [k, v.n])) : null,
                ...(_보여줘 ? { _timing: Object.fromEntries(
                      Object.entries(잼).sort((a, b) => b[1] - a[1])) } : {}),
@@ -6977,6 +7002,8 @@ app.get('/api/complexes/:id', async (req, res) => {
                거래목록: trades.recordset,
                전용률: exar.recordset[0] || null,
                scope: scope.recordset[0] || null });
+    if (_캐시씀 && !_보여줘) return res.type('application/json').send(상세캐시넣음(id, 몸));
+    res.json(몸);
   } catch (e) { fail(res, e, 'complex-detail'); }
 });
 
