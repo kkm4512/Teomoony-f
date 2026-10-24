@@ -2947,7 +2947,7 @@ function gridBlock(dongs, floors, hos, scope, sel, areaSel) {
   /* 칸마다 '01라인' 을 반복하면 30px 에 빡빡하다. 축 이름은 **모서리에 한 번**,
      칸에는 번호만 — 세로축(층)도 같은 방식이다. */
   const lineRow = `<div class="gx-row gx-lines"><div class="gx-h">라인</div>${
-      cols.map(c => `<div class="gx-c"${c.line === '?' ? ' title="호번호가 층×100+라인 꼴이 아닙니다"' : ''}>${
+      cols.map(c => `<div class="gx-c"${c.line === '?' ? ' title="호 번호로 라인을 정할 수 없는 호(상가 · 지하 등) — 층만 맞춤"' : ''}>${
         c.line === '?' ? '?' : c.line === null ? '전체' : String(c.line).padStart(2, '0')
       }</div>`).join('')}</div>`;
 
@@ -2960,13 +2960,12 @@ function gridBlock(dongs, floors, hos, scope, sel, areaSel) {
       [F.length ? '층별개요' : '', H.length ? '전유부' : '',
        nPrice ? '주택가격' : ''].filter(Boolean).join(' + ')}</span></div>
     <div class="gxgrid">${head}${lineRow}${body}</div>
-    ${orphanAll.length ? `<p class="note sm" title="${esc('호 번호가 층×100+라인 꼴이 아니라 라인을 못 가른 호 — ? 칸에 층만 적었습니다: ' + [...orphan.entries()].map(([pk, v]) => `${(order.find(o => o.pk === pk) || {}).nm || '—'} ${v.length}`).join(' · '))}">라인 모름 ${fmt(orphanAll.length)}호</p>` : ''}
-    <p class="srcline">${nHo ? `${fmt(nHo)}호 · 라인 ${fmt(nLine)}개` : '호는 전유부를 적재해야 나옵니다'}.
+    <p class="srcline">${/* 2026-10-24 22:25 사장님 ㄱㄱ: '라인 모름 N호' · 'N호 · 라인 N개' 를 뺐다(위 머리와 중복 · 격자에 보임) — 범례만 */''}${nHo ? '' : gapCell('', 'SCOPE', '호는 전유부를 받아야 나옵니다') + ' '}
       ${byPrice
         ? `<span class="fg-k p1"></span>낮음 <span class="fg-k p2"></span><span class="fg-k p3"></span>
            <span class="fg-k p4"></span><span class="fg-k p5"></span>높음
            <span class="fg-k p0" title="색 = 공시가격 · 단지 안 5분위"></span>가격 없음${
-           H.some(h => h.공시출처 === 'NED') ? ` · 연립·다세대 ${fmt(H.filter(h => h.공시출처 === 'NED').length)}호는 VWorld 공동주택가격` : ''}`
+           ''}`
         : `<span class="fg-k f-home"></span>주거 <span class="fg-k f-shop"></span>근린·업무
            <span class="fg-k f-park"></span>주차 <span class="fg-k f-etc"></span>기타.`}</p></div>`;
 }
