@@ -3,6 +3,16 @@ const fs = require('fs');
 const express = require('express');
 const { sql, getPool } = require('./db');
 
+/* ---------- 서버가 죽거나 다시 뜬 기록 (2026-10-25 문의 4: 08:25:27 에 서버가 다시 떴고 그 순간 사장님 화면이 502) ----------
+   node --watch 창의 글은 남지 않는다 → ../Teomoony/logs/web_life.log 에 적는다(Teomoony-f 밖 — 여기 쓰면 --watch 가 그걸 보고 또 재시작한다).
+   ★ 처리 안 된 Promise 거부는 **적고 계속 산다**(Node 24 기본은 프로세스 종료 — 한 요청의 실수로 모든 사용자가 502 를 보게 된다).
+   ★ 잡히지 않은 예외는 적고 종료(상태를 믿을 수 없다) — --watch 가 다시 띄운다. */
+const 생사기록 = (말) => { try { fs.appendFileSync(path.join(__dirname, '..', '..', 'Teomoony', 'logs', 'web_life.log'), `${new Date(Date.now() + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 19)} [${process.pid}] ${말}\n`); } catch (e) {} };
+생사기록('시작');
+process.on('unhandledRejection', (e) => { 생사기록('처리 안 된 거부(계속 삶): ' + (e && e.stack || e)); });
+process.on('uncaughtException', (e) => { 생사기록('잡히지 않은 예외(종료): ' + (e && e.stack || e)); process.exit(1); });
+for (const 신호 of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(신호, () => { 생사기록('신호 ' + 신호 + ' — 종료'); process.exit(0); });
+
 const app = express();
 /* ★★ 끈 채로 둔다. 기본값이지만 **적혀 있어야 눈에 띈다.**
    켜는 순간 `req.hostname` 이 손님이 적어 보내는 `X-Forwarded-Host` 를 읽고,

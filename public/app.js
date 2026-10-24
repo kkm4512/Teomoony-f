@@ -268,7 +268,17 @@ document.addEventListener('click', e => {
     if (!경로.startsWith('/api/')) return 원래fetch(input, init);
     const k = 로딩.시작(경로);
     let p;
-    try { p = 원래fetch(input, init); } catch (e) { 로딩.끝(k); throw e; }
+    /* ★ 2026-10-25 문의 4: 서버가 다시 뜨는 몇 초(또는 Cloudflare 와 PC 사이가 잠깐 끊긴 때) 단지 상세가 502 로 떨어졌다.
+       **우리 서버까지 오지 못한** 실패(502·503·504 인데 X-Request-Id 가 없음 · 네트워크 오류)는 읽기(GET)만 두 번 더 해 본다(1초 · 3초 뒤).
+       우리 서버가 답한 오류(번호가 있는 것)는 다시 하지 않는다 — 같은 답이 또 온다. */
+    const 읽기 = !init || !init.method || String(init.method).toUpperCase() === 'GET';
+    const 닿지못함 = r => [502, 503, 504].includes(r.status) && !r.headers.get('X-Request-Id');
+    const 한번 = () => 원래fetch(input, init);
+    const 다시해봄 = 읽기
+      ? (n = 0) => 한번().then(r => (n < 2 && 닿지못함(r)) ? new Promise(ok => setTimeout(ok, n ? 3000 : 1000)).then(() => 다시해봄(n + 1)) : r,
+                              e => { if (n < 2 && !(e && e.name === 'AbortError')) return new Promise(ok => setTimeout(ok, n ? 3000 : 1000)).then(() => 다시해봄(n + 1)); throw e; })
+      : 한번;
+    try { p = 다시해봄(); } catch (e) { 로딩.끝(k); throw e; }
     /* ★ 응답 머리가 왔을 때가 아니라 **본문까지 다 읽었을 때** 끝내고 싶지만,
        본문은 부르는 쪽이 .json() 으로 읽는다. 큰 응답(외곽선 수 MB)은 본문이 길다 -
        그래서 Response 의 json/text 를 감싸 거기서 끝낸다. 본문을 안 읽는 쪽을 위해
