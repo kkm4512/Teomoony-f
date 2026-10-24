@@ -3612,25 +3612,23 @@ function permitBlock(rows, scope, dongs) {
     if (!목.length) return '';
     const 총 = Number(목[0].동총수) || 목.length;
     const 같은이름 = d => !d.bld_nm || String(d.bld_nm).replace(/\s/g, '') === String(사업명 || '').replace(/\s/g, '');
-    const 이름없음 = 목.every(같은이름);
+    /* 2026-10-24 22:01 사장님 "동 내역 30개라면서 어떤 동인지 모르면 말이 안 맞다" — '동' 이라 부르지 않는다: **허가 건물 N개(주건축물 a · 부속 b)**.
+       표 한 줄 = 건물 하나(번호 · 구분 · 용도 · 세대 · 연면적 · 구조). 원문에 동 이름이 있으면 번호 대신 그 이름. 설명은 정책(건축인허가)에. */
     목.sort((x, y) => ((x.main_atch_gb_nm === '주건축물' ? 0 : 1) - (y.main_atch_gb_nm === '주건축물' ? 0 : 1))
                     || ((Number(y.hhld_cnt) || 0) - (Number(x.hhld_cnt) || 0)) || ((Number(y.tot_area) || 0) - (Number(x.tot_area) || 0)));
-    const 칸 = (d, i) => {
-      const t = [];
-      if (d.strct_nm) t.push(['구조', esc(d.strct_nm)]);
-      if (d.roof_nm)  t.push(['지붕', esc(d.roof_nm)]);
-      if (d.arch_area > 0) t.push(['건축면적', fmt(Math.round(d.arch_area)) + '㎡']);
-      if (d.tot_area  > 0) t.push(['연면적', fmt(Math.round(d.tot_area)) + '㎡']);
-      if (d.ho_cnt    > 0) t.push(['호', fmt(d.ho_cnt) + '호']);
-      if (d.ride_use_elvt_cnt > 0) t.push(['승강기', fmt(d.ride_use_elvt_cnt) + '대']);
-      const 머리 = [같은이름(d) ? `#${i + 1}` : esc(d.bld_nm), d.main_atch_gb_nm ? esc(d.main_atch_gb_nm) : '', d.main_purps_nm ? esc(d.main_purps_nm) : '',
-                   d.hhld_cnt > 0 ? fmt(d.hhld_cnt) + '세대' : ''].filter(Boolean).join(' · ');
-      return `<div class="pdrow"><b>${머리}</b>`
-           + (t.length ? `<dl class="pdkv">${t.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : '') + `</div>`;
-    };
-    return `<details class="pdong"><summary>동 내역 ${fmt(총)}개</summary>
-        ${이름없음 ? `<p class="note sm">인허가 원문의 동별 칸에는 <b>동 이름이 없습니다</b>(건물명 칸에 사업명만 적혀 있음). 몇 동인지는 알 수 없어 번호로 적고, 주건축물 · 세대 많은 순으로 세웠습니다.</p>` : ''}
-        <div class="pdlist">${목.map(칸).join('')}</div>
+    const 주 = 목.filter(d => d.main_atch_gb_nm === '주건축물').length, 부 = 목.filter(d => d.main_atch_gb_nm === '부속건축물').length;
+    const 세대합 = 목.reduce((t, d) => t + (Number(d.hhld_cnt) || 0), 0);
+    const 나눔 = [주 ? `주건축물 ${fmt(주)}` : '', 부 ? `부속 ${fmt(부)}` : '', 세대합 ? `${fmt(세대합)}세대` : ''].filter(Boolean).join(' · ');
+    return `<details class="pdong"><summary>허가 건물 ${fmt(총)}개${나눔 ? ` · ${나눔}` : ''}</summary>
+        <table class="pdtab"><thead><tr><th>#</th><th>구분</th><th>용도</th><th class="n">세대</th><th class="n">연면적</th><th>구조</th></tr></thead><tbody>
+        ${목.map((d, i) => `<tr>
+          <td>${같은이름(d) ? i + 1 : esc(d.bld_nm)}</td>
+          <td>${esc(String(d.main_atch_gb_nm || '').replace('건축물', '') || '—')}</td>
+          <td>${esc(d.main_purps_nm || '—')}</td>
+          <td class="n">${d.hhld_cnt > 0 ? fmt(d.hhld_cnt) : '—'}</td>
+          <td class="n">${d.tot_area > 0 ? fmt(Math.round(d.tot_area)) + '㎡' : '—'}</td>
+          <td class="muted">${esc(String(d.strct_nm || '').replace('구조', '') || '—')}</td></tr>`).join('')}
+        </tbody></table>
         ${총 > 목.length ? `<p class="note sm">${fmt(총)}개 중 ${fmt(목.length)}개만 보여 줍니다.</p>` : ''}
       </details>`;
   };
@@ -5360,6 +5358,7 @@ const 정책 = [
     '재개발·재건축은 주택법 사업계획승인 대상이라 이 자료에 들어오지 않습니다.',
     '재개발 단지는 준공 때 본번이 바뀌어 지번으로 안 붙는 경우가 있어, <b>신축 · 150세대 이상 · 그 법정동에서 세대수가 유일</b>할 때만 법정동 + 세대수로 이었습니다(추정).',
     '착공지연은 착공예정일과 실제 착공일의 차이만 씁니다. 착공기한은 날짜이지 일수가 아닙니다.',
+    '<b>허가 건물</b>(2026-10-24): 허가마다 딸린 건물(원문 \'동별개요\')을 한 줄씩 적습니다. 원문에는 <b>동 이름 칸이 없고</b> 건물명 칸에 사업명이 들어 있는 경우가 많아, 몇 동인지는 알 수 없습니다 — 그래서 \'동\' 이라 부르지 않고 번호로 적으며(원문에 동 이름이 있으면 그 이름), 주건축물 · 세대 많은 순으로 세웁니다. 대장의 동과 면적 · 세대로 맞춰 \'몇 동\' 이라고 짐작하지 않습니다(허가는 짓기 전 설계값). 실제 동은 동·호 탭(건축물대장)에 있습니다.',
   ] },
   { 키: 'zone', 제목: '용도지역 · 토지이용', 글: [
     '단지의 용도지역 비중은 <b>필지와 용도지역 폴리곤의 교차 면적</b>입니다 — 땅으로 잰 값이라 대장 경계와 정확히 같지는 않습니다.',
