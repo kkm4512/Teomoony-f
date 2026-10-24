@@ -5116,16 +5116,18 @@ app.get('/api/complexes/:id/points', async (req, res) => {
     /* ★ 2026-10-21: 유치원이 빠져 있었다. 사용자가 "갖다대도 안 찍힌다" 고 했고,
        파 보니 뷰에 **좌표가 없었다**(239 로 더했다). 거름칸은 없다 — 유치원은
        갈래가 없고 반경 500m 안 전부를 한 번에 보여준다. */
-    kinder: ['gold.v_complex_kinder',  'kinder_nm', null,           'establish'],
+    kinder: ['gold.v_complex_kinder',  'kinder_nm', 'kinder_nm',    'establish'],   /* 2026-10-24 사장님 "하나만 눌렀는데 다 떠" — 키(이름)를 주면 그 곳만 · 비우면 500m 안 전부 */
     /* 2026-10-22 어린이집(303) — 거름칸 = 유형(국공립·민간·가정 …). 키를 비우면 500m 안 전부 */
     childcare: ['gold.v_complex_childcare', 'cr_nm', 'cr_type', 'cr_type'],
+    childcarenm: ['gold.v_complex_childcare', 'cr_nm', 'cr_nm', 'cr_type'],          /* 2026-10-24 카드 하나 = 그 곳만 */
+    schoolid:  ['gold.v_complex_school',  'school_nm', 'school_id',    'fond_type'],  /* 2026-10-24 학교 카드 하나 = 그 학교만 */
     /* ★ 2026-10-21 19:48 사장님 "학원은 좌표가 없나? 갖다대도 안 찍혀서" — 뷰에 좌표(lat·lon)는 있었고
        **여기 등록이 없었다**(학원 칸을 만들 때 점 찍기를 안 붙였다). 분야 묶음(grp) · 이름(가까운 목록 한 줄) 두 가지 */
     academy:   ['gold.v_complex_academy', 'aca_nm', 'grp',    'le_crse_nm'],
     academynm: ['gold.v_complex_academy', 'aca_nm', 'aca_nm', 'le_crse_nm'],
   }[kind];
   if (!표 && kind !== 'busroute' && kind !== 'hira')
-    return res.status(400).json({ error: 'kind 는 scls|life|brand|subway|bus|school|kinder|childcare|academy|academynm|busroute|hira' });
+    return res.status(400).json({ error: 'kind 는 scls|life|brand|subway|bus|school|schoolid|kinder|childcare|childcarenm|academy|academynm|busroute|hira' });
 
   const [뷰, 이름칸, 거름칸, 보조칸] = 표 || [];
   const 상한 = 400;

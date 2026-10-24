@@ -437,9 +437,27 @@ function pnuJibun(pnu) {
 
 /* 거래일은 CHAR(8) YYYYMMDD 다. 계약일이 그대로 들어 있으므로 일자까지 보여준다.
    (평형 집계의 '최근' 은 MAX(deal_ymd) — 특정 한 건의 날짜라 일자가 의미 있다) */
-const ymd = v => (v && v.length === 8
-  ? `${v.slice(2, 4)}.${v.slice(4, 6)}.${v.slice(6, 8)}`
-  : '—');
+/* ★ 2026-10-24 사장님 "일자 형태 통일 — 연도가 있으면 yyyy.mm.dd · 연도가 없으면 mm.dd · 월이 없으면 dd" — **날짜는 이 함수 하나로만** 적는다.
+   받는 꼴: 'YYYYMMDD' · 'YYYY-MM-DD(…시각)' · 'YYYYMM' · 'YYYY' · Date. 원문에 있는 자리까지만 적는다(일자가 없으면 지어내지 않는다).
+   연도가 없는 원문('MMDD' · 'DD')은 받은 꼴 그대로 mm.dd · dd. */
+function 날짜(v, 없음 = '—') {
+  if (v == null || v === '') return 없음;
+  if (v instanceof Date) v = v.toISOString();
+  let t = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}[T ]/.test(t)) t = t.slice(0, 10);            // 시각은 버린다(날짜만)
+  const d = t.replace(/[^0-9]/g, '');
+  if (/^\d{4}[-./]?\d{1,2}[-./]?\d{1,2}$/.test(t) && d.length < 8) {   // 2026-9-1 같은 한 자리
+    const [y, m, dd] = t.split(/[-./]/); return `${y}.${String(m).padStart(2, '0')}.${String(dd).padStart(2, '0')}`;
+  }
+  if (d.length >= 8) return `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}`;
+  if (d.length === 6) return `${d.slice(0, 4)}.${d.slice(4, 6)}`;
+  if (d.length === 4 && /^(19|20)\d\d$/.test(d)) return d;              // 연도만
+  if (d.length === 4) return `${d.slice(0, 2)}.${d.slice(2, 4)}`;          // 연도 없는 월일
+  if (d.length <= 2 && d) return d.padStart(2, '0');                       // 일만
+  return t;
+}
+/* 거래일은 CHAR(8) YYYYMMDD — 일자까지 */
+const ymd = v => 날짜(v);
 
 /* ★ 20:19 사장님 "저거 이름 있는 거 아냐?" — 대장에 이름이 없어 **주소가 이름 자리에** 들어간 단지는
    실거래 이름(285, PNU 로 붙은 거래가 쓴 이름)을 이름으로 보인다. 주소는 그 아래 줄에 그대로 있다.
@@ -1038,7 +1056,7 @@ async function selectNewbuild(code, fromList) {
 function renderNewbuild({ newbuild: n, tradeStats, cost }) {
   lastDetail = null; lastGeo = null; lastBgeo = null;
   clearShots();
-  const day = v => (v ? `${v.slice(0,4)}.${v.slice(4,6)}.${v.slice(6,8)}` : '—');
+  const day = v => 날짜(v);
   const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
   const stats = tradeStats || [];
 
@@ -1272,7 +1290,7 @@ async function loadLawds() {
       const amt = p.max_amount == null ? null : Number(p.max_amount) / 100000000;
       const price = amt == null ? null
         : (amt >= 10 ? amt.toFixed(1) : amt.toFixed(2)).replace(/\.?0+$/, '') + '억';
-      const ym = p.max_ymd ? String(p.max_ymd).replace(/^(\d{4})(\d{2}).*/, '$1.$2') : '';
+      const ym = p.max_ymd ? 날짜(p.max_ymd) : '';
       L.marker([p.centroid_lat, p.centroid_lng], {
         icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
           html: `<div class="lmark"><b>${esc(p.emd_nm || '')}</b></div>` }),
@@ -1759,7 +1777,7 @@ async function ask() {
 function renderAskRegion(d) {
   const h = d.해석 || {}, R = d.지역순위 || {};
   const 만 = v => Math.round(Number(v) / 1e4).toLocaleString();
-  const 날 = v => (v ? `${v.slice(0, 4)}.${v.slice(4, 6)}` : '');
+  const 날 = v => 날짜(v, '');
   const 줄 = (k, v, note) => !v ? '' : `<div class="arow"><span class="ak">${esc(k)}</span><b>${esc(v)}</b>${note ? `<i>${esc(note)}</i>` : ''}</div>`;
   $('#count').textContent = `${fmt((R.목록 || []).length)}곳`;
   const 목 = R.목록 || [];
@@ -3440,7 +3458,7 @@ function costBlock(co, ctx) {
   const r = [];
   const add = (k, v) => { if (v !== null && v !== undefined && v !== '') r.push(`<dt>${k}</dt><dd>${v}</dd>`); };
   const won = n => (n == null ? '—' : fmt(Math.round(n)) + '원');
-  const ym = L.ym ? `${String(L.ym).slice(0,4)}.${String(L.ym).slice(4,6)}` : '';
+  const ym = L.ym ? 날짜(L.ym) : '';
 
   if (!L.세대당) {
     /* 값이 없는 이유를 적는다. 빈칸은 "왜 없지" 를 남긴다. */
@@ -3583,8 +3601,8 @@ function permitBlock(rows, scope, dongs) {
         loaded ? '이 단지 지번에 등록된 허가가 없습니다'
                : '이 법정동의 건축인허가를 아직 받아오지 않았습니다')}</p>`;
   }
-  const ym = v => (v && v.length === 8 ? `${v.slice(2,4)}.${v.slice(4,6)}` : null);
-  const ymd = v => (v && v.length === 8 ? `${v.slice(0,4)}.${v.slice(4,6)}.${v.slice(6,8)}` : null);
+  const ym = v => (v ? 날짜(v, null) : null);     /* 2026-10-24: 'yy.mm' 이던 것 — 일자까지(날짜 하나로) */
+  const ymd = ym;
   /* ★ **어떻게 붙었는지**를 적는다 (2026-10-18).
      재개발 단지는 합필 때 본번이 새로 바뀌는데 인허가에는 옛 지번만 있어서
      PNU 로는 영영 안 붙었다. 세대수 다리로 열었다(CONTEXT 11-23).
@@ -4048,7 +4066,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt) {
   grp('공사');
 
   /* 허가 -> 착공 -> 사용승인. 없는 단계는 적지 않는다. */
-  const ym = v => (v && v.length === 8 ? `${v.slice(0,4)}.${v.slice(4,6)}` : null);
+  const ym = v => (v ? 날짜(v, null) : null);
   const steps = [['허가', ym(spec.허가일)], ['착공', ym(spec.착공일)], ['사용승인', ym(spec.사용승인)]]
     .filter(([, v]) => v);
   지금.push(`<dt>공사</dt><dd${steps.length ? ' class="flow"' : ''}>${
@@ -4267,7 +4285,7 @@ function renderDetail(payload) {
   };
 
   const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
-  const day = s => (s ? `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}` : '—');
+  const day = s => 날짜(s);
 
   /* ---- 헤더: 핵심을 한 줄로 ----
      세부는 탭 안에 둔다. 한 화면에 다 쌓으면 스크롤만 길고 뭐가 중요한지 안 보인다. */
@@ -4277,7 +4295,7 @@ function renderDetail(payload) {
     spec && spec.주용도 ? esc(spec.주용도) : '',
     c.hhld_cnt_sum ? fmt(c.hhld_cnt_sum) + '세대' : '',
     `${fmt(c.dong_cnt)}개동`,
-    yr ? `${c.oldest_use_apr.slice(0,4)}.${c.oldest_use_apr.slice(4,6)}${age ? ` <span class="muted">(${age}년차)</span>` : ''}` : '',
+    yr ? `${날짜(c.oldest_use_apr)}${age ? ` <span class="muted">(${age}년차)</span>` : ''}` : '',
   ].filter(Boolean).join(' · ');
   const ratios = spec && (spec.용적률 || spec.건폐율)
     ? `용적률 ${spec.용적률 ? Number(spec.용적률).toFixed(0) + '%' : '—'} · 건폐율 ${
@@ -4350,7 +4368,9 @@ function renderDetail(payload) {
   const nearN = subN + (bus && Number(bus.r500) || 0);
   const TABS = [
     ['info',  `단지정보`],
-    ['near',  `교통·상권 <b>${fmt(nearN)}</b>`],   /* 2026-10-24 사장님 "주변 탭은 상권이라는 글자로" — 지하철·버스도 이 탭이라 '교통·상권' */
+    ['near',  `교통 <b>${fmt(nearN)}</b>`],     /* 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 지하철 · 버스 */
+    ['shop',  `상권${(poi || []).length ? ` <b>${fmt((poi || []).reduce((t, r) => t + (Number(r.r500) || 0), 0))}</b>` : ''}`],   /* 숫자 = 상권 칸 머리글과 같은 500m 합 */
+    ['med',   `병원·약국`],
     /* 2026-10-24 사장님 "어린이집·유치원·초등·중등·고등은 주변에서 분리" — 나이 순(어린이집 → 고등). 학원은 주변에 그대로(사장님) */
     ['edu',   `교육`],
     ['dong',  `동·호 <b>${fmt(dongN)}</b>`],
@@ -4533,7 +4553,14 @@ function renderDetail(payload) {
 
 
 
-    ${sect('주변 상권', 'poi', pz.length ? ` ${fmt(pTot('r500'))}` : '')}
+
+`;
+
+  /* ★ 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 상권 탭(상가 점포 · 브랜드 · 생활 편의). 병원·약국 묶음은 의료 탭으로 */
+  const paneC = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 <b>중심좌표가 아직 없습니다</b> — 상권은 거리로 찾으므로 <b>볼 수 없습니다.</b> 없는 게 아니라 아직 못 본 것입니다.</div>` : `
+    ${sect('상권', 'poi', pz.length ? ` ${fmt(pTot('r500'))}` : '')}
     ${pz.length ? `
       <div class="poirow">
         <span><b>${fmt(pTot('r300'))}</b>300m</span>
@@ -4547,7 +4574,7 @@ function renderDetail(payload) {
           title="가장 가까운 곳 ${fmt(b.최단m)}m">${esc(b.브랜드)}${
           Number(b.r500) > 1 ? `<b>${fmt(b.r500)}</b>` : ''}</span>`).join('')}</div>
         ` : ''}
-      ${pl.length ? `${생활묶음(pl).map(([g, xs]) => `
+      ${pl.length ? `${생활묶음(pl).filter(([g]) => g !== '병원·약국').map(([g, xs]) => `
         <div class="lgrp"><span class="lgl">${esc(g)}</span><div class="lifegrid">${xs.map(x => `
         <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}"
              data-pt-r="${Number(x.r500) ? 500 : 1000}"
@@ -4555,8 +4582,6 @@ function renderDetail(payload) {
           <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
           <span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div></div>`).join('')}
         ` : ''}
-      <div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>
-      <div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>
       <div class="lt2">그 밖에 많은 업종 (500m)</div>
       <div class="zlist">${pz.filter(r => Number(r.r500) > 0).slice(0, 8).map(r => `
         <div class="zrow"><span class="zn">${esc(r.소분류 || '')}</span>
@@ -4569,11 +4594,23 @@ function renderDetail(payload) {
       : `<p class="note">${gapCell('', 'SCOPE',
           '이 법정동의 상가업소를 아직 받아오지 않았습니다')}</p>`}
 
+`;
 
+  /* ★ 2026-10-24 병원·약국 탭 — 심평원 병원(종별 · 큰 병원 · 간판 과목) · 행안부 약국 인허가 · 상가 업종 병원·약국(출처 갈라 적음) */
+  const paneH = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 <b>중심좌표가 아직 없습니다</b> — 병원·약국은 거리로 찾으므로 <b>볼 수 없습니다.</b> 없는 게 아니라 아직 못 본 것입니다.</div>` : `
+    <div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>
+    <div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>
+    ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null; if (!g) return '';
+      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(소상공인 상가 데이터 · 업종 이름 기준 — 위 심평원 · 인허가와 출처가 다릅니다)</span></div>
+        <div class="lifegrid">${g[1].map(x => `
+        <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}" title="가장 가까운 곳 ${fmt(x.최단m)}m">
+          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`; })()}
 `;
 
 
-  /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 → 학원·교습소(교육청 등록, 01:09 사장님 "교육에 학원 넣자"). 상가 업종 '입시·보습학원' 은 교통·상권 탭 생활 편의 그대로(출처가 다름) */
+  /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 → 학원·교습소(교육청 등록, 01:09 사장님 "교육에 학원 넣자"). 상가 업종 '입시·보습학원' 은 상권 탭 생활 편의 그대로(출처가 다름) */
   const paneE = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 <b>중심좌표가 아직 없습니다</b> — 어린이집·유치원·학교는 거리로 찾으므로 <b>볼 수 없습니다.</b></div>` : `
@@ -4581,7 +4618,7 @@ function renderDetail(payload) {
     ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
     ${kin.length ? `
       <div class="schrow">${kin.map(x => `
-        <div class="scell" data-pt="kinder|" data-pt-r="500">
+        <div class="scell" data-pt="kinder|${esc(x.이름 || '')}" data-pt-r="500">
           <span class="sg">${esc((x.설립 || '').replace(/\s/g, '') || '—')}</span>
           <b>${esc(x.이름 || '—')}</b>
           <span class="sd">${fmt(x.거리m)}m${
@@ -4722,7 +4759,7 @@ function renderDetail(payload) {
     <p class="sub muted usecomp" data-usecomp="${esc(String(c.complex_id))}" hidden></p>
     <div class="tabs">${TABS.map(([k, label]) =>
       `<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !분양수(c.complex_id) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
-    <div class="pane">${({ info: paneI, near: paneN, edu: paneE, dong: paneD, mgmt: paneM,
+    <div class="pane">${({ info: paneI, near: paneN, shop: paneC, med: paneH, edu: paneE, dong: paneD, mgmt: paneM,
                            price: paneP, sale: paneS, land: paneL })[detailTab] || paneI}</div>`;
 
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
@@ -4743,8 +4780,8 @@ function renderDetail(payload) {
   } catch (e) {}
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
   어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
-  병원채우기();            // 심평원 병원·약국 칸 — 교통·상권 탭에 있을 때만 그릇이 있다
-  약국채우기();            // 행안부 약국 인허가 칸 — 교통·상권 탭에 있을 때만 그릇이 있다
+  병원채우기();            // 심평원 병원·약국 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
+  약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
 
   $('#detail').querySelectorAll('.tab').forEach(b =>
     b.addEventListener('click', () => { detailTab = b.dataset.tab; renderDetail(lastDetail); }));
@@ -5685,7 +5722,7 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
   const 펼 = 급 === '초등학교' ? 다 : 다.filter(x => !x.구역 || (x.거리m ?? 1e9) <= 1000 || x === 다.find(y => y.구역));
   const 접 = 다.filter(x => !펼.includes(x));
   const 칸 = x => `
-    <div class="scell" data-pt="school|${esc(급)}">
+    <div class="scell"${x.school_id && !x.위치없음 ? ` data-pt="schoolid|${esc(x.school_id)}"` : ''}>
       <span class="sg">${esc(x.설립 || '')}${x.분교 === '분교' ? ' 분교' : ''}</span>
       <b>${esc(x.이름 || '—')}${x.구역 ? ` <span class="ztag">${표말}</span>` : ''}</b>
       <span class="sd">${x.거리m != null ? fmt(x.거리m) + 'm' : '거리 모름'}${x.남녀 && x.남녀 !== '남녀공학' ? ' · ' + esc(x.남녀 === '남' ? '남학교' : x.남녀 === '여' ? '여학교' : x.남녀) : ''}</span>
@@ -5702,7 +5739,7 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
         ? '통학구역은 교육지원청이 정한 배정 구역입니다. 공동통학구역이면 표시된 학교 중에서 배정됩니다.'
         : 급 === '중학교' ? '중학교는 학교군 안에서 추첨으로 배정됩니다 — 표시된 학교는 <b>후보</b>입니다.'
         : '고등학교 학군은 일반고 배정 단위입니다. 특목·자율·특성화고는 학군과 따로 지원합니다(학군 표가 없는 학교).'}
-        단지 중심점 한 점으로 판정 · 최종 배정은 교육지원청 · 기준일 ${esc((구[0] || {}).기준일 || '')}</p>`
+        단지 중심점 한 점으로 판정 · 최종 배정은 교육지원청 · 기준일 ${esc(날짜((구[0] || {}).기준일, ''))}</p>`
     : `<p class="note sm">${gapCell('', 학구받음 ? 'UNSURE' : 'SCOPE', 학구받음
         ? `단지 중심점이 어느 ${급 === '초등학교' ? '통학구역' : '학교군'}에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다`
         : '이 지역의 학구도를 아직 받지 않았습니다')}</p>`;
@@ -5724,8 +5761,8 @@ function 학교공시줄(x) {
 }
 function 분양칸(공고, 머리에적음 = false) {   // 머리에적음: 공고 상세처럼 '안 이어짐' 을 위에서 이미 말한 경우
   if (!공고.length) return '';
-  const 날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v ? String(v) : '—'); };   /* 13:31 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 */
-  const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
+  const 날 = v => 날짜(v);   /* 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 — 날짜() 가 둘 다 받는다 */
+  const 월 = v => 날짜(v);
   /* 단지에 안 이어진 공고(지도 핀)는 '추정 연결' 표가 맞지 않는다 — 출처 표만 단다 */
   /* ★ 2026-10-23 "똑같은 건데 달라 보여" — 공고가 여럿이면 줄 머리는 **종류 · 공고일**, 이름은 첫 공고 이름과 다를 때만(예: '(2차)', '오피스텔 IM594').
      '무순위·재공급 · 무순위' 처럼 같은 말이 두 번 나오지 않게 원문 구분이 종류 말에 이미 있으면 뺀다. */
@@ -5896,7 +5933,7 @@ function 병원칸(r) {
         <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
         <span>${esc(x.종별 || '')}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>` : ''}
     ${과목칸(r)}
-    ${(r.과목상태 || {}).기준일 ? `<p class="note sm">간판 과목 ${esc(String(r.과목상태.기준일).replace(/(\d{4})(\d{2})(\d{2})/, '$1.$2.$3'))} 기준</p>` : ''}`;
+    ${(r.과목상태 || {}).기준일 ? `<p class="note sm">간판 과목 ${esc(날짜(r.과목상태.기준일))} 기준</p>` : ''}`;
 }
 /* 간판 과목 칸 (298) — 아이 키우는 집이 먼저 찾는 순서로 앞에 세우고, 나머지는 많은 순 */
 const 과목순서 = ['소아청소년과', '내과', '이비인후과', '가정의학과', '치과', '한방', '정형외과', '피부과', '안과', '산부인과'];
@@ -5927,7 +5964,7 @@ function 분양권칸(r) {
                                  .map(m => Number(m.최고원)); return v.length ? Math.max(...v) : null; };
   const 억 = v => { const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4);
     return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
-  const 날 = d => d ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : '—';
+  const 날 = d => 날짜(d);
   /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
   return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 해제 ${fmt(n.취소)}건)</span>` : ''}</div>
     ${Number(n.공고전) ? `<p class="note sm">${fmt(n.공고전)}건은 첫 모집공고 <b>전</b>에 맺은 <b>입주권</b>(조합원 권리) 계약입니다 — 공고 지번에서, 공고 전 10년 안의 것만 이었습니다.</p>` : ''}
@@ -6075,7 +6112,7 @@ async function 분양핀불러오기() {
   }
   const 지금월 = new Date().toISOString().slice(0, 7).replace('-', '');
   for (const g of 자리.values()) {
-    const 입주 = g.입주 ? `${g.입주.slice(0, 4)}.${g.입주.slice(4, 6)}` : null;
+    const 입주 = g.입주 ? 날짜(g.입주) : null;
     const 앞 = g.입주 && g.입주 >= 지금월;
     const 꼬리 = [...g.종류].map(k => 공고종류짧게[k] || k).join('·');
     const mk = L.marker([g.lat, g.lng], {
@@ -6169,7 +6206,7 @@ function 약국칸(r) {
   const 머리 = `<div class="lt2">약국 · 행정안전부 인허가 <span class="muted">(지방행정 인허가 · 영업/폐업)</span></div>`;
   if (!Number(범.적재)) return `${머리}<p class="note sm">${gapCell('', 'SCOPE', '행안부 약국 인허가를 아직 받지 않았습니다')}</p>`;
   if (!Number(범.좌표)) return '';
-  const 날 = v => (v ? String(v).slice(0, 10).replace(/-/g, '.') : '');
+  const 날 = v => 날짜(v, '');
   const 폐비 = Number(범.폐업전체) ? Math.round(100 * Number(범.폐업좌표) / Number(범.폐업전체)) : null;
   return `${머리}
     <div class="lifegrid">
@@ -6217,7 +6254,7 @@ async function 어린이집채우기() {
     ${곳.length ? `
       <p class="sm">${유.map(x => `<span class="lt2" data-pt="childcare|${esc(x.유형 || '')}" data-pt-r="500">${esc(x.유형 || '—')} <b>${fmt(x.n)}</b></span>`).join(' · ')}</p>
       <div class="schrow">${곳.map(x => `
-        <div class="scell" data-pt="childcare|${esc(x.유형 || '')}" data-pt-r="500">
+        <div class="scell" data-pt="childcarenm|${esc(x.이름 || '')}" data-pt-r="500">
           <span class="sg">${esc(x.유형 || '—')}</span>
           <b>${esc(x.이름 || '—')}</b>
           <span class="sd">${fmt(x.m)}m${x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${x.현원 != null ? ` · 현원 ${fmt(x.현원)}` : ''}</span>
@@ -6225,7 +6262,7 @@ async function 어린이집채우기() {
             x.상태 && x.상태 !== '정상' ? `<b>${esc(x.상태)}</b>` : null,
             x.제공서비스 && x.제공서비스 !== '일반' ? esc(x.제공서비스) : null].filter(Boolean).join(' · ')}</span>
         </div>`).join('')}</div>
-      <p class="note sm">500m 안 <b>${fmt(전체)}곳</b> 중 가까운 순 ${fmt(곳.length)}곳${기준 ? ` · 기준일 ${esc(기준)}` : ''}</p>`
+      <p class="note sm">500m 안 <b>${fmt(전체)}곳</b> 중 가까운 순 ${fmt(곳.length)}곳${기준 ? ` · 기준일 ${esc(날짜(기준))}` : ''}</p>`
       : `<p class="note">${gapCell('', Number(범.좌표) ? 'NA' : 'SCOPE',
           Number(범.좌표) ? '이 단지 500m 안에 어린이집이 없습니다' : '단지 좌표가 없어 주변을 잴 수 없습니다')}</p>`}`;
 }
@@ -6236,7 +6273,7 @@ async function 어린이집채우기() {
      그래서 구분은 원문(말소 · 폐쇄 · 일부말소 · 일부폐쇄) 그대로 적는다.
    ★ 묶음 = 같은 대지(PNU) + 같은 말소일. 세대수는 총괄표제부 원문만(동별 합을 만들지 않는다). */
 const 폐쇄캐시 = new Map();
-const 날8 = v => (v && /^\d{8}$/.test(v) ? `${v.slice(0, 4)}.${v.slice(4, 6)}.${v.slice(6, 8)}` : null);
+const 날8 = v => (v && /^\d{8}$/.test(v) ? 날짜(v) : null);
 function 폐쇄묶음줄(s, 동들, 열기 = false) {
   const 이름 = s.이름 || s.plat_plc || s.pnu;
   const 꼬리 = [s.주용도, s.동수 ? `${fmt(s.동수)}동` : null, s.총괄세대 != null ? `총괄표제부 ${fmt(s.총괄세대)}세대` : null,
@@ -6303,7 +6340,7 @@ async function 역사채우기() {
   const 지금 = document.querySelector('#detail .hsbox');
   if (!d || !지금 || 지금.dataset.hs !== 키) return;
   const 숫 = v => String(v || '').replace(/[^0-9]/g, '');
-  const 날 = v => { const t = 숫(v); return t.length >= 8 ? `${t.slice(0, 4)}.${t.slice(4, 6)}.${t.slice(6, 8)}` : t.length === 6 ? `${t.slice(0, 4)}.${t.slice(4, 6)}` : ''; };
+  const 날 = v => { const t = 숫(v); return t.length >= 6 ? 날짜(t) : ''; };
   const ev = [];
   /* 간다 = [탭, 그 칸 제목] · 폐쇄 = 지도에 그릴 옛 대장 키 */
   const 넣 = (날짜, 무엇, 간다, 출처, 폐쇄) => ev.push({ d: 숫(날짜).slice(0, 8), 무엇, 간다, 출처, 폐쇄 });
@@ -6426,7 +6463,7 @@ document.addEventListener('click', e => {
      · 지번 자리가 있는 것: 그 자리에 '공고' 표(누르면 공고 상세)
      · 자리가 없는 것: **'자리 모르는 공고 N' 묶음 표 하나** — 그 동을 가리키는 표일 뿐 공고의 자리가 아니다(점선 테두리 · 문구로 밝힘).
        누르면 목록 → 고르면 공고 상세. 법정동조차 모르는 공고(44)는 여기 안 나오고 검색 제안으로만. */
-const 공고날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v || '—'); };
+const 공고날 = v => 날짜(v);
 let 동공고층 = null, 동공고지금 = null, 동공고차례 = 0;
 function 동공고지우기() { if (동공고층) { try { map.removeLayer(동공고층); } catch (e) {} } 동공고층 = null; 동공고지금 = null; }
 async function 동공고그리기(lawd) {
@@ -6549,7 +6586,7 @@ async function 공고상세(house, lat, lng) {
   const 지번말 = w && w.pnu ? `${w.pnu.slice(10, 11) === '2' ? '산 ' : ''}${Number(w.pnu.slice(11, 15))}${Number(w.pnu.slice(15, 19)) ? '-' + Number(w.pnu.slice(15, 19)) : ''}` : null;
   const 이력칸 = w && (w.이력 || w.이력실패) ? `<div class="lt2">공고 지번 ${esc(지번말 || '')}의 토지 이동 이력 <span class="muted">(VWorld 토지이동이력 원문)</span></div>${
       w.이력실패 ? `<p class="note sm">${gapCell('', 'UNSURE', '이력을 불러오지 못했습니다 — ' + w.이력실패)}</p>`
-      : (w.이력 || []).length ? `<ul class="lu">${w.이력.slice(0, 4).map(z => `<li><b>${esc(z.일자 ? z.일자.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.사유 || '')}</span>
+      : (w.이력 || []).length ? `<ul class="lu">${w.이력.slice(0, 4).map(z => `<li><b>${esc(z.일자 ? 날짜(z.일자) : '날짜 없음')}</b> <span>${esc(z.사유 || '')}</span>
           <span class="muted">${esc([z.지목, z.면적 ? z.면적 + '㎡' : null].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
       : '<p class="note sm">이 지번으로 된 토지 이동 이력이 없습니다(블록 번호이거나 지번이 아닌 표기일 수 있음).</p>'}` : '';
   const 공고들 = r.공고 || [];                                  // 서버가 공고일 최근 순 — 끝이 첫 공고
@@ -6681,7 +6718,7 @@ document.addEventListener('click', async e => {
    닫히기 전 = 옛 건물 · 닫힌 뒤 = 이 지번으로 신고된 새 건물(새 대장이 아직 없거나 다른 지번에 있다). 날짜로만 가른다. */
 function 옛거래칸(o, s, 때들 = ['전', '뒤']) {
   if (!o || !(o.셈 || []).length) return '';
-  const 날 = d => d ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : '—';
+  const 날 = d => 날짜(d);
   const 닫 = 날(String(s.shter_day || ''));
   const 종 = k => /^APT/.test(k) ? '아파트' : /^RH/.test(k) ? '연립·다세대' : /^OFFI/.test(k) ? '오피스텔' : /^SH/.test(k) ? '단독·다가구' : '그 밖';
   const 돈 = x => Number(x.전월세) ? (Number(x.월세) ? `${eok(x.보증금)} / ${fmt(Math.round(Number(x.월세) / 10000))}만` : eok(x.보증금)) : eok(x.거래원);
@@ -6805,8 +6842,8 @@ function 폐쇄그리기() {
     ${거래수 || (r.분양권 || []).length || (r.옛거래.셈 || []).length ? '' : `<p class="note">${gapCell('', 'NA', '이 지번으로 신고된 실거래 중 단지에 안 붙은 것이 없습니다')}</p>`}
     ${공시칸}`;
 
-  const paneL = `${r.이력 ? `<div class="lt2">이 필지의 토지 이동 이력 <span class="muted">(VWorld 토지이동이력 원문 · ${esc(String(r.이력.받은시각 || '').slice(0, 10))} 받음)</span></div>
-      ${r.이력.줄.length ? `<ul class="lu">${r.이력.줄.slice(0, 12).map(z => `<li><b>${esc(z.이동일 ? z.이동일.replace(/-/g, '.') : '날짜 없음')}</b> <span>${esc(z.이동사유 || '')}</span>
+  const paneL = `${r.이력 ? `<div class="lt2">이 필지의 토지 이동 이력 <span class="muted">(VWorld 토지이동이력 원문 · ${esc(날짜(r.이력.받은시각, ''))} 받음)</span></div>
+      ${r.이력.줄.length ? `<ul class="lu">${r.이력.줄.slice(0, 12).map(z => `<li><b>${esc(z.이동일 ? 날짜(z.이동일) : '날짜 없음')}</b> <span>${esc(z.이동사유 || '')}</span>
         <span class="muted">${esc([z.지번, z.지목, z.면적 != null ? Number(z.면적) + '㎡' : null].filter(Boolean).join(' · '))}</span></li>`).join('')}</ul>`
         : '<p class="note sm">이 필지로 된 토지 이동 이력이 없습니다.</p>'}` : `<p class="note">${gapCell('', 'SCOPE', '이 필지의 토지 이동 이력을 아직 받지 않았습니다')}</p>`}
     ${r.필지 ? '' : `<p class="note sm">${s.lat != null ? (s.위치근거 && s.위치근거 !== '필지 중심' ? `이 필지는 지금 지적도에 없어 <b>${esc(s.위치근거)}</b>에 점을 찍었습니다(그 필지 경계가 아닙니다).` : '필지 경계를 받지 못해 자리만 찍었습니다.') : '그 필지가 지금은 없어서(합필·분필) 지도에 아무것도 그리지 않았습니다.'}</p>`}`;
@@ -6868,7 +6905,7 @@ async function 학구보이기(el) {
     /* 단지를 막 연 직후에는 단지 맞춤(외곽선 도착)이 뒤에 와서 덮는다 — 아직 이 구역을 보고 있고 경계가 화면에 다 안 들어 있으면 한 번 더 */
     setTimeout(() => { if (구역지금 === 키 && !map.getBounds().contains(b)) 맞춤(); }, 1200);
     const p = f.properties || {};
-    toast(`${esc(p.이름 || '')} — ${esc(p.종류 || '')}${Number(p.공동) ? ' · 공동' : ''} · 학교 ${fmt((f.학교 || []).length)}곳 (학구도 기준일 ${esc(p.기준일 || '')})`, 3000);
+    toast(`${esc(p.이름 || '')} — ${esc(p.종류 || '')}${Number(p.공동) ? ' · 공동' : ''} · 학교 ${fmt((f.학교 || []).length)}곳 (학구도 기준일 ${esc(날짜(p.기준일, ''))})`, 3000);
   } catch (e) { toast('경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 2500); }
 }
 document.addEventListener('click', e => {
@@ -6902,7 +6939,7 @@ async function 토지구역보이기(el) {
     if (폰() && document.querySelector('.app').dataset.sheet === 'full') 시트('half');
     setTimeout(() => map.fitBounds(b, { paddingTopLeft: [24, (폰() ? top : 0) + 24], paddingBottomRight: [24, sh + 24], maxZoom: 17 }), 폰() ? 280 : 0);
     const 고시 = [...new Set(r.구역.map(f => f.properties.고시연도).filter(Boolean))].sort().join('·');
-    toast(`${nm} — 경계 ${r.구역.length}개${고시 ? ` · 고시 ${고시}년` : ''} (VWorld${r.출처 === '미리 받음' && r.받은시각 ? ` · ${String(r.받은시각).slice(0, 10)} 받음` : ''})`, 3000);
+    toast(`${nm} — 경계 ${r.구역.length}개${고시 ? ` · 고시 ${고시}년` : ''} (VWorld${r.출처 === '미리 받음' && r.받은시각 ? ` · ${날짜(r.받은시각)} 받음` : ''})`, 3000);
   } catch (e) { toast('구역 경계를 불러오지 못했습니다 — 없다는 뜻이 아닙니다', 2500); }
 }
 document.addEventListener('click', e => {
@@ -6989,8 +7026,8 @@ function 구역상세(d) {
   const z = d.구역 || {}, 단 = d.단지 || [], 공 = d.공고 || [];
   const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
   const 세대합 = 단.reduce((t, x) => t + (Number(x.포함률) >= 50 ? Number(x.세대) || 0 : 0), 0);
-  const 날 = v => { const d = String(v || '').replace(/[^0-9]/g, ''); return d.length >= 8 ? `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}` : (v ? String(v) : '—'); };   /* 13:31 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 */
-  const 월 = v => (v ? `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}` : '—');
+  const 날 = v => 날짜(v);   /* 원문이 'YYYY-MM-DD' 와 'YYYYMMDD' 둘 다 온다 — 날짜() 가 둘 다 받는다 */
+  const 월 = v => 날짜(v);
   const 이름 = x => (x.이름 && x.주소 && x.이름 === x.주소 && x.실거래이름) ? x.실거래이름 : (shortNm(x.이름) || x.이름 || '(이름 없음)');
   return `
     <span class="pill">정비사업 구역</span>
