@@ -1058,45 +1058,61 @@ async function selectNewbuild(code, fromList) {
   }
 }
 
-function renderNewbuild({ newbuild: n, tradeStats, cost }) {
+/* 2026-10-24 21:46 사장님(신축 장위자이레디언트): ① 매매 · 전세 · 월세를 못 고른다 ② 전월세 보증금이 '—' ③ 날짜 정렬이 안 됨.
+   → 종류 탭(매매 · 전세 · 월세 — 단지 화면과 같은 3갈래) · 평형 요약은 고른 종류만(값 = 매매가 / 보증금) ·
+     그 아래 **최근 거래 목록(날짜 내림차순)**. 분양권 · 입주권은 매매 목록에 섞고 표시(단지 화면 316 과 같게) — 요약에는 넣지 않는다. */
+let 신축거래탭 = '매매', 신축더보기 = false, 신축마지막 = null;
+function renderNewbuild(data) {
+  const { newbuild: n, tradeStats, trades, cost } = data;
+  if (!신축마지막 || 신축마지막.newbuild.kapt_code !== n.kapt_code) { 신축거래탭 = '매매'; 신축더보기 = false; }
+  신축마지막 = data;
   lastDetail = null; lastGeo = null; lastBgeo = null;
   clearShots();
   const day = v => 날짜(v);
   const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
-  const stats = tradeStats || [];
+  const stats = tradeStats || [], 목록 = trades || [];
+  const 종류들 = ['매매', '전세', '월세'];
+  const 수 = k => { const x = 목록.find(t => t.종류 === k); return x ? Number(x.전체) : 0; };
+  if (!수(신축거래탭)) 신축거래탭 = 종류들.find(k => 수(k)) || '매매';
+  const 값이름 = 신축거래탭 === '매매' ? '최고가' : '최고 보증금';
 
   /* 동은 못 보여준다 — 31개 동의 이름을 아는 공공데이터가 없다.
-     대신 실거래의 aptSeq 가 단지를 갈라준다(4-15). bld_nm 에 '장위자이레디언트(2단지)'
-     처럼 이름이 그대로 들어 있어 화면에 쓸 수 있다. */
-  const table = (list, rent) => {
-    const rows = list.filter(t => !!t.is_rent === rent);
-    if (!rows.length) return '';
-    const n2 = rows.reduce((a, r) => a + (r.cnt || 0), 0);
-    return `<div class="subsect">${rent ? '전월세' : '매매'} ${fmt(n2)}<span class="muted"> · ${rows.length}개 평형</span></div>
-      <table><thead><tr><th>평형</th><th class="n">건</th><th class="n">${rent ? '보증금' : '가격'}</th><th class="n">최근</th></tr></thead><tbody>
-      ${rows.map(r => `<tr>
-        <td>${r.area_grp}㎡<span class="muted"> ${(r.area_grp/3.3058).toFixed(1)}평</span></td>
-        <td class="n">${fmt(r.cnt)}${r.canceled_cnt ? `<span class="warnx"> 해제${r.canceled_cnt}</span>` : ''}</td>
-        <td class="n">${r.max_amount != null ? eok(r.max_amount) : '—'}</td>
-        <td class="n">${ymd(r.last_ymd)}</td>
-      </tr>`).join('')}</tbody></table>`;
-  };
-
-  /* aptSeq 별로 묶는다. 거래가 많은 단지부터. */
+     대신 실거래의 aptSeq 가 단지를 갈라준다(4-15). '장위자이레디언트(2단지)' 처럼 이름이 그대로 들어 있다. */
+  const 이름표 = new Map(stats.filter(t => t.apt_seq).map(t => [t.apt_seq, t.seq_nm]));
   const bySeq = new Map();
-  stats.forEach(t => {
+  stats.filter(t => t.종류 === 신축거래탭).forEach(t => {
     const k = t.apt_seq || '';
     if (!bySeq.has(k)) bySeq.set(k, { nm: t.seq_nm, rows: [], cnt: 0 });
-    const g = bySeq.get(k);
-    g.rows.push(t); g.cnt += (t.cnt || 0);
-    if (!g.nm && t.seq_nm) g.nm = t.seq_nm;
+    const g = bySeq.get(k); g.rows.push(t); g.cnt += (t.cnt || 0);
   });
   const groups = [...bySeq.values()].sort((a, b) => b.cnt - a.cnt);
-  const multi = groups.length > 1;
+  const 갈림 = new Set(stats.map(t => t.apt_seq || '')).size;
+  const 요약 = groups.map(g => `
+    <div class="subsect">${갈림 > 1 ? esc(g.nm || '단지 미상') + ' · ' : ''}${신축거래탭} ${fmt(g.cnt)}<span class="muted"> · ${g.rows.length}개 평형 (평형 순)</span></div>
+    <table><thead><tr><th>평형</th><th class="n">건</th><th class="n">${값이름}</th><th class="n">최근</th></tr></thead><tbody>
+    ${g.rows.sort((a, b) => a.area_grp - b.area_grp).map(r => `<tr>
+      <td>${r.area_grp}㎡<span class="muted"> ${(r.area_grp / 3.3058).toFixed(1)}평</span></td>
+      <td class="n">${fmt(r.cnt)}${r.canceled_cnt ? `<span class="warnx"> 해제${r.canceled_cnt}</span>` : ''}</td>
+      <td class="n">${r.max_amount != null ? eok(r.max_amount) : '—'}</td>
+      <td class="n">${ymd(r.last_ymd)}</td></tr>`).join('')}</tbody></table>`).join('');
 
-  const tradeBlocks = groups.map(g => `
-    ${multi ? `<div class="sect">${esc(g.nm || '단지 미상')}<span class="muted"> · ${fmt(g.cnt)}건</span></div>` : ''}
-    ${table(g.rows, false)}${table(g.rows, true)}`).join('');
+  const 고른 = 목록.filter(t => t.종류 === 신축거래탭);
+  const 보일 = 신축더보기 ? 고른 : 고른.slice(0, 30);
+  const 돈 = t => 신축거래탭 === '매매' ? eok(t.금액)
+    : 신축거래탭 === '월세' ? `${eok(t.보증금)} / ${fmt(Math.round(Number(t.월세) / 10000))}만` : eok(t.보증금);
+  const 거래표 = 고른.length ? `
+    <div class="subsect">최근 거래<span class="muted"> · 날짜 최신 순${수(신축거래탭) > 고른.length ? ` · 전체 ${fmt(수(신축거래탭))}건 중 최근 ${fmt(고른.length)}건` : ''}</span></div>
+    <table><thead><tr><th>날짜</th>${갈림 > 1 ? '<th>단지</th>' : ''}<th class="n">전용</th><th class="n">층</th><th class="n">${신축거래탭 === '매매' ? '가격' : 신축거래탭 === '월세' ? '보증금 / 월세' : '보증금'}</th></tr></thead><tbody>
+    ${보일.map(t => `<tr${t.취소 ? ' class="dim"' : ''}>
+      <td>${ymd(t.날짜)}</td>
+      ${갈림 > 1 ? `<td class="muted">${esc(String(이름표.get(t.apt_seq) || '').replace(/^.*\(/, '(') || '—')}</td>` : ''}
+      <td class="n">${t.면적 != null ? Number(t.면적).toFixed(2) : '—'}</td>
+      <td class="n">${t.층 != null ? fmt(t.층) : '—'}</td>
+      <td class="n">${돈(t)}${t.분양권 ? ` <span class="pill">${esc(t.분양권)}</span>` : ''}${t.취소 ? '<span class="warnx"> 해제</span>' : ''}${t.갱신 ? '<span class="muted"> 갱신</span>' : ''}${t.직거래 ? '<span class="muted"> 직거래</span>' : ''}</td>
+    </tr>`).join('')}</tbody></table>
+    ${고른.length > 30 ? `<button type="button" class="moreb" data-nbmore>${신축더보기 ? '접기' : `${fmt(고른.length - 30)}건 더 보기`}</button>` : ''}` : '';
+  const 탭 = 목록.length ? `<div class="apick tpick">${종류들.map(k => `<button type="button" class="achip" role="tab" aria-selected="${k === 신축거래탭}" data-nbkind="${k}"${수(k) ? '' : ' disabled'}>${k} <b>${fmt(수(k))}</b></button>`).join('')}</div>` : '';
+  const tradeBlocks = 탭 + (갈림 > 1 ? `<p class="note sm">실거래가 ${갈림}개 단지로 갈림(한 지번 · 신고 단지 일련번호로 구분)</p>` : '') + 요약 + 거래표;
 
   $('#detail').innerHTML = `
     <span class="pill nb">대장 없는 신축</span>
@@ -1118,13 +1134,23 @@ function renderNewbuild({ newbuild: n, tradeStats, cost }) {
       ${row('건축인허가', n.인허가 ? fmt(n.인허가) + '건' : '없음')}
       ${row('K-apt 코드', esc(n.kapt_code))}
     </dl>
-    ${multi ? `<p class="note sm">실거래가 ${groups.length}개 단지로 갈림(한 지번 · 신고 단지 일련번호로 구분)</p>` : ''}
     ${tradeBlocks}
-    ${stats.length ? '' : '<p class="muted" style="padding:6px 2px">이 지번에 매칭된 실거래가 없습니다.</p>'}
+    ${목록.length ? '' : '<p class="muted" style="padding:6px 2px">이 지번에 매칭된 실거래가 없습니다.</p>'}
     <div class="ahbox" data-ah="k|${esc(n.kapt_code)}"></div>
     ${costBlock(cost)}`;
   분양채우기();
 }
+
+document.addEventListener('click', e => {
+  const k = e.target.closest('#detail [data-nbkind]');
+  const m = e.target.closest('#detail [data-nbmore]');
+  if (!(k || m) || !신축마지막) return;
+  if (k) { 신축거래탭 = k.dataset.nbkind; 신축더보기 = false; }
+  if (m) 신축더보기 = !신축더보기;
+  const y = $('#detail').scrollTop;
+  renderNewbuild(신축마지막);
+  $('#detail').scrollTop = y;
+});
 
 /* ═══════════ 자동완성 (2026-10-21, 사장님 요청) ═══════════
    "법정동·행정동으로도 검색 가능해야 하고 자동완성에 떠야 해" + 재개발·상가·학원·학교.

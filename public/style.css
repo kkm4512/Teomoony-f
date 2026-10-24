@@ -1927,3 +1927,6 @@ table.cned td.sm { line-height: 1.6; }
 
 /* 2026-10-24 소개 문서 링크(바닥글) */
 .fb .fbabout{font-size:12.5px;font-weight:500;margin-left:8px}
+
+/* 2026-10-24 신축 실거래 목록: 해제된 거래는 흐리게 */
+.detail tr.dim td{color:var(--ink-4);text-decoration:line-through;text-decoration-color:var(--ink-4)}

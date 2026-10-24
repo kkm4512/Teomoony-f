@@ -4066,15 +4066,40 @@ app.get('/api/newbuilds/:code', async (req, res) => {
       error: '해당 신축을 찾을 수 없습니다',
       hint: '대장이 올라와 정식 단지가 되었을 수 있습니다. 단지명으로 다시 검색해 보세요.',
     });
+    /* 2026-10-24 21:46 사장님(신축 장위자이레디언트): ① 매매 · 전세 · 월세를 고를 수 없다 ② 전월세 보증금이 '—' ③ 날짜 정렬이 안 됨.
+       ② 원인: gold.v_newbuild_trade 는 deal_amount(매매가)만 모은다 — 전월세는 deal_amount 가 비고 보증금은 deposit 에 있다.
+       → 집계를 여기서 **종류(매매/전세/월세)별**로 다시 낸다(값 = 매매가 · 보증금 · 보증금+월세). 목록(trades)은 종류별 최근 300건, 날짜 내림차순. */
     const t = await pool.request().input('pnu', sql.Char(19), d.pnu)
-      .query(`SELECT apt_seq, seq_nm, is_rent, area_grp, cnt, canceled_cnt,
-                     min_amount, max_amount, last_ymd, direct_cnt
-                FROM gold.v_newbuild_trade WHERE pnu = @pnu
-               ORDER BY is_rent, area_grp`);
+      .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        WITH r AS (
+          SELECT apt_seq, bld_nm, deal_ymd, is_canceled, deal_amount, deposit, monthly_rent, floor_no, dealing_gbn, contract_type,
+                 종류 = CASE WHEN is_rent = 0 THEN N'매매' WHEN ISNULL(monthly_rent, 0) > 0 THEN N'월세' ELSE N'전세' END,
+                 면적 = COALESCE(exclu_use_ar, total_floor_ar, building_ar)
+            FROM silver.rtms_trade
+           WHERE match_pnu = @pnu AND match_complex_id IS NULL AND trade_kind NOT LIKE 'SILV%'   /* 집계엔 분양권 빼고(292) */
+             AND COALESCE(exclu_use_ar, total_floor_ar, building_ar) IS NOT NULL)
+        SELECT apt_seq, seq_nm = MIN(bld_nm), 종류, area_grp = CAST(FLOOR(면적) AS INT),
+               cnt = SUM(CASE WHEN is_canceled = 0 THEN 1 ELSE 0 END), canceled_cnt = SUM(CAST(is_canceled AS INT)),
+               max_amount = MAX(CASE WHEN is_canceled = 0 THEN CASE 종류 WHEN N'매매' THEN deal_amount ELSE deposit END END),
+               min_amount = MIN(CASE WHEN is_canceled = 0 THEN CASE 종류 WHEN N'매매' THEN deal_amount ELSE deposit END END),
+               last_ymd = MAX(CASE WHEN is_canceled = 0 THEN deal_ymd END)
+          FROM r GROUP BY apt_seq, 종류, CAST(FLOOR(면적) AS INT)
+         ORDER BY apt_seq, 종류, area_grp;
+        WITH r AS (
+          SELECT apt_seq, 날짜 = deal_ymd, 취소 = CAST(is_canceled AS INT),
+                 종류 = CASE WHEN is_rent = 0 THEN N'매매' WHEN ISNULL(monthly_rent, 0) > 0 THEN N'월세' ELSE N'전세' END,
+                 금액 = deal_amount, 보증금 = deposit, 월세 = monthly_rent, 면적 = COALESCE(exclu_use_ar, total_floor_ar, building_ar),
+                 층 = floor_no, 직거래 = CASE WHEN dealing_gbn LIKE N'%직거래%' THEN 1 ELSE 0 END,
+                 갱신 = CASE WHEN contract_type = N'갱신' THEN 1 ELSE 0 END,
+                 /* 목록엔 분양권·입주권도 매매 탭에 섞고 표시한다(단지 화면 316 과 같게) */
+                 분양권 = CASE WHEN trade_kind LIKE 'SILV%' THEN CASE WHEN ownership_gbn = N'입' THEN N'입주권' ELSE N'분양권' END END
+            FROM silver.rtms_trade WHERE match_pnu = @pnu AND match_complex_id IS NULL),
+        k AS (SELECT *, 순 = ROW_NUMBER() OVER (PARTITION BY 종류 ORDER BY 날짜 DESC), 전체 = COUNT(*) OVER (PARTITION BY 종류) FROM r)
+        SELECT apt_seq, 날짜, 취소, 종류, 금액, 보증금, 월세, 면적, 층, 직거래, 갱신, 분양권, 전체 FROM k WHERE 순 <= 300 ORDER BY 종류, 날짜 DESC;`);
     /* 신축에도 붙인다. 대개 비어 있는데, **비어 있다는 것 자체가 정보다** —
        2025.3 준공이면 2024.12 관리비가 없다. 화면이 그 이유를 말한다. */
     const cost = await costOf(pool, code);
-    res.json({ newbuild: d, tradeStats: t.recordset, cost });
+    res.json({ newbuild: d, tradeStats: t.recordsets[0], trades: t.recordsets[1], cost });
   } catch (e) { fail(res, e, 'newbuild-detail'); }
 });
 
