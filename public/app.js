@@ -6571,7 +6571,7 @@ async function 역사채우기() {
   /* 같은 날 · 같은 일은 한 줄(인허가가 같은 날 여러 건) */
   const 줄 = ev.filter((e, i) => !ev.slice(0, i).some(x => x.d === e.d && x.무엇 === e.무엇));
   지금.innerHTML = `${sect('이 땅의 역사', 'hist')}
-    <ol class="hist">${줄.map(e => `<li data-histgo="${esc(e.간다.join('|'))}"${e.폐쇄 ? ` data-histcl="${esc(e.폐쇄)}"` : ''} role="button" tabindex="0" title="누르면 그 칸으로 갑니다${e.폐쇄 ? ' · 지도에 그 옛 대장 자리를 표시합니다' : ''}">
+    <ol class="hist">${줄.map(e => `<li data-histgo="${esc(e.간다.join('|'))}" data-histd="${esc(String(e.d || '').replace(/[^0-9]/g, '').slice(0, 8))}"${e.폐쇄 ? ` data-histcl="${esc(e.폐쇄)}"` : ''} role="button" tabindex="0" title="누르면 그 칸으로 갑니다${e.폐쇄 ? ' · 지도에 그 옛 대장 자리를 표시합니다' : ''}">
       <span class="hist-d">${esc(날(e.d) || '날짜 없음')}</span>
       <span class="hist-w">${esc(e.무엇)}<span class="hist-s">${esc(e.출처)} · ${esc(e.간다[1])} 칸</span></span></li>`).join('')}</ol>
     `;
@@ -6582,9 +6582,30 @@ document.addEventListener('click', async e => {
   const [탭, 칸] = li.dataset.histgo.split('|');
   const 옛 = li.dataset.histcl;
   if (탭 !== detailTab) { detailTab = 탭; renderDetail(lastDetail); }
+  /* 10-25 사장님 "하나를 클릭하면 밑으로 이동하는데, 어디를 봐야 할지 모르겠어" — 내려간 칸 안에서 **그 줄**을 찾아 가운데로 · 잠깐 색칠.
+     찾는 법: 옛 대장 줄은 그 대장 표시(data-clsite) · 그 밖은 같은 날짜가 적힌 가장 작은 줄(2009.07.30 · 2009-07-30 · 20090730 어느 꼴이든).
+     못 찾으면 칸 제목을 색칠한다(어디로 왔는지는 보이게). */
+  const 날 = li.dataset.histd || '';
   setTimeout(() => {
     const t = [...document.querySelectorAll('#detail .sect')].find(x => x.textContent.trim().startsWith(칸));
-    if (t) t.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (!t) return;
+    const 칸들 = [];
+    for (let n = t.nextElementSibling; n && !n.classList.contains('sect'); n = n.nextElementSibling) 칸들.push(n);
+    const 꼴 = 날.length === 8 ? [날, `${날.slice(0, 4)}.${날.slice(4, 6)}.${날.slice(6)}`, `${날.slice(0, 4)}-${날.slice(4, 6)}-${날.slice(6)}`,
+                                  `${날.slice(0, 4)}.${Number(날.slice(4, 6))}.${Number(날.slice(6))}`] : [];
+    let 줄 = null;
+    if (옛) 줄 = 칸들.map(n => n.matches(`[data-clsite="${CSS.escape(옛)}"]`) ? n : n.querySelector(`[data-clsite="${CSS.escape(옛)}"]`)).find(Boolean) || null;
+    if (!줄 && 꼴.length) {
+      const 후보 = 칸들.flatMap(n => [n, ...n.querySelectorAll('tr, li, .row, p, div')])
+        .filter(x => 꼴.some(f => (x.textContent || '').includes(f)));
+      /* 가장 작은(안쪽) 줄 — 자식 중에 같은 날짜를 품은 것이 없는 것 */
+      줄 = 후보.find(x => !후보.some(y => y !== x && x.contains(y))) || null;
+      if (줄 && 줄.closest('tr')) 줄 = 줄.closest('tr');
+    }
+    const 칠 = 줄 || t;
+    칠.scrollIntoView({ block: 줄 ? 'center' : 'start', behavior: 'smooth' });
+    칠.classList.remove('histflash'); void 칠.offsetWidth; 칠.classList.add('histflash');
+    setTimeout(() => 칠.classList.remove('histflash'), 2600);
   }, 350);
   if (옛) {
     try {

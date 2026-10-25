@@ -1960,3 +1960,7 @@ table.cned td.sm { line-height: 1.6; }
 
 /* 22:33 사장님 "상자 눌러도 목록이 안 접혀" — .dpick 의 display:flex 가 hidden 속성을 이겼다(속성은 바뀌는데 화면은 그대로). 숨김을 우선한다 */
 .dsel .dpick[hidden]{display:none}
+
+/* 10-25 이 땅의 역사 → 내려간 곳의 그 줄을 잠깐 칠한다 */
+.histflash { animation: histflash 2.6s ease-out; border-radius: 6px; }
+@keyframes histflash { 0%, 35% { background: rgba(214, 120, 52, .28); box-shadow: 0 0 0 2px rgba(214, 120, 52, .55); } 100% { background: transparent; box-shadow: 0 0 0 2px transparent; } }
