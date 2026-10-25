@@ -435,7 +435,8 @@ app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지�
   app.get('/api/closed/pins', s.닫힌핀); app.get('/api/newbuilds', s.신축핀);
   app.get('/api/suggest', s.자동완성); app.get('/api/complexes', s.목록검색);
   app.get('/api/areas/here', s.여기지역); app.get('/api/complexes/near', s.주변단지); app.get('/api/applyhome/pins', s.청약핀);   /* svc_mode "misc" */
-  app.use(s.응답캐시); }   /* 호 상세 · 주변 지점 · 점포 목록 지나며 담기 — svc_mode "cache" */   /* 자동완성 · 목록 검색 — svc_mode "suggest" · "search" */   /* 자동완성 — svc_mode "suggest" */
+  app.use(s.응답캐시);
+  app.get('/api/closed/empty', s.빈자리); }   /* 10-25 지금 대장 없는 자리(닫힌 대장만 남은 필지) */   /* 호 상세 · 주변 지점 · 점포 목록 지나며 담기 — svc_mode "cache" */   /* 자동완성 · 목록 검색 — svc_mode "suggest" · "search" */   /* 자동완성 — svc_mode "suggest" */
 
 app.get('/api/usage', async (req, res) => {
   try {

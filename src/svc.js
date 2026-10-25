@@ -731,4 +731,40 @@ async function 응답캐시(req, res, next) {
   return next();
 }
 
-module.exports = { 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, 여기지역, 주변단지, 청약핀, 응답캐시, pg, 지금설정 };
+
+/* ---------- 지금 대장 없는 자리 (2026-10-25 사장님 "✕ 는 말소돼서 지금 못 쓰는 자리 · 누르지 않아도 보이게") ----------
+   닫힌(폐쇄 · 말소) 대장이 있었고 **그 필지에 지금 단지(대장)가 없는** 곳 = svc.lyr_closed.now_complex_id IS NULL.
+   그 필지의 **지금** 경계를 낸다(옛 건물 모양은 원천에 없다). 한 필지에 닫힌 대장이 여럿이면 한 면 · 개수 · 가장 최근 것.
+   ★ 새 기능이라 옛 경로가 없다 — 서비스DB 가 안 되면 빈 목록(지도에 안 그릴 뿐, 다른 화면은 그대로). 넓게 보면 많아서 1,500 필지까지. */
+async function 빈자리(req, res) {
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (b.length !== 4 || b.some(v => !Number.isFinite(v))) return res.status(400).json({ error: 'bbox=서,남,동,북' });
+  try {
+    const r = await pg().query(`
+      SELECT c.pnu, count(*)::int AS 개수,
+             (array_agg(c.site_key ORDER BY c.shter_day DESC NULLS LAST, c.site_key))[1] AS key,
+             (array_agg(c."이름" ORDER BY c.shter_day DESC NULLS LAST, c.site_key))[1] AS 이름,
+             (array_agg(c."폐쇄구분" ORDER BY c.shter_day DESC NULLS LAST, c.site_key))[1] AS 구분,
+             max(c.shter_day) AS 최근,
+             (SELECT p.geojson FROM svc.lyr_parcel p WHERE p.pnu = c.pnu LIMIT 1) AS geojson
+        FROM svc.lyr_closed c
+       WHERE c.now_complex_id IS NULL AND c.lng BETWEEN $1 AND $3 AND c.lat BETWEEN $2 AND $4
+         /* 대장 전의 새 아파트(K-apt 신축)가 선 필지는 뺀다 — 장위자이레디언트 62-1 이 '지금 대장 없는 자리' 로 칠해졌다(10-25 시험) */
+         AND NOT EXISTS (SELECT 1 FROM svc.lyr_sg_newbuild n WHERE n.pnu = c.pnu)
+       GROUP BY c.pnu
+       LIMIT 1501`, b);
+    const 잘림 = r.rows.length > 1500;
+    const features = [];
+    for (const x of (잘림 ? r.rows.slice(0, 1500) : r.rows)) {
+      if (!x.geojson) continue;
+      let g; try { g = JSON.parse(x.geojson); } catch { continue; }
+      features.push({ type: 'Feature', geometry: g, properties: { pnu: x.pnu, 개수: x.개수, key: x.key, 이름: x.이름, 구분: x.구분, 최근: x.최근 } });
+    }
+    res.set('X-Svc', 'hit');
+    return res.json({ type: 'FeatureCollection', 잘림, features });
+  } catch (e) {
+    return res.json({ type: 'FeatureCollection', 잘림: false, features: [], 못함: true });
+  }
+}
+
+module.exports = { 빈자리, 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, 여기지역, 주변단지, 청약핀, 응답캐시, pg, 지금설정 };

@@ -893,6 +893,7 @@ function initMap() {
   newbuildLayer = L.layerGroup().addTo(map);
   분양핀층 = L.layerGroup().addTo(map);
   폐쇄핀층 = L.layerGroup().addTo(map);
+  빈자리켜기();
 
   map.on('moveend', refreshMap);
   /* 줌만 바뀌어도 이름표를 다시 판단한다. loadOverlay 는 bbox 가 그대로면
@@ -6630,6 +6631,43 @@ async function 폐쇄채우기() {
     ${묶.length ? 묶.map(s => 폐쇄묶음줄(s, 동[s.site_key])).join('')
       : '<p class="note muted">이 단지 필지에는 폐쇄·말소된 대장이 없습니다.</p>'}
     ${ Number(범.받은동) < Number(범.법정동) ? `<p class="srcline">이 단지 필지의 법정동 ${fmt(범.법정동)}곳 중 ${fmt(범.받은동)}곳만 받았습니다.</p>` : ''}`;
+}
+/* ---------------- 지금 대장 없는 자리 (2026-10-25 사장님 "✕ 는 말소돼서 지금 못 쓰는 자리 · 누르지 않아도 보이게") ----------------
+   닫힌(폐쇄·말소) 대장이 있었고 그 필지에 **지금 대장(단지)이 없는** 곳 — 옅은 회색 면. 17 이상 확대하면 저절로, 19 이상이면 ✕ 도.
+   ★ 옛 대장이 있었어도 지금 건물이 있는 필지는 여기 안 나온다(10-23 사장님 "지금 라이브인 건 지도에 표시 안 함").
+   ★ 면은 그 필지의 **지금** 경계다(옛 건물 모양은 원천에 없다). 누르면 닫힌 대장 말풍선. */
+const 빈자리줌 = 17, 빈자리X줌 = 19;
+let 빈자리층 = null, 빈자리차례 = 0, 빈자리타이머 = null;
+function 빈자리켜기() {
+  if (!map.getPane('emptyPane')) { const pn = map.createPane('emptyPane'); pn.style.zIndex = 405; }
+  빈자리층 = L.featureGroup().addTo(map);
+  map.on('moveend', () => { clearTimeout(빈자리타이머); 빈자리타이머 = setTimeout(빈자리불러오기, 300); });
+  빈자리불러오기();
+}
+async function 빈자리불러오기() {
+  if (!빈자리층) return;
+  const z = map.getZoom();
+  if (z < 빈자리줌) { 빈자리층.clearLayers(); 지도알림('빈자리', ''); return; }
+  const 차례 = ++빈자리차례;
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(n => n.toFixed(7)).join(',');
+  let r;
+  try { r = await fetch(`/api/closed/empty?bbox=${bbox}`).then(x => x.json()); } catch (e) { return; }
+  if (차례 !== 빈자리차례 || !r || r.error) return;
+  빈자리층.clearLayers();
+  const 면 = L.geoJSON(r, { pane: 'emptyPane',
+    style: { color: '#6b7280', weight: 1, opacity: 0.7, fillColor: '#6b7280', fillOpacity: 0.28 },
+    onEachFeature: (f, ly) => {
+      const p = f.properties || {};
+      ly.bindTooltip(`지금 대장 없는 자리 · 옛 대장 ${fmt(p.개수)}${p.최근 ? ` · 최근 ${esc(p.구분 || '')} ${esc(날8(p.최근) || '')}` : ''}${p.이름 ? ` · ${esc(p.이름)}` : ''}`,
+                     { direction: 'top', sticky: true });
+      ly.on('click', e => { if (p.key) 폐쇄핀열기(p.key, e.latlng); });
+    } }).addTo(빈자리층);
+  if (z >= 빈자리X줌) 면.eachLayer(ly => {
+    L.marker(ly.getBounds().getCenter(), { interactive: false, pane: 'emptyPane', keyboard: false,
+      icon: L.divIcon({ className: 'clx-wrap', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="clx emp" aria-label="지금 대장 없는 자리">✕</div>' }) }).addTo(빈자리층);
+  });
+  지도알림('빈자리', r.잘림 ? '지금 대장 없는 자리는 한 화면에 1,500 필지까지만 보입니다 — 더 확대하세요' : '');
 }
 async function 폐쇄핀불러오기() {
   if (!폐쇄핀층) return;

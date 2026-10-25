@@ -1964,3 +1964,7 @@ table.cned td.sm { line-height: 1.6; }
 /* 10-25 이 땅의 역사 → 내려간 곳의 그 줄을 잠깐 칠한다 */
 .histflash { animation: histflash 2.6s ease-out; border-radius: 6px; }
 @keyframes histflash { 0%, 35% { background: rgba(214, 120, 52, .28); box-shadow: 0 0 0 2px rgba(214, 120, 52, .55); } 100% { background: transparent; box-shadow: 0 0 0 2px transparent; } }
+
+/* 10-25 지금 대장 없는 자리 — 범례 · 크게 확대했을 때의 ✕ (닫힌 대장 상세의 ✕ 보다 작고 옅게) */
+.lrow .sw.emp { background: rgba(107, 114, 128, .35); border: 1px solid #6b7280; }
+.clx.emp { width: 18px; height: 18px; font-size: 11px; border-width: 1.5px; opacity: .85; }
