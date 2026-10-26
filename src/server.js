@@ -196,8 +196,11 @@ function 이용_이름(req) {
 }
 
 function 이용_동작(req) {
-  if (이용_안세는호스트.has(req.hostname)) return null;
+  if (이용_안세는호스트.has(req.hostname)) return null;   // 이 PC 안(사장님이 PC 에서 · 제가 확인하며 여는 것) — 안 센다
   if (운영자IP.has(진짜IP(req))) return null;          // 315: 운영자(사장님) 접속은 공개 수치에서 뺀다
+  /* ★ 2026-10-26 사장님 "나나 너는 제외해 줘" — root 토큰을 단 요청이면 IP 를 몰라도 뺀다(휴대폰처럼 IP 가 자주 바뀌는 곳) · 그 IP 도 운영자로 적는다 */
+  const 토큰 = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (토큰) { const p = verifyToken(토큰); if (p && p.r === 'root') { 운영자IP더하기(req, 'root 토큰 요청'); return null; } }
   return 이용_이름(req);
 }
 
@@ -4410,9 +4413,17 @@ app.get('/api/redev/:sn', async (req, res) => {
 app.get('/api/lawds/:lawd/geo', async (req, res) => {
   const lawd = String(req.params.lawd || '');
   if (!/^\d{10}$/.test(lawd)) return res.status(400).json({ error: 'bad lawd_cd' });
+  /* ★ 2026-10-26 리(끝 두 자리가 00 이 아님)는 리 경계표(357 · VWorld LT_C_ADRI_INFO)에서 */
+  const 리 = !lawd.endsWith('00');
   try {
     const pool = await getPool();
-    const r = await pool.request().input('lawd', sql.Char(10), lawd).query(`
+    const r = await pool.request().input('lawd', sql.Char(10), lawd).query(리 ? `
+      SELECT b.lawd_cd, emd_nm = b.ri_nm, b.full_nm, b.geojson,
+             v.complex_cnt, v.trade_cnt, v.max_amount, v.max_area, v.max_ymd,
+             v.dong_cnt, v.hhld_cnt
+      FROM silver.ri_boundary b
+      LEFT JOIN gold.v_lawd_map v ON v.lawd_cd = b.lawd_cd
+      WHERE b.is_current = 1 AND b.lawd_cd = @lawd` : `
       SELECT b.lawd_cd, b.emd_nm, b.full_nm, b.geojson,
              v.complex_cnt, v.trade_cnt, v.max_amount, v.max_area, v.max_ymd,
              v.dong_cnt, v.hhld_cnt
@@ -5273,6 +5284,26 @@ app.get('/api/areas/dongs', async (req, res) => {
                  : 경계없음 === r.recordset.length ? '이 지역은 아직 자료를 받지 않았습니다 — 이름만 보입니다'
                  : 경계없음 ? `${경계없음}곳은 법정동 경계를 아직 받지 않아 테두리 없이 그 동네로만 옮깁니다` : null });
   } catch (e) { fail(res, e, 'areas-dongs'); }
+});
+
+/* ★ 2026-10-26 사장님 "법정동까지만 보여주는데 리까지 있는 경우도 있어" — 고른 읍·면 아래의 리 목록.
+   이름은 법정동 마스터(meta.lawd_code), 테두리·범위는 리 경계(silver.ri_boundary). 리가 없는 동이면 빈 목록. */
+app.get('/api/areas/ris', async (req, res) => {
+  const emd = String(req.query.emd || '');
+  if (!/^\d{10}$/.test(emd)) return res.status(400).json({ error: 'emd 는 법정동코드 10자리' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('e8', sql.Char(8), emd.slice(0, 8)).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT cd = l.lawd_cd, 이름 = l.ri_nm, b.centroid_lat, b.centroid_lng,
+             minx = b.bbox_minx, miny = b.bbox_miny, maxx = b.bbox_maxx, maxy = b.bbox_maxy,
+             경계있음 = CASE WHEN b.lawd_cd IS NULL THEN 0 ELSE 1 END
+        FROM meta.lawd_code l
+        LEFT JOIN silver.ri_boundary b ON b.lawd_cd = l.lawd_cd AND b.is_current = 1
+       WHERE LEFT(l.lawd_cd, 8) = @e8 AND l.ri_nm IS NOT NULL AND l.is_abolished = 0
+       ORDER BY l.ri_nm, l.lawd_cd`);
+    res.json({ emd, 리: r.recordset, 경계없음: r.recordset.filter(x => !x.경계있음).length });
+  } catch (e) { fail(res, e, 'areas-ris'); }
 });
 
 /* 지도 가운데가 어느 구·동인가 — 창이 '지금 어디' 를 따라가게 */

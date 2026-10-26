@@ -1968,3 +1968,6 @@ table.cned td.sm { line-height: 1.6; }
 /* 10-25 지금 대장 없는 자리 — 범례 · 크게 확대했을 때의 ✕ (닫힌 대장 상세의 ✕ 보다 작고 옅게) */
 .lrow .sw.emp { background: rgba(107, 114, 128, .35); border: 1px solid #6b7280; }
 .clx.emp { width: 18px; height: 18px; font-size: 11px; border-width: 1.5px; opacity: .85; }
+/* 2026-10-26 리 줄 — 고른 읍·면 아래 리가 있을 때만 보인다 */
+.areactl .ac-ri .ac-lab { flex: 0 0 auto; font-size: 11.5px; color: var(--ink-3); padding: 0 2px 0 4px; }
+.areactl .ac-ri[hidden] { display: none; }

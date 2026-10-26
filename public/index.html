@@ -143,6 +143,11 @@
         <select id="acDong" aria-label="읍·면·동 고르기" disabled><option value="">읍·면·동</option></select>
         <button type="button" id="acClear" class="ac-x" title="고른 동 강조 지우기" aria-label="강조 지우기" hidden>×</button>
       </div>
+      <!-- ★ 2026-10-26 읍·면을 고르면 그 아래 리가 있을 때만 한 줄 더 — 세 칸 줄에 끼우면 다 좁아져서 -->
+      <div class="ac-sel ac-ri" id="acRiRow" hidden>
+        <span class="ac-lab">리</span>
+        <select id="acRi" aria-label="리 고르기"><option value="">리 전체</option></select>
+      </div>
       <div id="acRel" class="ac-rel" hidden></div>
     </div>
 

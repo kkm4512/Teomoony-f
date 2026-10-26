@@ -266,6 +266,16 @@ document.addEventListener('click', e => {
     try { 경로 = new URL(typeof input === 'string' ? input : input.url, location.href).pathname; }
     catch { /* 못 읽으면 표시만 건너뛴다 */ }
     if (!경로.startsWith('/api/')) return 원래fetch(input, init);
+    /* ★ 2026-10-26 사장님 "이용현황의 사람 동작에서 나나 너는 제외해 줘" — 로그인해 있으면 모든 /api 요청에 토큰을 실어
+       서버가 운영자(root) 요청을 이용현황에서 뺀다. 전에는 /api/me 가 답하기 전 첫 화면 요청들(지도 훑기 · 신축 단지 · 단지 목록)이
+       새 IP(휴대폰 등)에서 '사람' 으로 세어졌다. 이미 Authorization 을 단 요청은 그대로 둔다. */
+    try {
+      const t = localStorage.getItem('tm_token');
+      if (t && typeof input === 'string') {
+        const h = new Headers((init && init.headers) || {});
+        if (!h.has('Authorization')) { h.set('Authorization', 'Bearer ' + t); init = { ...(init || {}), headers: h }; }
+      }
+    } catch { /* 저장소를 못 읽으면 그냥 보낸다 */ }
     const k = 로딩.시작(경로);
     let p;
     /* ★ 2026-10-25 문의 4: 서버가 다시 뜨는 몇 초(또는 Cloudflare 와 PC 사이가 잠깐 끊긴 때) 단지 상세가 502 로 떨어졌다.
@@ -5686,7 +5696,7 @@ function 거리재기단추() {
      얇게 같이 그린다 — '법정동 장위동 = 행정동 장위1동 34% · 장위2동 33% · 장위3동 31%'.
      둘을 늘 같이 그리면 선이 이중으로 보여 지저분하다 — 겹쳐 보여주는 건 **고른 동 하나**만.
    · 지도를 움직이면 가운데가 어느 구·동인지 창이 따라간다('지금 어디'). 고른 직후 1.5초는 안 따라간다. */
-const 동네 = { 시도: [], 시도cd: '', 구: [], 동: [], 구cd: '', 동kind: '', 고른: null, 멈춤: 0, 타이머: null, 번: 0, 구번: 0 };
+const 동네 = { 시도: [], 시도cd: '', 구: [], 동: [], 구cd: '', 동kind: '', 고른: null, 멈춤: 0, 타이머: null, 번: 0, 구번: 0, 리: [], 리부모: '', 리번: 0 };
 /* ★ 19:03 사장님: "시 군 구를 다 고를 수 있어야" — 시·도 → 시·군·구 → 읍·면·동. 목록은 전국(법정동코드),
    받은 자료가 없는 곳은 '자료 없음' 으로 적고 고르면 이름만 보인다(지도는 안 옮긴다 — 옮길 상자가 없다). */
 const 구이름 = nm => String(nm || '').replace(/^(.+?시)(.+구)$/, '$1 $2');
@@ -5709,6 +5719,9 @@ async function 동네시작() {
   $('#acSido').addEventListener('change', e => 동네시도(e.target.value, true));
   $('#acSgg').addEventListener('change', e => 동네구(e.target.value, true));
   $('#acDong').addEventListener('change', e => e.target.value ? 동네동(e.target.value) : 동네지우기());
+  /* 2026-10-26 리 — '리 전체' 로 되돌리면 그 읍·면을 다시 보인다(리 목록은 그대로) */
+  $('#acRi').addEventListener('change', e => e.target.value ? 동네리(e.target.value)
+    : (동네.리부모 ? 동네동(동네.리부모, true) : null));
   $('#acClear').addEventListener('click', 동네지우기);
   try {
     const r = await fetch('/api/areas/sido').then(r => r.json());
@@ -5787,8 +5800,13 @@ async function 동네구(sgg, 이동) {
     if (r.말 && 이동) toast(esc(r.말), 4000);
   } catch (e) { 오류토스트('동 목록', null, e); }
 }
-function 동네지우기(조용히) {
+function 리줄숨김() {
+  동네.리 = []; 동네.리부모 = '';
+  $('#acRiRow').hidden = true; $('#acRi').innerHTML = '<option value="">리 전체</option>';
+}
+function 동네지우기(조용히, 리유지) {
   동네.고른 = null;
+  if (!리유지) 리줄숨김();
   lawdFocusLayer.clearLayers();
   if (relateLayer) relateLayer.clearLayers();
   if (relateLabelLayer) relateLabelLayer.clearLayers();
@@ -5796,10 +5814,12 @@ function 동네지우기(조용히) {
   $('#acClear').hidden = true;
   if (!조용히) $('#acDong').value = '';
 }
-async function 동네동(cd) {
+async function 동네동(cd, 리유지) {
   const k = 동네종류();
   const d = 동네.동.find(x => x.cd === cd);
-  동네지우기(true);
+  동네지우기(true, 리유지);
+  if (리유지) $('#acRi').value = '';
+  else if (k === 'lawd') 리목록(cd);   /* 기다리지 않는다 — 경계 그리기와 따로 */
   동네.고른 = { k, cd };
   $('#acClear').hidden = false;
   동네.멈춤 = Date.now() + 1800;
@@ -5837,6 +5857,40 @@ async function 동네동(cd) {
        '(일부)' = 그 동의 일부만 이 동에 들어온다(상대 넓이 < 90%). 경계선이 스치는 조각(3% 미만)은 서버가 뺀다. */
     /* ★ 19:42 사장님: 창 아래 글자도 뺀다 — 겹치는 동은 **지도 위 경계와 이름표**로만 보인다 */
   } catch (e) { 오류토스트('겹치는 동', null, e); }
+}
+/* ★ 2026-10-26 사장님 "법정동까지만 보여주는데 리까지 있는 경우도 있어" — 고른 읍·면에 리가 있으면 한 줄 더 */
+async function 리목록(emd) {
+  const 번 = ++동네.리번;
+  try {
+    const r = await fetch(`/api/areas/ris?emd=${emd}`).then(r => r.json());
+    if (번 !== 동네.리번 || !동네.고른 || 동네.고른.cd !== emd) return;
+    if (r.error) return 오류토스트('리 목록', r);
+    동네.리 = r.리 || []; 동네.리부모 = emd;
+    if (!동네.리.length) { $('#acRiRow').hidden = true; return; }
+    $('#acRi').innerHTML = `<option value="">리 전체 (${동네.리.length})</option>` + 동네.리.map(x =>
+      `<option value="${x.cd}">${esc(x.이름 || '')}${x.경계있음 ? '' : ' · 경계 없음'}</option>`).join('');
+    $('#acRiRow').hidden = false;
+  } catch (e) { 오류토스트('리 목록', null, e); }
+}
+async function 동네리(cd) {
+  const x = 동네.리.find(y => y.cd === cd);
+  lawdFocusLayer.clearLayers();
+  if (relateLayer) relateLayer.clearLayers();
+  if (relateLabelLayer) relateLabelLayer.clearLayers();
+  동네.고른 = { k: 'lawd', cd: 동네.리부모, 리: cd };
+  $('#acClear').hidden = false;
+  동네.멈춤 = Date.now() + 1800;
+  try {
+    const f = await fetch(`/api/lawds/${cd}/geo`).then(r => r.json());
+    if (f.error) {
+      if (x && x.minx != null) map.fitBounds([[x.miny, x.minx], [x.maxy, x.maxx]], { padding: [40, 40] });
+      if (f._상태 === 404 || f.error === 'not found') return toast(`${esc(x ? x.이름 : cd)} — 이 리의 경계를 아직 받지 않았습니다`, 3500);
+      return 오류토스트('리 경계', f);
+    }
+    lawdFocusLayer.addData(f);
+    lawdFocusLayer.setStyle({ color: css('--s6'), weight: 3.4, opacity: 1, dashArray: null, fillColor: css('--s3'), fillOpacity: .06 });
+    map.fitBounds(lawdFocusLayer.getBounds(), { padding: [40, 40] });
+  } catch (e) { 오류토스트('리 경계', null, e); }
 }
 async function 동네따라가기(강제) {
   if (!강제 && Date.now() < 동네.멈춤) return;
