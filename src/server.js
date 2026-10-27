@@ -2621,15 +2621,23 @@ async function lookupRegion(pool, cands) {
     /* 2026-10-23 QA(200문항): '잠실 · 반포 · 대치 · 여의도 · 평촌' 처럼 **'동' 을 뺀 말** — 우리 범위(서울 · 안양) 안에서 'X동' 이
        **정확히** 있을 때만 그 동('X동N가' 꼴도). '여의도 재건축' 이 여의도를 못 알아듣고 서울 전체(압구정)를 내보냈다. */
     /* 같은 말이 구 이름에 맞으면 구가 먼저('마포' = 마포구, 마포동 아님 · '송파' = 송파구) */
-    const 구말 = c => rows.some(g => g.수준 === 'sgg' && g.sgg_nm && g.sgg_nm.includes(c.v));
+    /* ★ 2026-10-28 사장님 "대구에서 제일 비싼 곳 → 부산 해운대구로 알아들음" — '해운대구'.includes('대구') 였다.
+         구 이름은 **앞부분**으로만 맞춘다('강남' = 강남구 · '영통' = 수원시영통구 — 일반구는 '시' 뒤를 따로 본다). 가운데 글자로는 안 맞춘다. */
+    const 시도들 = (await pool.request().query(`SELECT lawd_cd, sido_nm FROM meta.lawd_code WHERE sgg_nm IS NULL AND emd_nm IS NULL AND ri_nm IS NULL AND sido_nm IS NOT NULL`)).recordset;
+    const 시도말v = v => !!v && v.length >= 2 && 시도들.some(x => x.sido_nm.startsWith(v));
+    /* 시도 이름과 겹치는 말('부산' · '대구' · '인천' …)은 구 이름과 **정확히**(끝 글자 시·군·구만 뗀 것) 같을 때만 — '부산' 이 부산진구로 가지 않게 */
+    const 구이름맞음 = (nm, v) => !!nm && !!v && nm.split(/(?<=.시)(?=.)/).some(p => 시도말v(v) ? p === v || p.slice(0, -1) === v : p.startsWith(v));
+    const 구말 = c => rows.some(g => g.수준 === 'sgg' && 구이름맞음(g.sgg_nm, c.v));
     const 동뺌꼴 = (c, r) => r.emd_nm === c.v + '동' || 가맞음({ v: c.v + '동' }, r.emd_nm);
     /* 범위 밖이면 그 이름의 동이 **하나뿐**일 때만('산본' = 군포 산본동 → '아직 적재 안 함') — 아무 말에 '동' 을 붙여 먼 동네를 잡지 않게 */
-    const 동뺌맞음 = (c, r) => c.v.length >= 2 && !/[동가]$/.test(c.v) && !구말(c) && 동뺌꼴(c, r)
+    /* ★ 2026-10-28 '대구' 가 강원 동해시 '대구동' 으로(동을 뺀 말 규칙) — 시도 이름 앞부분(대구 · 서울 · 부산 …)이면 동을 붙여 찾지 않는다 */
+    const 시도말 = c => 시도말v(c.v);
+    const 동뺌맞음 = (c, r) => c.v.length >= 2 && !/[동가]$/.test(c.v) && !구말(c) && !시도말(c) && 동뺌꼴(c, r)
       && (범위안(r) || new Set(rows.filter(o => o.수준 === 'emd' && 동뺌꼴(c, o)).map(o => o.sgg_cd)).size === 1);
     const 동맞음 = (c, r) => c.v === r.emd_nm || 가맞음(c, r.emd_nm) || 동뺌맞음(c, r);
     const emdExact = rows.filter(r => r.수준 === 'emd'
       && cands.some(c => 동맞음(c, r)));
-    let sggRows = rows.filter(r => r.수준 === 'sgg');
+    let sggRows = rows.filter(r => r.수준 === 'sgg' && cands.some(c => 구이름맞음(r.sgg_nm, c.v)));
     /* ★ '안양시' 처럼 **하위 구가 따로 있는 시 레벨** 행은 뺀다(2026-10-19).
        '안양' 으로 찾으면 안양시 / 안양시만안구 / 안양시동안구 셋이 잡혀
        화면에 세 곳처럼 보인다. 단지는 만안·동안에만 달리므로 시 행은 군더더기다.
@@ -2641,7 +2649,7 @@ async function lookupRegion(pool, cands) {
     {
       const 말별 = new Map();
       for (const c of cands) {
-        const hit = sggRows.filter(r => r.sgg_nm && r.sgg_nm.includes(c.v)).map(r => r.sgg_cd);
+        const hit = sggRows.filter(r => 구이름맞음(r.sgg_nm, c.v)).map(r => r.sgg_cd);
         if (hit.length) 말별.set(c.t, new Set([...(말별.get(c.t) || []), ...hit]));
       }
       if (말별.size >= 2) {
@@ -2656,15 +2664,23 @@ async function lookupRegion(pool, cands) {
       const 안쪽 = emdExact.filter(e => sggRows.some(g => g.sgg_cd === e.sgg_cd));
       if (안쪽.length) 구안동 = 안쪽;
     }
-    const picked = 구안동.length ? 구안동 : sggRows;
+    let picked = 구안동.length ? 구안동 : sggRows;
+    /* ★ 2026-10-28 '인천 송도' 가 포항 송도동까지 — 시도 말이 같이 왔으면 그 시도 **안의** 것만(안에 있을 때) */
+    {
+      const 시도코드 = cands.filter(c => 시도말v(c.v)).flatMap(c => 시도들.filter(x => x.sido_nm.startsWith(c.v)).map(x => String(x.lawd_cd).slice(0, 2)));
+      if (시도코드.length) {
+        const 안 = picked.filter(r => 시도코드.includes(String(r.lawd_cd).slice(0, 2)));
+        if (안.length) picked = 안;
+      }
+    }
     지역 = picked.map(r => ({
       lawd_cd: r.lawd_cd, sgg_cd: r.sgg_cd, 수준: r.수준,
       이름: r.수준 === 'sgg' ? `${r.sido_nm} ${r.sgg_nm}` : r.full_nm }));
     for (const c of cands) {
       const hit = picked.some(r =>
-        (r.emd_nm && 동맞음(c, r)) || (!r.emd_nm && r.sgg_nm && r.sgg_nm.includes(c.v)))
+        (r.emd_nm && 동맞음(c, r)) || (!r.emd_nm && 구이름맞음(r.sgg_nm, c.v)))
         /* 고른 동을 감싸는 구 이름도 알아들은 말이다('서초구 반포동' 의 서초구) */
-        || sggRows.some(g => g.sgg_nm && g.sgg_nm.includes(c.v) && picked.some(r => r.sgg_cd === g.sgg_cd));
+        || sggRows.some(g => 구이름맞음(g.sgg_nm, c.v) && picked.some(r => r.sgg_cd === g.sgg_cd));
       if (hit) 맞은말.push(c.t);
     }
     /* ★ 2026-10-22 ('서울에서 제일 비싼 지역' — '서울에서' 를 못 알아들음): **시도**도 찾는다.
@@ -5323,9 +5339,11 @@ app.get('/api/areas/dongs', async (req, res) => {
             LEFT JOIN silver.lawd_boundary b ON b.lawd_cd = l.lawd_cd AND b.is_current = 1
            WHERE l.sgg_cd = @sgg AND l.emd_nm IS NOT NULL AND l.ri_nm IS NULL AND l.is_abolished = 0
              /* 자료가 있는 구는 경계나 단지가 있는 동만 · **자료가 없는 구는 이름이라도 다** 보인다 */
+             /* ★ 2026-10-28 사장님 "대구 구지면이 없어" — 리를 둔 읍·면은 단지가 **리 코드**(앞 8자리 + 리 2자리)에 붙어 있어
+                  읍·면 코드(끝 00) 10자리로 찾으면 0 이었다(경계도 없으면 목록에서 빠짐). 앞 8자리(읍면동)로 찾는다. */
              AND (b.lawd_cd IS NOT NULL OR EXISTS (SELECT 1 FROM gold.complex c
-                    WHERE c.rep_pnu >= CAST(l.lawd_cd + '000000000' AS CHAR(19))
-                      AND c.rep_pnu <= CAST(l.lawd_cd + '999999999' AS CHAR(19)))
+                    WHERE c.rep_pnu >= CAST(LEFT(l.lawd_cd, 8) + '00000000000' AS CHAR(19))
+                      AND c.rep_pnu <= CAST(LEFT(l.lawd_cd, 8) + '99999999999' AS CHAR(19)))
                   OR NOT EXISTS (SELECT 1 FROM gold.complex c2
                     WHERE c2.rep_pnu >= CAST(@sgg + '00000000000000' AS CHAR(19))
                       AND c2.rep_pnu <= CAST(@sgg + '99999999999999' AS CHAR(19))))
