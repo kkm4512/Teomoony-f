@@ -5703,6 +5703,10 @@ const 구이름 = nm => String(nm || '').replace(/^(.+?시)(.+구)$/, '$1 $2');
 let relateLayer = null, relateLabelLayer = null;
 const 동네종류 = () => (행정동보기 ? 'adm' : 'lawd');
 const 동네말 = k => (k === 'adm' ? '행정동' : '법정동');
+/* ★ 2026-10-27 사장님 "고를 때 단지 개수도" — 서버가 지도 마커 그대로 센 수(단지수). 수를 못 받았으면 안 적는다 */
+/* ★ 17:03 사장님 "법정동 행정동은 걍 갯수만 보여줘" — '이름 (수)' 만. 수를 받았으면 '경계 없음' 같은 덧말도 안 붙인다 */
+const 수있음 = x => typeof x.단지수 === 'number';
+const 단지수말 = x => (수있음(x) ? ` (${fmt(x.단지수)})` : '');
 
 async function 동네시작() {
   if (!$('#areactl')) return;
@@ -5728,7 +5732,7 @@ async function 동네시작() {
     if (r.error) return 오류토스트('시·도 목록', r);
     동네.시도 = r.시도 || [];
     $('#acSido').innerHTML = '<option value="">시·도</option>' + 동네.시도.map(g =>
-      `<option value="${g.sido_cd}">${esc(g.이름 || '')}${g.자료 ? '' : ' · 자료 없음'}</option>`).join('');
+      `<option value="${g.sido_cd}">${esc(g.이름 || '')}${수있음(g) ? 단지수말(g) : g.자료 ? '' : ' · 자료 없음'}</option>`).join('');
   } catch (e) { 오류토스트('시·도 목록', null, e); }
   map.on('moveend', () => { clearTimeout(동네.타이머); 동네.타이머 = setTimeout(동네따라가기, 500); });
   동네따라가기();
@@ -5763,7 +5767,7 @@ async function 동네시도(sido, 이동) {
     if (r.error) return 오류토스트('시·군·구 목록', r);
     동네.구 = r.구 || [];
     sel.innerHTML = `<option value="">시·군·구 (${동네.구.length})</option>` + 동네.구.map(g =>
-      `<option value="${g.sgg_cd}">${esc(구이름(g.sgg_nm))}${g.자료 ? '' : ' · 자료 없음'}</option>`).join('');
+      `<option value="${g.sgg_cd}">${esc(구이름(g.sgg_nm))}${수있음(g) ? 단지수말(g) : g.자료 ? '' : ' · 자료 없음'}</option>`).join('');
     sel.disabled = false;
     if (이동) {
       const 있 = 동네.구.filter(g => g.minx != null);
@@ -5795,7 +5799,7 @@ async function 동네구(sgg, 이동) {
     if (r.error) return 오류토스트('동 목록', r);
     동네.동 = (r.동 || []).map(x => ({ ...x, _sgg: sgg })); 동네.동kind = k;
     sel.innerHTML = `<option value="">${동네말(k)} (${동네.동.length})</option>` + 동네.동.map(d =>
-      `<option value="${d.cd}">${esc(d.이름 || '')}${d.경계있음 ? '' : ' · 경계 없음'}</option>`).join('');
+      `<option value="${d.cd}">${esc(d.이름 || '')}${수있음(d) ? 단지수말(d) : d.경계있음 ? '' : ' · 경계 없음'}</option>`).join('');
     sel.disabled = false;
     if (r.말 && 이동) toast(esc(r.말), 4000);
   } catch (e) { 오류토스트('동 목록', null, e); }
@@ -5868,7 +5872,7 @@ async function 리목록(emd) {
     동네.리 = r.리 || []; 동네.리부모 = emd;
     if (!동네.리.length) { $('#acRiRow').hidden = true; return; }
     $('#acRi').innerHTML = `<option value="">리 전체 (${동네.리.length})</option>` + 동네.리.map(x =>
-      `<option value="${x.cd}">${esc(x.이름 || '')}${x.경계있음 ? '' : ' · 경계 없음'}</option>`).join('');
+      `<option value="${x.cd}">${esc(x.이름 || '')}${수있음(x) ? 단지수말(x) : x.경계있음 ? '' : ' · 경계 없음'}</option>`).join('');
     $('#acRiRow').hidden = false;
   } catch (e) { 오류토스트('리 목록', null, e); }
 }
@@ -5990,7 +5994,7 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
     ${구역줄}
     <div class="schrow">${펼.map(칸).join('')}</div>
     ${접.length ? `<details class="zfold"><summary>이 ${급 === '중학교' ? '학교군' : '학군'}의 나머지 ${fmt(접.length)}곳 (1km 밖)</summary><div class="schrow">${접.map(칸).join('')}</div></details>` : ''}
-    ${요 ? `<p class="note sm">${Number(요.r1000) ? `1km 안 ${fmt(요.r1000)}곳` : `1km 안에 없어 가장 가까운 한 곳`} · 2km 안 ${fmt(요.r2000)}곳</p>` : ''}`;   /* '직선거리' 는 정책(공통)에 */
+    ${요 ? `<p class="note sm">${Number(요.r1000) ? `1km 안 ${fmt(요.r1000)}곳` : (목.length > 1 ? `1km 안에 없어 가장 가까운 곳 — 같은 거리 ${fmt(목.length)}곳` : `1km 안에 없어 가장 가까운 한 곳`)} · 2km 안 ${fmt(요.r2000)}곳</p>` : ''}`;   /* '직선거리' 는 정책(공통)에 */
 }
 /* ★ 2026-10-23 학교알리미 공시 한 줄 — 공시값 그대로. 못 이은 까닭을 가른다(안 받음 SCOPE · 받았는데 못 이음 UNSURE · 공시 제외 NA) */
 function 학교공시줄(x) {

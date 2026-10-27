@@ -12,6 +12,7 @@ const { Pool } = require('pg');
 const 설정파일 = path.join(__dirname, '..', 'svc_mode.json');
 let 설정 = { read: false }, 설정읽은때 = 0;
 function 지금설정() {
+  if (process.env.TEOMOONY_DEV === '1') return { read: false };   // 2026-10-27 개발판(5174)은 서비스DB 를 읽지도 쓰지도 않는다 — 단지 상세 = 적재DB + 시험DB(norm.js)
   if (Date.now() - 설정읽은때 > 10000) {
     설정읽은때 = Date.now();
     try { 설정 = JSON.parse(fs.readFileSync(설정파일, 'utf8')); } catch (e) { 설정 = { read: false }; }

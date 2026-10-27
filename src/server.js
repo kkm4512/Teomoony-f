@@ -7,7 +7,33 @@ const { sql, getPool } = require('./db');
    node --watch 창의 글은 남지 않는다 → ../Teomoony/logs/web_life.log 에 적는다(Teomoony-f 밖 — 여기 쓰면 --watch 가 그걸 보고 또 재시작한다).
    ★ 처리 안 된 Promise 거부는 **적고 계속 산다**(Node 24 기본은 프로세스 종료 — 한 요청의 실수로 모든 사용자가 502 를 보게 된다).
    ★ 잡히지 않은 예외는 적고 종료(상태를 믿을 수 없다) — --watch 가 다시 띄운다. */
-const 생사기록 = (말) => { try { fs.appendFileSync(path.join(__dirname, '..', '..', 'Teomoony', 'logs', 'web_life.log'), `${new Date(Date.now() + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 19)} [${process.pid}] ${말}\n`); } catch (e) {} };
+/* ★ 2026-10-27 개발판(TEOMOONY_DEV=1 · 보통 PORT=5174): 사장님 "프론트도 개발로 만들고 그 DB 를 바라보게 해서 실제 속도와 데이터로 재 봐".
+     단지 상세의 주변 상가 · 학교를 시험 DB(src/norm.js)에서. **공개 수치 · 접속 기록 · 운영자 IP · 서비스DB 에는 아무것도 안 쓴다**(서비스DB 읽기도 끈다). */
+const 개발 = process.env.TEOMOONY_DEV === '1';
+const norm = require('./norm');   /* 풀은 처음 쓸 때 만든다 */
+/* ★ 2026-10-27 사장님 "중복 데이터는 매칭 테이블 — 원본을 훼손하지 않으면 채용" — 단지 상세의 주변 상가 · 학교 · '자료 받았나'(scope)를
+     서비스DB 의 매칭 테이블(nm 스키마, etl/nm_build.py)에서 읽는다. 켜기/끄기 = deploy/svc/svc_mode.json 의 "norm" (개발판은 늘 켬).
+     ★ 서비스DB 가 실패하면 **그 질의만 지금 적재DB 질의로** 돌아간다(화면은 산다). ?_nm=0 이면 적재DB 질의(대조용). */
+let 정규실패 = 0, 정규쉬는끝 = 0;
+function 정규켜짐(req) {
+  if (req && req.query && req.query._nm === '0') return false;
+  if (개발) return true;
+  if (Date.now() < 정규쉬는끝) return false;
+  try { return require('./svc').지금설정().norm === true; } catch { return false; }
+}
+function 정규길(이름, id, req, 원래) {
+  return async () => {
+    if (!정규켜짐(req)) return 원래();
+    try { const r = await norm[이름](id); 정규실패 = 0; return r; }
+    catch (e) {
+      if (개발) throw e;
+      if (++정규실패 >= 5) { 정규쉬는끝 = Date.now() + 30000; 정규실패 = 0; }
+      console.error(`[nm] ${이름} 실패 → 적재DB 질의로 — ${e.message}`);
+      return 원래();
+    }
+  };
+}
+const 생사기록 = (말) => { try { fs.appendFileSync(path.join(__dirname, '..', '..', 'Teomoony', 'logs', 개발 ? 'web_life_dev.log' : 'web_life.log'), `${new Date(Date.now() + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 19)} [${process.pid}] ${말}\n`); } catch (e) {} };
 생사기록('시작');
 process.on('unhandledRejection', (e) => { 생사기록('처리 안 된 거부(계속 삶): ' + (e && e.stack || e)); });
 process.on('uncaughtException', (e) => { 생사기록('잡히지 않은 예외(종료): ' + (e && e.stack || e)); process.exit(1); });
@@ -196,6 +222,7 @@ function 이용_이름(req) {
 }
 
 function 이용_동작(req) {
+  if (개발) return null;   // 개발판은 공개 수치에 안 센다
   if (이용_안세는호스트.has(req.hostname)) return null;   // 이 PC 안(사장님이 PC 에서 · 제가 확인하며 여는 것) — 안 센다
   if (운영자IP.has(진짜IP(req))) return null;          // 315: 운영자(사장님) 접속은 공개 수치에서 뺀다
   /* ★ 2026-10-26 사장님 "나나 너는 제외해 줘" — root 토큰을 단 요청이면 IP 를 몰라도 뺀다(휴대폰처럼 IP 가 자주 바뀌는 곳) · 그 IP 도 운영자로 적는다 */
@@ -227,6 +254,7 @@ async function 운영자IP읽기() {
 }
 운영자IP읽기(); setInterval(운영자IP읽기, 10 * 60 * 1000).unref();
 function 운영자IP더하기(req, 근거) {
+  if (개발) return;
   const ip = 진짜IP(req);
   if (!ip || 운영자IP.has(ip) || 이용_안세는호스트.has(req.hostname)) return;
   운영자IP.add(ip);
@@ -346,6 +374,7 @@ app.use((req, res, next) => {
   const 로그인 = req.method === 'POST' && p === '/api/login';
   if ((req.method !== 'GET' && !로그인) || p.startsWith('/api/_')) return next();
   res.on('finish', () => {
+    if (개발) return;   /* 개발판은 접속 기록에 안 쓴다 */
     if (기록_줄.length >= 기록_상한) return;   /* 넘치면 조용히 버린다 — 서버가 먼저다 */
     기록_줄.push({
       때: 이용_시각(),
@@ -377,10 +406,22 @@ function 이용_시각(밀리 = Date.now()) {
        + 'T' + 두(k.getUTCHours()) + ':' + 두(k.getUTCMinutes()) + ':' + 두(k.getUTCSeconds());
 }
 
+/* ★ 2026-10-27 17:05: 150줄씩 15초에 한 번이면 1초에 10줄밖에 못 넣는다 — 서비스DB 전체 발행(초당 수십 건, 이 PC 안 요청)이 돌면
+   기록이 한 시간 넘게 밀리고(16:57 것을 17:05 에 넣는 중) 넘치면 버렸다. 이제 한 번에 다 비울 때까지(최대 40묶음 = 6,000줄) 잇달아 넣는다. */
 async function 기록_내보내기() {
   if (기록_넣는중 || !기록_줄.length) return;
+  for (let 묶음 = 0; 묶음 < 40 && 기록_줄.length && !기록_넣는중; 묶음++) {
+    const 앞 = 기록_줄.length;
+    await 기록_한묶음();
+    if (기록_줄.length >= 앞) break;   /* 못 넣었다(돌려놓음) — 다음 차례에 */
+  }
+}
+async function 기록_한묶음() {
+  if (기록_넣는중 || !기록_줄.length) return;
   기록_넣는중 = true;
-  const 담음 = 기록_줄.splice(0, 500);
+  /* ★ 2026-10-27 한 번에 150줄까지 — 줄마다 칸 13개라 500줄이면 매개변수 6,500개로 SQL Server 한도(2,100)를 넘어 통째로 실패했다.
+     10-26 22:33 부터 접속 기록이 한 줄도 안 쌓였다(실패분을 앞에 돌려놓고 다시 500줄 → 또 실패). 13 × 150 = 1,950. */
+  const 담음 = 기록_줄.splice(0, 150);
   try {
     const pool = await getPool();
     const r = pool.request();
@@ -425,8 +466,7 @@ async function 기록_정리() {
     if (n) console.log(`[접속기록] 90일 지난 ${n}줄 지웠다`);
   } catch (e) { console.error('[접속기록] 정리 실패 —', e.message); }
 }
-setInterval(기록_정리, 6 * 3600 * 1000).unref();
-setTimeout(기록_정리, 5 * 60 * 1000).unref();   /* 뜨고 5분 뒤 한 번 */
+if (!개발) { setInterval(기록_정리, 6 * 3600 * 1000).unref(); setTimeout(기록_정리, 5 * 60 * 1000).unref(); }   /* 뜨고 5분 뒤 한 번 */
 
 /* 이용현황 조회 — 누구나 본다 */
 /* 2026-10-24 서비스DB(PostgreSQL) 읽기 — 발행된 단지 응답이 있으면 그걸 보내고, 없으면 아래 기존 경로(적재DB). 끄기: svc_mode.json read:false (src/svc.js) */
@@ -5190,6 +5230,17 @@ const 시군구다수결 = `
    받은 자료가 있는지는 따로 적는다(자료 = 행정동 경계 · 법정동 경계 · 단지 중 하나라도). 없는 곳은 '자료 없음'.
    ★ 일반구가 있는 시(안양시 41170 → 만안구 41171 · 동안구 41173)는 **일반구만** 보인다 — 읍면동이 일반구 밑에 있다.
      부모·자식은 코드로 가른다: 앞 4자리가 같고 끝이 0 인 것이 부모. 이름으로 안 가른다. */
+/* ★ 2026-10-27 사장님 "법정동이나 행정동 고를 때 단지 개수가 몇 개 있는지도" — 서비스DB 의 svc.area_cnt(마커 표를 발행할 때 **그 마커 그대로** 센 것).
+   지도에 찍히는 단지 수와 같다. 서비스DB 를 못 읽으면 수를 안 적는다(틀린 수보다 빈칸). 표에 없는 곳 = 0. */
+async function 단지수(kind, cds) {
+  try {
+    const svc = require('./svc');
+    if (!svc.지금설정().read || !cds.length) return null;
+    const r = await svc.pg().query('SELECT cd, n FROM svc.area_cnt WHERE kind = $1 AND cd = ANY($2)', [kind, cds]);
+    const m = new Map(r.rows.map(x => [x.cd, x.n]));
+    return cd => m.get(cd) || 0;
+  } catch { return null; }
+}
 app.get('/api/areas/sido', async (req, res) => {
   try {
     const pool = await getPool();
@@ -5202,7 +5253,8 @@ app.get('/api/areas/sido', async (req, res) => {
         FROM meta.lawd_code l
        WHERE l.sgg_nm IS NULL AND l.emd_nm IS NULL AND l.ri_nm IS NULL AND l.is_abolished = 0
        ORDER BY CASE l.sido_cd WHEN '11' THEN 0 WHEN '41' THEN 1 ELSE 2 END, l.lawd_cd`);
-    res.json({ 시도: r.recordset });
+    const 수 = await 단지수('sido', r.recordset.map(x => x.sido_cd));
+    res.json({ 시도: 수 ? r.recordset.map(x => ({ ...x, 단지수: 수(x.sido_cd) })) : r.recordset });
   } catch (e) { fail(res, e, 'areas-sido'); }
 });
 
@@ -5239,7 +5291,8 @@ app.get('/api/areas/sgg', async (req, res) => {
                     WHERE LEFT(k.sgg_cd, 4) = LEFT(l.sgg_cd, 4) AND k.sgg_cd <> l.sgg_cd
                       AND k.emd_nm IS NULL AND k.ri_nm IS NULL AND k.sgg_nm IS NOT NULL AND k.is_abolished = 0))
        ORDER BY l.lawd_cd`);
-    const 구 = r.recordset.map(x => ({ ...x, 자료: (x.행정동 || x.법정동경계 || x.단지) ? 1 : 0 }));
+    const 수 = await 단지수('sgg', r.recordset.map(x => x.sgg_cd));
+    const 구 = r.recordset.map(x => ({ ...x, 자료: (x.행정동 || x.법정동경계 || x.단지) ? 1 : 0, ...(수 ? { 단지수: 수(x.sgg_cd) } : {}) }));
     res.json({ 출처: '목록 = 법정동코드(행정안전부) · 구 상자 = 통계청 SGIS 행정동 경계 또는 VWorld 법정동 경계',
                sido: sido || null, 구, 자료있음: 구.filter(x => x.자료).length });
   } catch (e) { fail(res, e, 'areas-sgg'); }
@@ -5278,6 +5331,8 @@ app.get('/api/areas/dongs', async (req, res) => {
                       AND c2.rep_pnu <= CAST(@sgg + '99999999999999' AS CHAR(19))))
            ORDER BY l.emd_nm`);
     const 경계없음 = r.recordset.filter(x => !x.경계있음).length;
+    const 수 = await 단지수(kind === 'adm' ? 'adm' : 'emd', r.recordset.map(x => x.cd));
+    if (수) r.recordset.forEach(x => { x.단지수 = 수(x.cd); });
     res.json({ kind, sgg, 동: r.recordset, 경계없음,
                말: !r.recordset.length
                    ? (kind === 'adm' ? `이 지역의 행정동 경계는 아직 받지 않았습니다${((await 범위표()) || {}).말 ? `(${_범위.말}만 있습니다)` : ''}` : '이 지역의 법정동이 없습니다')
@@ -5302,6 +5357,8 @@ app.get('/api/areas/ris', async (req, res) => {
         LEFT JOIN silver.ri_boundary b ON b.lawd_cd = l.lawd_cd AND b.is_current = 1
        WHERE LEFT(l.lawd_cd, 8) = @e8 AND l.ri_nm IS NOT NULL AND l.is_abolished = 0
        ORDER BY l.ri_nm, l.lawd_cd`);
+    const 수 = await 단지수('ri', r.recordset.map(x => x.cd));
+    if (수) r.recordset.forEach(x => { x.단지수 = 수(x.cd); });
     res.json({ emd, 리: r.recordset, 경계없음: r.recordset.filter(x => !x.경계있음).length });
   } catch (e) { fail(res, e, 'areas-ris'); }
 });
@@ -5901,7 +5958,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        ① K-apt 대상이 아닌 단지(150세대 미만) ② 그 법정동에 K-apt 미적재
        ③ 적재는 됐는데 1:1 연결이 안 섬. ②③ 은 화면이 말해야 한다.
        (관리비 138단지 중 87개가 ③ 으로 화면에 못 온다) */
-    const _q_scope = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_scope = 정규길('scope', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-21: 적재 중 표의 잠금을 기다리지 않는다 (11-145) */
       
       /* **이 법정동에 그 축을 적재했는가.** 축마다 적재 범위가 다르다.
@@ -5934,7 +5991,7 @@ app.get('/api/complexes/:id', async (req, res) => {
                         JOIN silver.bld_title t2 ON t2.mgm_bldrgst_pk = f.mgm_bldrgst_pk
                                                 AND t2.is_current = 1
                         WHERE f.is_current=1 AND t2.sigungu_cd + t2.bjdong_cd = @lawd)
-                      THEN 1 ELSE 0 END;`);
+                      THEN 1 ELSE 0 END;`));
 
     /* ---------- 동 x 층 ----------
        층별개요(getBrFlrOulnInfo)에서 온다. 한 동의 한 층에 용도가 여럿이면 행도
@@ -5946,7 +6003,7 @@ app.get('/api/complexes/:id', async (req, res) => {
       SELECT TOP 2000 동, 층, 층명, 용도, 면적, 구획수, 주부속
         FROM gold.v_complex_floor
        WHERE complex_id = @id
-       ORDER BY 동, 층 DESC`);
+       ORDER BY 동, 층 DESC, 층명, 용도, 면적, 구획수, 주부속`   /* 2026-10-27 같은 동·층 여러 줄의 순서 고정(전엔 열 때마다 바뀔 수 있었다) */);
 
     /* ---------- 동 x 층 x 호 ----------
        전유부(getBrExposInfo)에서 온다. **조인이 전부 PK 다** — 전유부 PK -> 기본개요
@@ -6170,7 +6227,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        ★ **소분류**로 센다. 대분류(음식/소매/수리·개인)는 분류 체계의 말이지
          사람 말이 아니다 - 사람은 "편의점·카페·약국" 으로 생각한다.
          (화면에서 '수리·개인 59' 를 보고 고쳤다) */
-    const _q_poi = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_poi = 정규길('poi', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SELECT 소분류 = v.inds_scls_nm, 대분류 = v.inds_lcls_nm,
              r300  = SUM(CASE WHEN v.dist_m <= 300 THEN 1 ELSE 0 END),
              r500  = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
@@ -6180,14 +6237,15 @@ app.get('/api/complexes/:id', async (req, res) => {
       FROM gold.v_complex_poi v
       WHERE v.complex_id = @id AND v.inds_scls_nm IS NOT NULL
       GROUP BY v.inds_scls_nm, v.inds_lcls_nm
-      ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC`);
+      /* ★ 2026-10-27 500m 수가 같은 업종끼리 순서가 정해져 있지 않았다(열 때마다 바뀔 수 있음) → 1km 수 · 가까운 거리 · 이름으로 고정 */
+      ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, MIN(v.dist_m), v.inds_scls_nm`));
 
     /* 업종 다양성은 **중분류 distinct** 다. 소분류별 행을 더해서는 못 구한다. */
-    const _q_poiSum = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_poiSum = 정규길('poiSum', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SELECT 업종수500 = COUNT(DISTINCT CASE WHEN v.dist_m <= 500 THEN v.inds_mcls_cd END),
              업종수1000 = COUNT(DISTINCT v.inds_mcls_cd),
              단지내 = SUM(v.on_site)
-      FROM gold.v_complex_poi v WHERE v.complex_id = @id`);
+      FROM gold.v_complex_poi v WHERE v.complex_id = @id`));
 
     /* 브랜드 — ★ 이건 **코드가 아니라 상호명 문자열 매칭**이다.
        · 상호가 한글 음차로 들어온다: GS25 -> '지에스25', CU -> '씨유',
@@ -6200,14 +6258,14 @@ app.get('/api/complexes/:id', async (req, res) => {
          CU -> '씨유'. 영문 표기(GS25/CU/7-ELEVEN/EMART24)도 226 에서 더했다.
          그래도 편의점 기준 **82.8%** 라
          **"있다" 는 말할 수 있어도 "없다" 는 말할 수 없다.** 화면에 그렇게 적혀 있다. */
-    const _q_poiBrand = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_poiBrand = 정규길('poiBrand', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SELECT 브랜드 = v.brand,
              r500 = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
              r1000 = COUNT(*), 최단m = MIN(CAST(v.dist_m AS INT))
         FROM gold.v_complex_poi v
        WHERE v.complex_id = @id AND v.brand IS NOT NULL
        GROUP BY v.brand
-       ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, MIN(v.dist_m)`);
+       ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, MIN(v.dist_m), v.brand`));
 
     /* 생활 편의 묶음 (2026-10-19)
        ★ **이 묶음은 우리가 정한 것이다.** 원본 분류에 '생활 편의' 라는 축은 없다.
@@ -6224,7 +6282,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        같은 분류가 필요하다. 규칙을 두 군데 적으면 **언젠가 갈라진다** — 오늘 실거래에서
        마커와 상세가 서로 다른 WHERE 를 들고 있어 한 화면에서 숫자가 어긋났다(11-81).
        같은 사실은 한 곳에서만 만든다. */
-    const _q_poiLife = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_poiLife = 정규길('poiLife', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SELECT 항목 = v.life,
              r500  = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
              r1000 = COUNT(*), 최단m = MIN(CAST(v.dist_m AS INT)),
@@ -6247,7 +6305,7 @@ app.get('/api/complexes/:id', async (req, res) => {
                                WHEN N'당구장·볼링장' THEN 28 ELSE 99 END
         FROM gold.v_complex_poi v
        WHERE v.complex_id = @id AND v.life IS NOT NULL
-       GROUP BY v.life ORDER BY ord`);
+       GROUP BY v.life ORDER BY ord`));
 
     /* 상권의 변화(2025-06 분기 CSV ↔ 지금 스냅샷)는 **2026-10-21 에 뺐다**(사장님과 정함, CONTEXT 11-144).
        ★ 바뀐 수(147곳 중 −12 / +20 = 8~14%)가 **재는 오차(상가번호 유지율 871/1000 = 13% 흔들림)만큼** 작았다.
@@ -6373,7 +6431,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        ★ 거리로 학군을 말하면 그럴듯하게 틀린다. 이게 **배정**이다.
        ★ 단지 **중심점 한 점**으로 판정한다. 큰 단지는 경계에 걸칠 수 있다.
          동마다 다를 수 있다는 뜻이고, 화면에 그렇게 적는다. */
-    const _q_schoolZone = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_schoolZone = 정규길('schoolZone', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-21: 학구도 적재 중 잠금 대기 막기(szScope 와 같은 이유) */
       /* ★ 좌표가 없으면 Point 를 만들지 않는다 - 상세 전체가 죽는다(2026-10-19).
          geography 쪽만 고치고 여기를 놓쳐 같은 에러를 두 번 봤다.
@@ -6413,17 +6471,18 @@ app.get('/api/complexes/:id', async (req, res) => {
         OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
                             교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
                        FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
-       ORDER BY CASE z.급 WHEN N'초등학교' THEN 1 WHEN N'중학교' THEN 2 ELSE 3 END, z.구역, 거리m`);
+       ORDER BY CASE z.급 WHEN N'초등학교' THEN 1 WHEN N'중학교' THEN 2 ELSE 3 END, z.구역, 거리m, k.school_id`));
 
     /* 주변 학교 (2026-10-19)
        ★ 상권 데이터에는 학교가 **0건**이다. 전혀 다른 출처다 -
          전국초중등학교위치표준데이터(교육부/한국교육시설안전원, data.go.kr 15021148).
        ★ 거리는 직선거리다. 도보도 아니고 **배정(학구도)은 더더욱 아니다.**
          통학구역은 교육지원청이 정하고 그 데이터는 우리에게 없다. */
-    const _q_schools = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_schools = 정규길('schools', id, req, () => pool.request().input('id', sql.Int, id).query(`
       WITH v AS (SELECT * FROM gold.v_complex_school WHERE complex_id = @id),
+      /* ★ 2026-10-27 같은 거리(같은 자리 — 한 캠퍼스 두 학교)면 학교ID 순으로 고정(전엔 열 때마다 다른 학교가 뽑힐 수 있었다) */
       n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
-                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m)
+                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m, school_id)
               FROM v),
       a AS (SELECT school_se,
                    r500  = SUM(CASE WHEN dist_m <=  500 THEN 1 ELSE 0 END),
@@ -6453,7 +6512,9 @@ app.get('/api/complexes/:id', async (req, res) => {
            학교급마다 1km 안 전부(가까운 순), 1km 안에 없으면 2km 안 가장 가까운 한 곳. 거리는 위 요약 · AI 검색과 **같은 뷰**(v_complex_school). */
       WITH v AS (SELECT * FROM gold.v_complex_school WHERE complex_id = @id),
       n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
-                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m),
+                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m, school_id),
+                   /* ★ 2026-10-27 사장님 "둘 다 보여줘" — 1km 안에 없을 때 '가장 가까운 곳' 이 같은 거리로 여럿이면 전부 */
+                   rk = RANK() OVER (PARTITION BY school_se ORDER BY dist_m),
                    k1 = SUM(CASE WHEN dist_m <= 1000 THEN 1 ELSE 0 END) OVER (PARTITION BY school_se)
               FROM v)
       SELECT n.school_id, 학교급 = n.school_se, 이름 = n.school_nm, 설립 = n.fond_type, 분교 = n.bnhh_se, 거리m = CAST(n.dist_m AS INT),
@@ -6469,8 +6530,8 @@ app.get('/api/complexes/:id', async (req, res) => {
         OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
                             교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
                        FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
-       WHERE n.dist_m <= 1000 OR (n.k1 = 0 AND n.rn = 1)
-       ORDER BY ord, n.dist_m`);
+       WHERE n.dist_m <= 1000 OR (n.k1 = 0 AND n.rk = 1)
+       ORDER BY ord, n.dist_m, n.school_id`));
 
     /* 유치원 (유치원알리미, 교육부)  2026-10-19
        ★ 학교(초·중·고)만 있으면 '애 키우기' 는 절반만 보인다.
