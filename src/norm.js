@@ -24,7 +24,7 @@ async function poi(id) {
       sum(CASE WHEN d <= 300 THEN 1 ELSE 0 END)::int AS r300, sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END)::int AS r500,
       count(*)::int AS r1000, min(trunc(d))::int AS "최단m", sum(on_site)::int AS "단지내"
     FROM v WHERE inds_scls_nm IS NOT NULL GROUP BY inds_scls_nm, inds_lcls_nm
-    ORDER BY sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END) DESC, count(*) DESC, min(d), inds_scls_nm COLLATE svc.ko_ci`, [id]);
+    ORDER BY sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END) DESC, count(*) DESC, min(d), inds_scls_nm COLLATE "C"`, [id]);
   return 모양(r.rows);
 }
 async function poiSum(id) {
@@ -35,7 +35,7 @@ async function poiSum(id) {
 async function poiBrand(id) {
   const r = await pg().query(V_POI + `SELECT brand AS "브랜드", sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END)::int AS r500,
       count(*)::int AS r1000, min(trunc(d))::int AS "최단m"
-    FROM v WHERE brand IS NOT NULL GROUP BY brand ORDER BY sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END) DESC, min(d), brand COLLATE svc.ko_ci`, [id]);
+    FROM v WHERE brand IS NOT NULL GROUP BY brand ORDER BY sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END) DESC, min(d), brand COLLATE "C"`, [id]);
   return 모양(r.rows);
 }
 const 생활순서 = [['편의점',1],['마트·슈퍼',2],['카페',3],['빵집',4],['음식점',5],['주점',6],['약국',7],['내과·소아과',8],['치과',9],['한의원',10],
@@ -113,4 +113,74 @@ async function scope(id) {
     FROM (SELECT $1::int AS id) x LEFT JOIN complex_lawd l ON l.complex_id = x.id LEFT JOIN lawd_scope s ON s.lawd = l.lawd`, [id]);
   return 모양(r.rows);
 }
-module.exports = { poi, poiSum, poiBrand, poiLife, schoolZone, schools, scope };
+
+/* ---------- 10-27 2차: 학원 · 유치원 · 지하철 · 버스 · 받았나(유치원 · 학구도 · 공시가격) ----------
+   ★ 거리가 같으면 이름(가나다) → ID 순(사장님 "순서 없는 것은 ID · 가시성은 가나다"). 적재DB 질의(server.js)도 같은 순서로 고쳤다.
+     이름 비교는 **글자 코드 순**(PG "C" = SQL Server BIN2 — 한글은 가나다, 영문·숫자는 아스키). 언어 규칙 정렬은 두 DB 가 '-' 같은 기호를 달리 다뤄 갈렸다(9-3 vs 900). */
+const 시군구 = `(SELECT left(lawd, 5) FROM complex_lawd WHERE complex_id = $1)`;
+const 받았나 = 자료 => `CASE WHEN EXISTS (SELECT 1 FROM coverage WHERE "자료" = '${자료}' AND sgg_cd IN (${시군구}, left(${시군구}, 4) || '0')) THEN 1 ELSE 0 END`;
+async function aca(id) {
+  const V = `WITH c AS (SELECT * FROM cpt WHERE complex_id = $1 AND is_active = 1),
+    v AS MATERIALIZED (SELECT a.academy_sk, a.aca_nm, a.realm_sc_nm, a.le_crse_nm, a.grp, ST_Distance(a.g, c.g) AS d FROM academy a, c WHERE ST_DWithin(a.g, c.g, 1000)) `;
+  const q = pg();
+  const [a, b, t] = await Promise.all([
+    q.query(V + `SELECT coalesce(grp, '99 분류 못 함') AS "묶음", sum(CASE WHEN d <= 500 THEN 1 ELSE 0 END)::int AS r500, count(*)::int AS r1000,
+                        min(trunc(d))::int AS "최단m" FROM v GROUP BY coalesce(grp, '99 분류 못 함') ORDER BY coalesce(grp, '99 분류 못 함') COLLATE svc.ko_ci`, [id]),
+    q.query(V + `SELECT aca_nm AS "이름", realm_sc_nm AS "분야", le_crse_nm AS "과정", trunc(d)::int AS "거리m", (count(*) OVER ())::int AS "전체500"
+                   FROM v WHERE d <= 500 ORDER BY d, aca_nm COLLATE "C", academy_sk LIMIT 8`, [id]),
+    q.query(`SELECT "전체", "좌표있음" FROM academy_total`)]);
+  return 모양(a.rows, b.rows, t.rows);
+}
+async function kinders(id) {
+  const r = await pg().query(`WITH c AS (SELECT * FROM cpt WHERE complex_id = $1 AND is_active = 1),
+    v AS (SELECT k.*, ST_Distance(c.g, k.g) AS d FROM kinder k, c WHERE ST_DWithin(c.g, k.g, 500)),
+    n AS (SELECT v.*, row_number() OVER (ORDER BY d, kinder_nm COLLATE "C", kinder_cd) AS rn FROM v)
+    SELECT kinder_cd, kinder_nm AS "이름", establish AS "설립", cap_cnt AS "정원", pupil_cnt AS "원아", class_cnt AS "학급", pbnt_tmng AS "공시",
+           oper_time AS "운영시간", trunc(d)::int AS "거리m", (count(*) OVER ())::int AS "전체"
+      FROM n WHERE rn <= 8 ORDER BY d, kinder_nm COLLATE "C", kinder_cd`, [id]);
+  return 모양(r.rows);
+}
+async function subways(id) {
+  const r = await pg().query(`WITH c AS (SELECT * FROM cpt WHERE complex_id = $1 AND is_active = 1),
+    v AS (SELECT s.*, ST_Distance(s.g, c.g) AS d FROM subway s, c WHERE ST_DWithin(s.g, c.g, 1500)),
+    g AS (SELECT sttn_nm AS "역", string_agg(line_nm, ' · ' ORDER BY line_nm COLLATE svc.ko_ci) AS "노선", trunc(min(d))::int AS "최단m",
+                 max(CASE WHEN transfer_se LIKE '%환승역%' THEN 1 ELSE 0 END) AS "환승" FROM v GROUP BY sttn_nm)
+    SELECT "역", "노선", "최단m", "환승", (count(*) OVER ())::int AS "전체" FROM g ORDER BY "최단m", "역" COLLATE "C" LIMIT 4`, [id]);
+  return 모양(r.rows);
+}
+/* gold.v_complex_bus 와 같은 뜻: 500m 안 정류장 · 같은 도시 · 같은 ARS(없으면 정류장ID)는 가까운 한 곳(같은 거리면 정류장ID) */
+const V_BUS = `WITH c AS (SELECT * FROM cpt WHERE complex_id = $1 AND is_active = 1),
+  b AS MATERIALIZED (SELECT s.stop_no, s.stop_nm, s.ars_no, s.city_code, ST_Distance(s.g, c.g) AS d FROM bus_stop s, c WHERE ST_DWithin(s.g, c.g, 500)),
+  v AS (SELECT * FROM (SELECT b.*, row_number() OVER (PARTITION BY city_code, coalesce(ars_no, stop_no) ORDER BY d, stop_no) AS rn0 FROM b) x WHERE rn0 = 1) `;
+async function busStops(id) {
+  const r = await pg().query(V_BUS + `, w AS (SELECT v.*, row_number() OVER (ORDER BY d, stop_nm COLLATE "C", stop_no) AS rn FROM v)
+    SELECT sum(CASE WHEN d <= 300 THEN 1 ELSE 0 END)::int AS r300, count(*)::int AS r500, trunc(min(d))::int AS "최단m",
+           max(CASE WHEN rn = 1 THEN stop_nm END) AS "가까운곳", ${받았나('버스정류장')} AS "적재" FROM w`, [id]);
+  return 모양(r.rows);
+}
+async function busList(id) {
+  const r = await pg().query(V_BUS + `, w AS (SELECT v.*, row_number() OVER (ORDER BY d, stop_nm COLLATE "C", stop_no) AS rn, (count(*) OVER ())::int AS "전체" FROM v)
+    SELECT stop_nm AS "정류장", ars_no AS ars, trunc(d)::int AS "거리m", "전체" FROM w WHERE rn <= 20 ORDER BY d, stop_nm COLLATE "C", stop_no`, [id]);
+  return 모양(r.rows);
+}
+async function busRoutes(id) {
+  const r = await pg().query(V_BUS + `, w AS (SELECT ars_no, CASE WHEN ars_no ~ '^\\s*[+-]?[0-9]{1,9}\\s*$' THEN right('00000' || ars_no, 5) END AS ars5, d FROM v)
+    SELECT r.route_abrv AS "번호", r.route_type AS "종류", trunc(min(w.d))::int AS "최단m"
+      FROM w CROSS JOIN c
+      JOIN bus_route_station rs ON (rs.ars_no = w.ars_no OR rs.ars_no = w.ars5) AND ST_DWithin(rs.g, c.g, 700)
+      JOIN bus_route r ON r.route_id = rs.route_id
+     GROUP BY r.route_abrv, r.route_type
+     ORDER BY CASE r.route_type WHEN '3' THEN 1 WHEN '4' THEN 2 WHEN '2' THEN 3 WHEN '6' THEN 4 WHEN '15' THEN 5 ELSE 9 END, min(w.d), r.route_abrv COLLATE "C"`, [id]);
+  return 모양(r.rows);
+}
+async function kinderN(id) { const r = await pg().query(`SELECT ${받았나('유치원')} AS n`, [id]); return 모양(r.rows); }
+async function szScope(id) {
+  const r = await pg().query(`SELECT CASE WHEN EXISTS (SELECT 1 FROM school_zone z WHERE (z.sd_cd || z.sgg_cd) = ${시군구}) THEN 1 ELSE 0 END AS "받았나"`, [id]);
+  return 모양(r.rows);
+}
+async function prcScope(id) {
+  const r = await pg().query(`SELECT g."받은건수", g.api_total AS "전체건수", g."받은페이지", g."빠진페이지", g."실패"
+    FROM complex_lawd l JOIN load_gap g ON g.sgg_cd = left(l.lawd, 5) AND g.bjdong_cd = substr(l.lawd, 6, 5) WHERE l.complex_id = $1`, [id]);
+  return 모양(r.rows);
+}
+module.exports = { poi, poiSum, poiBrand, poiLife, schoolZone, schools, scope, aca, kinders, subways, busStops, busList, busRoutes, kinderN, szScope, prcScope };

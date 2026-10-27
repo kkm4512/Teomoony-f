@@ -6238,7 +6238,7 @@ app.get('/api/complexes/:id', async (req, res) => {
       WHERE v.complex_id = @id AND v.inds_scls_nm IS NOT NULL
       GROUP BY v.inds_scls_nm, v.inds_lcls_nm
       /* ★ 2026-10-27 500m 수가 같은 업종끼리 순서가 정해져 있지 않았다(열 때마다 바뀔 수 있음) → 1km 수 · 가까운 거리 · 이름으로 고정 */
-      ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, MIN(v.dist_m), v.inds_scls_nm`));
+      ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, MIN(v.dist_m), v.inds_scls_nm COLLATE Latin1_General_BIN2`));
 
     /* 업종 다양성은 **중분류 distinct** 다. 소분류별 행을 더해서는 못 구한다. */
     const _q_poiSum = 정규길('poiSum', id, req, () => pool.request().input('id', sql.Int, id).query(`
@@ -6265,7 +6265,7 @@ app.get('/api/complexes/:id', async (req, res) => {
         FROM gold.v_complex_poi v
        WHERE v.complex_id = @id AND v.brand IS NOT NULL
        GROUP BY v.brand
-       ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, MIN(v.dist_m), v.brand`));
+       ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, MIN(v.dist_m), v.brand COLLATE Latin1_General_BIN2`));
 
     /* 생활 편의 묶음 (2026-10-19)
        ★ **이 묶음은 우리가 정한 것이다.** 원본 분류에 '생활 편의' 라는 축은 없다.
@@ -6320,7 +6320,7 @@ app.get('/api/complexes/:id', async (req, res) => {
          없고(실측), 지하철역 좌표를 주는 살아있는 오픈API 는 사실상 없다.
        ★ 한 역이 여러 노선이면 줄이 여러 개다 -> **역사명으로 묶는다.**
          안 묶으면 공덕역 하나가 세 역처럼 보인다. */
-    const _q_subways = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_subways = 정규길('subways', id, req, () => pool.request().input('id', sql.Int, id).query(`
       /* ★ 2026-10-21: TOP 4 로 **조용히 자르고 있었다.** 창덕궁은 1.5km 안에
          역이 5곳인데 4곳만 보이고, 머리글의 숫자도 4 였다 — 사용자는 그게
          전부인 줄 안다. 자르는 건 그대로 두되 **몇 곳 중 몇 곳인지 같이 낸다.**
@@ -6334,9 +6334,9 @@ app.get('/api/complexes/:id', async (req, res) => {
                환승 = MAX(CASE WHEN transfer_se LIKE N'%환승역%' THEN 1 ELSE 0 END)
           FROM v GROUP BY sttn_nm)
       SELECT TOP 4 역, 노선, 최단m, 환승, 전체 = COUNT(*) OVER ()
-        FROM g ORDER BY 최단m`);
+        FROM g ORDER BY 최단m, 역 COLLATE Latin1_General_BIN2`));
 
-    const _q_busStops = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_busStops = 정규길('busStops', id, req, () => pool.request().input('id', sql.Int, id).query(`
       /* 같은 승강장이 서울BIS/경기BIS 두 줄로 오는 건 뷰에서 이미 묶었다.
          ★ 'Cannot perform an aggregate function on an expression containing
            an aggregate or a subquery' 를 **세 번째** 당했다(2026-10-19).
@@ -6344,8 +6344,8 @@ app.get('/api/complexes/:id', async (req, res) => {
            가장 가까운 한 줄은 **ROW_NUMBER 로 미리 찍어두고** 집계한다.
            (MIN(CASE WHEN dist_m = (SELECT MIN...)) 같은 모양을 다시 쓰지 말 것) */
       WITH v AS (
-        SELECT stop_nm, dist_m,
-               rn = ROW_NUMBER() OVER (ORDER BY dist_m)
+        SELECT stop_nm, stop_no, dist_m,
+               rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no)
           FROM gold.v_complex_bus WHERE complex_id = @id)
       SELECT r300 = SUM(CASE WHEN dist_m <= 300 THEN 1 ELSE 0 END),
              r500 = COUNT(*), 최단m = CAST(MIN(dist_m) AS INT),
@@ -6353,7 +6353,7 @@ app.get('/api/complexes/:id', async (req, res) => {
              /* ★ '없다' 와 '아직 안 받았다' 를 가른다. 이게 비면 화면이
                 "500m 안에 정류장이 없습니다" 라고 **거짓말**을 한다. */
              적재 = ${받았나SQL('버스정류장', 단지시군구SQL)}   /* ★ 2026-10-24: 전국 건수가 아니라 이 시군구 */
-        FROM v`);
+        FROM v`));
 
     /* 이 단지 앞에 서는 버스 번호 (2026-10-19)
        출처: 서울특별시_노선정보조회 서비스 (data.go.kr 15000193, 공공누리 1유형)
@@ -6378,16 +6378,16 @@ app.get('/api/complexes/:id', async (req, res) => {
        번호 칩은 노선이라 단위가 다르다. 사용자가 "버스 번호만 보여주고 정류장은
        안 보여준다" 고 했고, 맞는 말이었다.
        ★ 20곳에서 자르되 **전체 수를 같이 낸다**(작업방식 10장 규칙 2). */
-    const _q_busList = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_busList = 정규길('busList', id, req, () => pool.request().input('id', sql.Int, id).query(`
       WITH v AS (
-        SELECT stop_nm, ars_no, dist_m,
-               rn = ROW_NUMBER() OVER (ORDER BY dist_m),
+        SELECT stop_nm, ars_no, stop_no, dist_m,
+               rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no),
                전체 = COUNT(*) OVER ()
           FROM gold.v_complex_bus WHERE complex_id = @id)
       SELECT 정류장 = stop_nm, ars = ars_no, 거리m = CAST(dist_m AS INT), 전체
-        FROM v WHERE rn <= 20 ORDER BY dist_m`);
+        FROM v WHERE rn <= 20 ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no`));
 
-    const _q_busRoutes = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_busRoutes = 정규길('busRoutes', id, req, () => pool.request().input('id', sql.Int, id).query(`
       DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326)
                                 FROM gold.complex
                                WHERE complex_id = @id
@@ -6424,7 +6424,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        GROUP BY r.route_abrv, r.route_type
        ORDER BY CASE r.route_type WHEN '3' THEN 1 WHEN '4' THEN 2 WHEN '2' THEN 3
                                   WHEN '6' THEN 4 WHEN '15' THEN 5 ELSE 9 END,
-                MIN(v.dist_m)`);
+                MIN(v.dist_m), r.route_abrv COLLATE Latin1_General_BIN2`));
 
     /* 배정 초등학교(학구도) (2026-10-19)
        출처: 한국교육시설안전원_초등학교통학구역 (data.go.kr 15159265, SHP)
@@ -6541,17 +6541,17 @@ app.get('/api/complexes/:id', async (req, res) => {
        ★ 500m 로 끊는다. 걸어서 데려다주는 거리다.
        ★ 집계 안에 서브쿼리를 넣지 않는다 - 같은 에러를 다섯 번 당했다.
          가까운 한 곳은 ROW_NUMBER 로 뽑는다. */
-    const _q_kinders = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_kinders = 정규길('kinders', id, req, () => pool.request().input('id', sql.Int, id).query(`
       WITH v AS (SELECT * FROM gold.v_complex_kinder WHERE complex_id = @id),
       n AS (SELECT kinder_cd, kinder_nm, establish, cap_cnt, pupil_cnt, class_cnt,
                    pbnt_tmng, oper_time, dist_m,
-                   rn = ROW_NUMBER() OVER (ORDER BY dist_m)
+                   rn = ROW_NUMBER() OVER (ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd)
               FROM v)
       /* ★ 2026-10-21: 여기도 8곳에서 **조용히 잘랐다.** 몇 곳 중 몇 곳인지 같이 낸다. */
       SELECT kinder_cd, 이름 = kinder_nm, 설립 = establish, 정원 = cap_cnt, 원아 = pupil_cnt,
              학급 = class_cnt, 공시 = pbnt_tmng, 운영시간 = oper_time,
              거리m = CAST(dist_m AS INT), 전체 = COUNT(*) OVER ()
-        FROM n WHERE rn <= 8 ORDER BY dist_m`);
+        FROM n WHERE rn <= 8 ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd`));
 
     /* ★ 교육청 등록 학원·교습소 (2026-10-21, 사장님: "학원 수집은 된 거 같은데 화면에 노출이 안 된다")
        silver.academy(27,356) · gold.v_complex_academy(206·207)는 만들어 두고 **어디서도 안 불렀다.**
@@ -6561,7 +6561,7 @@ app.get('/api/complexes/:id', async (req, res) => {
          **7.3초**였다(같은 333곳을 바로 세면 10ms). 담는 모양에서만 계획이 공간색인을 버렸다.
          뷰에서 바로 두 번 뽑으면 45ms + 35ms 다 — 화면이 받는 칸 그대로 쟀다.
        ★ 좌표를 아직 다 못 붙였다(10-21 16시 64%). 몇 곳 중 몇 곳 기준인지 같이 낸다. */
-    const _q_aca = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_aca = 정규길('aca', id, req, () => pool.request().input('id', sql.Int, id).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT 묶음 = ISNULL(grp, N'99 분류 못 함'),
              r500 = SUM(CASE WHEN dist_m <= 500 THEN 1 ELSE 0 END), r1000 = COUNT(*),
@@ -6570,9 +6570,9 @@ app.get('/api/complexes/:id', async (req, res) => {
        GROUP BY ISNULL(grp, N'99 분류 못 함') ORDER BY 1;
       SELECT TOP 8 이름 = aca_nm, 분야 = realm_sc_nm, 과정 = le_crse_nm, 거리m = CAST(dist_m AS INT),
              전체500 = COUNT(*) OVER ()
-        FROM gold.v_complex_academy WHERE complex_id = @id AND dist_m <= 500 ORDER BY dist_m;
+        FROM gold.v_complex_academy WHERE complex_id = @id AND dist_m <= 500 ORDER BY dist_m, aca_nm COLLATE Latin1_General_BIN2, academy_sk;
       SELECT 전체 = COUNT(*), 좌표있음 = SUM(CASE WHEN geog IS NOT NULL THEN 1 ELSE 0 END)
-        FROM silver.academy WHERE is_current = 1 AND reg_sttus_nm = N'개원';`);
+        FROM silver.academy WHERE is_current = 1 AND reg_sttus_nm = N'개원';`));
 
     /* 적재 자체를 안 했으면 '없다' 가 아니라 '안 받았다' 다 */
     /* ★ 이 단지의 시군구 학구도를 우리가 받았나 (2026-10-20).
@@ -6583,7 +6583,7 @@ app.get('/api/complexes/:id', async (req, res) => {
        ★ 전국 건수로 판정하면 안 된다 - 135건이 있다고 해서 이 구를 받은 건 아니다.
          (kinderLoaded 도 2026-10-24 부터 시군구로 묻는다 — 유치원도 전국이 아니었다.)
          학구도는 구 단위로 잘라 넣었으므로 **구로 물어야 한다.** */
-    const _q_szScope = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_szScope = 정규길('szScope', id, req, () => pool.request().input('id', sql.Int, id).query(`
       /* ★★ 2026-10-21 QA: 학구도 적재(b-hakgudo-bg)가 school_zone 에 쓰는 동안 이 EXISTS 가
          **잠금을 기다려** 상세 전체가 60초 시간초과였다(77291 에서 찾음 · 모든 단지가 같은 일을 당한다).
          '이 구를 받았나' 는 있음/없음만 보는 범위 표시다 — 커밋 전 행을 봐도 해가 없다. 기다리지 않는다. */
@@ -6591,7 +6591,7 @@ app.get('/api/complexes/:id', async (req, res) => {
       DECLARE @sgg CHAR(5) = (SELECT sigungu_cd FROM gold.complex WHERE complex_id = @id);
       SELECT 받았나 = CASE WHEN EXISTS (SELECT 1 FROM silver.school_zone z
                                         WHERE z.sd_cd + z.sgg_cd = @sgg)
-                           THEN 1 ELSE 0 END`);
+                           THEN 1 ELSE 0 END`));
 
     /* ★ 용적률 분위 (2026-10-20). **굳힌 표**(gold.bld_vlrat)를 본다 —
        뷰(gold.v_bld_vlrat)는 창 함수가 바구니 전체를 훑어서 7.5초다.
@@ -6625,8 +6625,8 @@ app.get('/api/complexes/:id', async (req, res) => {
        GROUP BY f.종류`);
 
     /* ★ 2026-10-24: 유치원은 '전국을 한 번에' 가 아니었다 — 서울·안양 824곳뿐이다. 전국 건수로 보면 다른 지역에서 '없다' 가 된다. 이 시군구로 묻는다 */
-    const _q_kinderN = () => pool.request().input('id', sql.Int, id).query(
-      `SELECT n = ${받았나SQL('유치원', 단지시군구SQL)}`);
+    const _q_kinderN = 정규길('kinderN', id, req, () => pool.request().input('id', sql.Int, id).query(
+      `SELECT n = ${받았나SQL('유치원', 단지시군구SQL)}`));
 
     /* ---------- 이 법정동 주택가격을 **다 받았나** (2026-10-21) ----------
        ⚠ 화면이 잠실(524566)에 "이 단지 호에 공시가격이 없습니다" 라고 **단정했다.**
@@ -6639,13 +6639,13 @@ app.get('/api/complexes/:id', async (req, res) => {
          /api/_prog 는 `CEILING(api_total/100.0)` 로 기대쪽을 내는데, 그 쪽 크기(100)를
          여기서 또 쓰면 **같은 공식이 두 군데**가 된다(작업방식 10장). 건수 두 칸을
          비교하면 쪽 크기를 가정하지 않아도 되고 뜻도 더 분명하다. */
-    const _q_prcScope = () => pool.request().input('id', sql.Int, id).query(`
+    const _q_prcScope = 정규길('prcScope', id, req, () => pool.request().input('id', sql.Int, id).query(`
       DECLARE @sgg CHAR(5), @bjd CHAR(5);
       SELECT @sgg = sigungu_cd, @bjd = bjdong_cd FROM gold.complex WHERE complex_id = @id;
       SELECT 받은건수 = g.받은건수, 전체건수 = g.api_total,
              받은페이지 = g.받은페이지, 빠진페이지 = g.빠진페이지, 실패 = g.실패
         FROM meta.v_load_page_gap g
-       WHERE g.sgg_cd = @sgg AND g.bjdong_cd = @bjd AND g.op = 'getBrHsprcInfo'`);
+       WHERE g.sgg_cd = @sgg AND g.bjdong_cd = @bjd AND g.op = 'getBrHsprcInfo'`));
 
     /* ---------- 공시가격 18년 추이 (2026-10-21) ----------
        `silver.bld_hsprc` 에 2008~2026 **19개 연도**가 쌓여 있는데, 지금 화면에서
