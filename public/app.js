@@ -1828,11 +1828,28 @@ async function ask() {
       오류카드({ 무엇: 'AI 검색', 응답: d, 다시: () => ask() });
       return;
     }
+    if (d.되묻기 && d.되묻기.length) return 되묻기그리기(d);
     renderAsk(d);
   } catch (e) {
     $('#list').innerHTML = `<li class="muted">AI 검색을 하지 못했습니다.</li>`;
     오류카드({ 무엇: 'AI 검색', 예외: e, 다시: () => ask() });
   }
+}
+
+/* 2026-10-28 사장님 "애매한 경우엔 다시 질문" — '광주' 처럼 여러 곳에 맞는 말이면 고르지 않고 후보를 보인다. 누르면 그 말을 바꿔 다시 묻는다 */
+function 되묻기그리기(d) {
+  $('#count').textContent = '';
+  const 원문 = String(d.원문 || $('#q').value);
+  $('#list').innerHTML = d.되묻기.map((x, i) => `
+    <li class="askbox">
+      <div class="at">'${esc(x.보임 || x.말)}' — 어느 곳을 말씀하신 건가요?</div>
+      <div class="askpick">${x.후보.map((h, j) => `<button type="button" class="ec-b" data-pick="${i}|${j}">${esc(h.이름)}</button>`).join(' ')}</div>
+    </li>`).join('');
+  $('#list').querySelectorAll('[data-pick]').forEach(b => b.addEventListener('click', () => {
+    const [i, j] = b.dataset.pick.split('|').map(Number), x = d.되묻기[i], h = x.후보[j];
+    $('#q').value = 원문.replace(x.말, h.질의);
+    ask();
+  }));
 }
 
 /* 지역 순위 (2026-10-22) — 숫자는 서버(DB)가 센 그대로. 기준·기간·뺀 곳을 같이 적는다(작업방식 10장: 자르면 말한다). */

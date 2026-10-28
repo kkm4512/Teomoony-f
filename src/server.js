@@ -2278,7 +2278,9 @@ const 조사 = /(의|에서|에|을|를|은|는|이|가|도|만|으로|로|랑|�
 /* 2026-10-23 QA(200문항): 흔히 묶어 부르는 구 — 구 이름만 적는다(뜻이 정해진 줄임말만) */
 const 지역묶음 = {
   '마용성': ['마포구', '용산구', '성동구'], '노도강': ['노원구', '도봉구', '강북구'], '금관구': ['금천구', '관악구', '구로구'],
-  '강남3구': ['강남구', '서초구', '송파구'], '강남4구': ['강남구', '서초구', '송파구', '강동구'] };
+  '강남3구': ['강남구', '서초구', '송파구'], '강남4구': ['강남구', '서초구', '송파구', '강동구'],
+  /* 2026-10-28 광주광역시는 전남과 합쳐 '전남광주통합특별시' 가 됐다 — 옛 이름으로 물으면 그 다섯 구(시도 말을 같이 넣어 다른 도시 동구 · 서구와 안 섞이게) */
+  '광주광역시': ['전남광주통합특별시', '동구', '서구', '남구', '북구', '광산구'] };
 const 접미 = /(구|시|군|동|읍|면|리)$/;
 
 /* 정렬 — 여기 적힌 것만 쓸 수 있다. 문장이 무슨 말을 하든 이 밖으로 못 나간다. */
@@ -2604,9 +2606,9 @@ app.post('/api/my/notice/read', requireAuth, async (req, res) => {
    그래서 LLM 이 보태준 표현도 **반드시 이 함수를 거친다.**
    코드 변환까지 LLM 에 맡기면 조용히 틀린 지역을 보여주게 된다. */
 async function lookupRegion(pool, cands) {
-  if (!cands.length) return { 지역: [], 맞은말: [] };
+  if (!cands.length) return { 지역: [], 맞은말: [], 되묻기: [] };
   let 지역 = [];
-  const 맞은말 = [];
+  const 맞은말 = [], 되묻기 = [];
   if (cands.length) {
     const rq = pool.request();
     const ors = cands.map((c, i) => {
@@ -2692,6 +2694,36 @@ async function lookupRegion(pool, cands) {
     지역 = picked.map(r => ({
       lawd_cd: r.lawd_cd, sgg_cd: r.sgg_cd, 수준: r.수준,
       이름: r.수준 === 'sgg' ? `${r.sido_nm} ${r.sgg_nm}` : r.full_nm }));
+    /* ★ 2026-10-28 사장님 "애매한 경우엔 다시 질문" — 한 말이 **서로 다른 곳 둘 이상**에 맞으면 고르지 않고 되묻는다.
+         '광주'(광주광역시 · 경기 광주시) · '고성'(강원 · 경남) · '중구'(여러 시) · '송도동'(인천 · 포항).
+         같은 시의 일반구들('마산' = 마산합포구 · 마산회원구 · '안양' = 만안 · 동안)은 한 곳으로 본다(법정동코드 앞 4자리).
+         다른 말이 이미 좁혔으면('인천 송도' · '서초구 반포동') 묻지 않는다 — picked 는 그 좁힘을 거친 것이다. */
+    {
+      const 본말 = new Set();
+      for (const c of cands) {
+        if (본말.has(c.t)) continue;
+        const 맞음 = picked.filter(r => (r.emd_nm && 동맞음(c, r)) || (!r.emd_nm && 구이름맞음(r.sgg_nm, c.v)));
+        const 묶 = new Map();
+        for (const r of 맞음) {
+          const k = String(r.sgg_cd).slice(0, 4);
+          if (!묶.has(k)) 묶.set(k, []);
+          묶.get(k).push(r);
+        }
+        const 후보 = [...묶.values()].map(rs => ({
+          이름: rs.map(r => r.수준 === 'sgg' ? `${r.sido_nm} ${r.sgg_nm}` : r.full_nm).slice(0, 3).join(' · '),
+          질의: rs.length === 1 ? (rs[0].수준 === 'sgg' ? `${rs[0].sido_nm} ${rs[0].sgg_nm}` : rs[0].full_nm) : rs.map(r => r.수준 === 'sgg' ? r.sgg_nm : r.full_nm).join(' ') ,
+          sido: String(rs[0].lawd_cd).slice(0, 2) }));
+        /* 시도 이름과 같은 말('광주')이 그 시도 밖의 구 · 시에도 맞았으면 시도도 후보 */
+        if (시도말v(c.v)) for (const x of 시도들.filter(x => x.sido_nm.startsWith(c.v))) {
+          const sd = String(x.lawd_cd).slice(0, 2);
+          if (후보.length && !후보.some(h => h.sido === sd)) 후보.unshift({ 이름: x.sido_nm, 질의: x.sido_nm, sido: sd });
+        }
+        /* '광주' = 경기 광주시 또는 옛 광주광역시(지금 전남광주통합특별시의 다섯 구) */
+        if (c.v === '광주' && /^광주(?!시|광역)/.test(c.t) && !cands.some(o => o.t !== c.t && 시도말v(o.v)) && 후보.length && !후보.some(h => h.sido === '12'))
+          후보.push({ 이름: '옛 광주광역시 (전남광주통합특별시 동구 · 서구 · 남구 · 북구 · 광산구)', 질의: '광주광역시', sido: '12' });
+        if (후보.length >= 2) { 되묻기.push({ 말: c.t, 보임: c.v, 후보: 후보.slice(0, 8).map(({ 이름, 질의 }) => ({ 이름, 질의 })) }); 본말.add(c.t); }
+      }
+    }
     for (const c of cands) {
       const hit = picked.some(r =>
         (r.emd_nm && 동맞음(c, r)) || (!r.emd_nm && 구이름맞음(r.sgg_nm, c.v)))
@@ -2715,7 +2747,7 @@ async function lookupRegion(pool, cands) {
       }
     }
   }
-  return { 지역, 맞은말 };
+  return { 지역, 맞은말, 되묻기 };
 }
 
 /* ===================== 지역 순위 (2026-10-22 사장님 "2번 ㄱㄱ" — '서울에서 제일 비싼 지역') =====================
@@ -3315,8 +3347,10 @@ app.get('/api/ask', requireAuth, async (req, res) => {
       if (묶음) { 묶음.forEach(v => cands.push({ t, v })); 알림앞.push({ 종류: 'HINT', 말: `'${말}' 은 ${묶음.join(' · ')} 로 풀어 찾았습니다` }); continue; }
       for (const v of 변형(t)) cands.push({ t, v });
     }
-    let { 지역, 맞은말 } = await lookupRegion(pool, cands);
+    let { 지역, 맞은말, 되묻기 } = await lookupRegion(pool, cands);
     맞은말.forEach(t => 쓴말.add(t));
+    /* 2026-10-28 애매한 지역은 고르지 않고 되묻는다 — 화면이 후보 단추를 띄우고, 누르면 그 말을 바꿔 다시 묻는다 */
+    if (되묻기 && 되묻기.length) return res.json({ 되묻기, 원문: q });
 
     /* ---- 2) 정렬 ---- */
     /* ★ 매칭은 문자열(q.includes)로 하는데 쓴말은 토큰으로 채운다 -
