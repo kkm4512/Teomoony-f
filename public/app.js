@@ -892,7 +892,11 @@ function initMap() {
          같은 색이 겹쳐도 진해지지 않고, 다른 색이 겹쳐도 섞인 새 색이 생기지 않는다(위에 그린 것의 색 — 큰 것 아래·작은 것 위, 서버 순서 그대로).
        → 위에 가려진 것도 숨지 않게 **누른 자리의 영역을 전부** 보여 준다(겹침목록팝업). */
   for (const [이름, 투명, z] of [['ovZone', OV_투명.zone, 410], ['ovRedev', OV_투명.redev, 411]]) {
-    const pn = map.createPane(이름); pn.style.zIndex = z; pn.style.opacity = 투명;
+    /* ★ 2026-10-28 사장님 "손으로 클릭해도 단지 상세가 안 들어가져": leaflet-rotate(10-23)는 기본 판(마커 · 겹쳐보기 …)을 **돌아가는 판** 안에 둔다.
+       createPane(이름) 만 하면 지도 판 바로 밑(돌아가는 판의 **형제**)에 생겨 z 405~411 이 돌아가는 판(400) 전체 — 마커(600) 포함 — 위로 올라간다.
+       → 겹쳐보기 · 빈자리 판은 기본 겹쳐보기 판(overlayPane)과 **같은 부모(돌아가는 판)** 안으로 옮긴다 — 지도와 같이 돌고,
+         마커가 든 '안 돌아가는 판'이 그 뒤 형제라 마커가 늘 위에 온다(면을 눌러도 마커 밖이면 면이 받는다). */
+    const pn = map.createPane(이름); map.getPane('overlayPane').parentNode.appendChild(pn); pn.style.zIndex = z; pn.style.opacity = 투명;   // ★ leaflet-rotate 의 createPane 은 부모 인자를 무시한다 → 직접 옮김
   }
   zoneLayer = L.geoJSON(null, { style: styleZone, pane: 'ovZone', renderer: L.svg({ pane: 'ovZone' }) });
   redevLayer = L.geoJSON(null, { style: styleRedev, pane: 'ovRedev', renderer: L.svg({ pane: 'ovRedev' }) });
@@ -6715,7 +6719,8 @@ async function 폐쇄채우기() {
 const 빈자리줌 = 17, 빈자리X줌 = 19;
 let 빈자리층 = null, 빈자리차례 = 0, 빈자리타이머 = null;
 function 빈자리켜기() {
-  if (!map.getPane('emptyPane')) { const pn = map.createPane('emptyPane'); pn.style.zIndex = 405; }
+  /* ★ 10-28: 기본 겹쳐보기 판과 같은 부모(돌아가는 판) 안으로 — 밖에 두면 이 판의 캔버스(지도 전체 크기)가 단지 마커 위에 덮여 17 이상 확대에서 마커가 안 눌렸다 */
+  if (!map.getPane('emptyPane')) { const pn = map.createPane('emptyPane'); map.getPane('overlayPane').parentNode.appendChild(pn); pn.style.zIndex = 405; }
   빈자리층 = L.featureGroup().addTo(map);
   map.on('moveend', () => { clearTimeout(빈자리타이머); 빈자리타이머 = setTimeout(빈자리불러오기, 300); });
   빈자리불러오기();
