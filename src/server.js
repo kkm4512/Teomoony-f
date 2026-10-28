@@ -7546,7 +7546,11 @@ function toFC(rows, extra) {
 const 사이트맵_최소세대 = 100;
 app.get('/robots.txt', (req, res) => {
   res.type('text/plain; charset=utf-8').send(
-    'User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://teomoony.com/sitemap.xml\n');
+    /* ★ 2026-10-28 사장님 "막자" — SEO 분석 업체 로봇(남의 사이트 순위를 팔려고 긁는 것)은 전부 막는다.
+         AhrefsBot 이 하루 1만 번 단지 페이지를 긁어 바깥 요청의 90% 였다. 검색엔진(구글 · 네이버 · 빙 · 다음)은 그대로. */
+    ['AhrefsBot', 'SemrushBot', 'MJ12bot', 'DotBot', 'PetalBot', 'BLEXBot', 'DataForSeoBot', 'SeznamBot', 'serpstatbot', 'Barkrowler', 'MegaIndex.ru']
+      .map(b => `User-agent: ${b}\nDisallow: /\n\n`).join('')
+    + 'User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://teomoony.com/sitemap.xml\n');
 });
 /* 2026-10-24 사장님 "그냥 '터무니' 라고 쳤을 때 나오게" — 이름 뜻 · 원칙 · 출처를 적은 정적 소개 문서(JS 없이 읽힘) */
 app.get(['/about', '/about/'], (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'about.html')));
