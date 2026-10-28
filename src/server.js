@@ -608,6 +608,22 @@ app.get('/api/_usage_rebuild', async (req, res) => {
 });
 
 /* 315 root 전용 — 접속 IP 목록(최근 7일). ★ 공개 화면에는 IP 를 내보내지 않는다 — 여기만, root 토큰일 때만 */
+/* ★ 2026-10-28 사장님 "수집 스케줄이 돌았나 안 돌았나, 안 돌았으면 어떤 이유로" — 수집 현황(root 만). 일정(ops.collect_schedule) · 실행 기록(ops.collect_run, etl/collect_cron.py 가 적는다) */
+app.get('/api/admin/collect', requireAuth, async (req, res) => {
+  if (!req.user || req.user.r !== 'root') return res.status(403).json({ error: '관리자만 볼 수 있습니다' });
+  try {
+    const r = await (await getPool()).request().query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT s.schedule_id, s.이름, s.자료, s.작업, s.주기, s.출처주기, s.근거, s.켜짐, s.다음, s.확인,
+             마지막성공 = (SELECT MAX(끝) FROM ops.collect_run r WHERE r.schedule_id = s.schedule_id AND r.상태 = N'성공'),
+             최근 = (SELECT TOP 1 CONCAT(r.상태, N'|', CONVERT(VARCHAR(16), r.예정, 120), N'|', ISNULL(r.이유, N''))
+                       FROM ops.collect_run r WHERE r.schedule_id = s.schedule_id ORDER BY r.예정 DESC, r.run_id DESC),
+             실패7일 = (SELECT COUNT(*) FROM ops.collect_run r WHERE r.schedule_id = s.schedule_id AND r.상태 IN (N'실패', N'못돎') AND r.예정 >= DATEADD(DAY, -7, SYSDATETIME()))
+        FROM ops.collect_schedule s ORDER BY s.자료, s.이름;
+      SELECT TOP 80 run_id, 이름, 예정, 놓음, 시작, 끝, 상태, 이유, 종료코드, 초, 로그 FROM ops.collect_run ORDER BY run_id DESC;`);
+    res.json({ 일정: r.recordsets[0], 기록: r.recordsets[1] });
+  } catch (e) { fail(res, e, 'admin-collect'); }
+});
 app.get('/api/admin/ips', requireAuth, async (req, res) => {
   if (!req.user || req.user.r !== 'root') return res.status(403).json({ error: '관리자만 볼 수 있습니다' });
   try {

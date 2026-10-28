@@ -1971,3 +1971,10 @@ table.cned td.sm { line-height: 1.6; }
 /* 2026-10-26 리 줄 — 고른 읍·면 아래 리가 있을 때만 보인다 */
 .areactl .ac-ri .ac-lab { flex: 0 0 auto; font-size: 11.5px; color: var(--ink-3); padding: 0 2px 0 4px; }
 .areactl .ac-ri[hidden] { display: none; }
+
+/* 2026-10-28 수집 현황 상태 */
+.cst { display: inline-block; padding: 0 .4em; border-radius: 4px; font-size: .85em; font-weight: 600; }
+.cst.ok { background: color-mix(in srgb, #2e9d57 18%, transparent); color: #2e9d57; }
+.cst.bad { background: color-mix(in srgb, #d64545 18%, transparent); color: #d64545; }
+.cst.warn { background: color-mix(in srgb, #c98a12 20%, transparent); color: #b07a10; }
+.cst.mid { background: color-mix(in srgb, var(--ink-2, #888) 15%, transparent); color: var(--ink-2, #777); }

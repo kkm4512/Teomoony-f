@@ -7645,7 +7645,9 @@ async function 내정보그리기() {
       <span class="r"><button type="button" class="ec-b" data-my-out>로그아웃</button></span></div></div>
 
     ${나.role === 'root' ? `<section class="mysec"><h3>접속 IP <span class="muted">최근 7일 · root 만 보입니다 — 이용현황(공개)에는 나라별 수만</span>
-        <button type="button" class="ec-b" data-my-ips>열기</button></h3><div id="myips"></div></section>` : ''}
+        <button type="button" class="ec-b" data-my-ips>열기</button></h3><div id="myips"></div></section>
+      <section class="mysec"><h3>수집 현황 <span class="muted">자료마다 언제 받았고 다음은 언제인지 · 안 돌았으면 왜인지</span>
+        <button type="button" class="ec-b" data-my-collect>열기</button></h3><div id="mycollect"></div></section>` : ''}
 
     <section class="mysec"><h3>알림함 ${d.안읽음 ? `<span class="pill use">안 읽음 ${fmt(d.안읽음)}</span>` : ''}
         <span class="muted">문의에 답이 달리면 여기로 옵니다</span>
@@ -7729,6 +7731,28 @@ document.addEventListener('click', async e => {
     보기전환('qna');   // 답변은 문의 탭에서 그 글과 같이 본다
     const qid = n.dataset.myInq;
     if (qid) setTimeout(() => { const a = document.querySelector(`#view-qna [data-qid="${qid}"]`); if (a) { a.scrollIntoView({ block: 'center' }); a.style.outline = '2px solid var(--mark)'; } }, 900);
+    return;
+  }
+  /* 2026-10-28 수집 현황(root) — 상태 색: 성공 초록 · 실패/못돎 빨강 · 건너뜀 노랑 · 놓음/도는중 회색 */
+  if (e.target.closest('[data-my-collect]')) {
+    const box = $('#mycollect'); box.innerHTML = '<p class="muted">불러오는 중…</p>';
+    const 때 = v => v ? esc(String(v).slice(5, 16).replace('T', ' ')) : '—';
+    const 색 = st => ({ 성공: 'ok', 실패: 'bad', 못돎: 'bad', 건너뜀: 'warn' })[st] || 'mid';
+    try {
+      const r = await fetch('/api/admin/collect', { headers: { Authorization: 'Bearer ' + 토큰() } });
+      const d = await r.json(); if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+      box.innerHTML = `<div class="ipwrap"><table class="iptab"><thead><tr><th>자료</th><th>일정</th><th>주기</th><th>마지막 성공</th><th>최근</th><th>다음</th><th>7일 실패·못돎</th></tr></thead><tbody>${
+        d.일정.map(x => { const [st, at, why] = String(x.최근 || '').split('|');
+          return `<tr title="${esc((x.출처주기 || '') + (x.근거 ? ' · ' + x.근거 : ''))}"><td>${esc(x.자료)}</td><td>${esc(x.이름)}${x.켜짐 ? '' : ' <span class="muted">(꺼짐)</span>'}</td><td>${esc(x.주기)}</td>
+            <td>${때(x.마지막성공)}</td><td>${st ? `<span class="cst ${색(st)}">${esc(st)}</span> ${esc(String(at).slice(5))}${why ? `<br><span class="muted sm">${esc(why)}</span>` : ''}` : '—'}</td>
+            <td>${때(x.다음)}</td><td>${fmt(x.실패7일)}</td></tr>`; }).join('')}</tbody></table></div>
+        <h4 class="sm">최근 실행</h4>
+        <div class="ipwrap"><table class="iptab"><thead><tr><th>예정</th><th>일정</th><th>상태</th><th>시작 ~ 끝</th><th>걸린 시간</th><th>이유 · 로그</th></tr></thead><tbody>${
+        d.기록.map(x => `<tr><td>${때(x.예정)}</td><td>${esc(x.이름)}</td><td><span class="cst ${색(x.상태)}">${esc(x.상태)}</span></td>
+          <td>${때(x.시작)} ~ ${때(x.끝)}</td><td>${x.초 != null ? fmt(Math.round(x.초 / 60)) + '분' : '—'}</td>
+          <td class="sm">${esc(x.이유 || '')}${x.로그 ? `<br><span class="muted">logs\\${esc(x.로그)}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>
+        <p class="note sm">'못돎' = 예정 시각에 PC 나 수집 일정 프로그램이 꺼져 있었던 것(다시 켜질 때 적힘). '건너뜀' = 앞 실행이 아직 도는 중 · 디스크 부족 · 출처에 새 것 없음. 시각은 한국 시각.</p>`;
+    } catch (x) { box.innerHTML = `<p class="note sm">불러오지 못했습니다 — ${esc(x.message)}</p>`; }
     return;
   }
   if (e.target.closest('[data-my-ips]')) {
