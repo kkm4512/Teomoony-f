@@ -289,10 +289,15 @@ const 법정동 = 층('lawds', async (req, b) => {
   return { type: 'FeatureCollection', features };
 });
 const 행정동 = 층('adms', async (req, b) => {
+  /* ★ 2026-10-29 전국 3,559동 — 넓게 볼수록 **그림용 사본**(점을 덜어낸 것, load_adm_boundary.py)을 보낸다.
+       폭 2° 넘음 → s2(0.002° ≈ 200m, 줌 8 한 픽셀보다 작다) · 0.3° 넘음 → s1(0.0003° ≈ 30m, 줌 11 한 픽셀보다 작다) · 그 안 → 원본.
+       원본 도형은 그대로다. 사본이 없으면(옛 표) 원본. 전국 한 화면 23MB → 약 3MB. */
+  const 폭 = b[2] - b[0];
+  const 칸 = 폭 > 2 ? 'geojson_s2' : 폭 > 0.3 ? 'geojson_s1' : 'geojson';
   const r = await pg().query(`SELECT * FROM svc.lyr_adm WHERE minx <= $3 AND maxx >= $1 AND miny <= $4 AND maxy >= $2`, [b[0], b[1], b[2], b[3]]);
   const features = r.rows.filter(d => d.geojson).map(d => ({
     type: 'Feature',
-    geometry: JSON.parse(d.geojson),
+    geometry: JSON.parse(d[칸] || d.geojson),
     properties: {
       adm_cd_sgis: d.adm_cd_sgis, year: d.year, adm_nm: d.adm_nm, emd_nm: d.emd_nm,
       centroid_lat: d.centroid_lat, centroid_lng: d.centroid_lng,
