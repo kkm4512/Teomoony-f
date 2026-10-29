@@ -1263,9 +1263,24 @@ async function 제안부르기() {
   const 내차례 = ++제안.차례;
   if (!q) return 제안닫기();
   try {
-    const j = await fetch('/api/suggest?q=' + encodeURIComponent(q)).then(r => r.json());
+    let j = await fetch('/api/suggest?q=' + encodeURIComponent(q)).then(r => r.json());
     if (내차례 !== 제안.차례 || askMode) return;      /* 늦게 온 것 · 그새 AI 검색으로 바꿈 */
     if (j.error) { 제안닫기(); return 오류토스트('자동완성', j); }
+    /* ★ 2026-10-29 QA: '광주 봉선동' · '부산 연제구 거제동' · '제주 노형' 처럼 **지역을 앞에 붙이면 0건**이었다(검색어 전체를 이름으로 찾아서).
+         0건이고 낱말이 둘 이상(숫자 없음)이면 마지막 낱말로 다시 찾고, 앞 낱말(지역)이 주소 · 이름에 **모두 들어 있는 것만** 남긴다.
+         줄임말은 공식 이름으로도 맞춘다(충북 → 충청북도 …). 거른 뒤의 수만 보인다(서버 '전체' 는 거르기 전 수라 안 쓴다). */
+    const 낱말 = q.split(/\s+/).filter(Boolean);
+    if (!(j.묶음 || []).some(g => (g.항목 || []).length) && 낱말.length >= 2 && !/\d/.test(q)) {
+      const 줄임 = { 충북: '충청북도', 충남: '충청남도', 경북: '경상북도', 경남: '경상남도', 전남: '전남광주', 광주: '광주', 서울시: '서울', 부산시: '부산' };
+      const 앞 = 낱말.slice(0, -1), 끝 = 낱말[낱말.length - 1];
+      const j2 = await fetch('/api/suggest?q=' + encodeURIComponent(끝)).then(r => r.json());
+      if (내차례 !== 제안.차례 || askMode) return;
+      if (!j2.error) {
+        const 맞나 = it => { const t = ((it.보조 || '') + ' ' + (it.이름 || '')).replace(/\s+/g, ''); return 앞.every(w => t.includes(w) || (줄임[w] && t.includes(줄임[w]))); };
+        const 묶음 = (j2.묶음 || []).map(g => { const 항목 = (g.항목 || []).filter(맞나); return { ...g, 항목, 전체: 항목.length }; }).filter(g => g.항목.length);
+        if (묶음.length) j = { ...j2, q, 묶음 };
+      }
+    }
     제안.마지막 = j;
     if (document.activeElement === $('#q')) 제안그리기(j);
   } catch (e) { if (내차례 === 제안.차례) 제안닫기(); }
@@ -1626,8 +1641,14 @@ async function loadOverlay() {
     const lyr = overlay === 'zone' ? zoneLayer : redevLayer;
     lyr.clearLayers();
     if (fc.features.length) lyr.addData(fc);
-    else toast(overlay === 'zone' ? '이 영역에는 적재된 용도지역이 없습니다'
-                                  : '이 영역에는 정비사업 구역이 없습니다', 2600);
+    else {
+      /* ★ 2026-10-29 QA: 부산에서 '정비사업 구역이 없습니다' 라고 했다 — 정비구역은 **서울만** 받았다(없는 게 아니라 안 받음).
+           받은 범위(서울 상자) 밖이면 '안 받음' 으로 말한다. 용도지역 지도도 서울 위주(+일부)라 같은 말로. */
+      const c = map.getCenter(), 서울안 = c.lat > 37.42 && c.lat < 37.72 && c.lng > 126.76 && c.lng < 127.19;
+      toast(overlay === 'zone'
+        ? (서울안 ? '이 영역에는 적재된 용도지역이 없습니다' : '용도지역 지도는 아직 서울 위주로만 받았습니다 — 이 지역은 안 받음(없는 게 아님)')
+        : (서울안 ? '이 영역에는 정비사업 구역이 없습니다' : '정비사업 구역은 아직 서울만 받았습니다 — 이 지역은 안 받음(없는 게 아님)'), 3200);
+    }
     재개발이름표();
     /* 확대하면 이름이 뜬다는 걸 **한 번은** 알려 준다 — 안 그러면 기능이 있는 줄 모른다. */
     if (overlay === 'redev' && fc.features.length && map.getZoom() < REDEV_라벨줌 && !redev안내했나) {

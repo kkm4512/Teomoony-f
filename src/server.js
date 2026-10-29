@@ -5307,6 +5307,25 @@ async function 단지수(kind, cds) {
     return cd => m.get(cd) || 0;
   } catch { return null; }
 }
+/* ★ 2026-10-29 QA: 지역 고르기 목록(시도 · 시군구 · 읍면동 · 리)이 부를 때마다 적재DB 를 세어 0.5~3초 걸렸다(적재 중엔 더).
+     목록과 단지 수는 적재가 끝나야 바뀌므로 **10분** 메모리에 둔다(주소 그대로가 열쇠 · 200 응답만 · 최대 3,000개).
+     얻는 것: 두 번째부터 즉시 / 잃는 것: 새 적재 뒤 최대 10분 묵은 수. */
+const _지역캐시 = new Map();
+app.use(/^\/api\/areas\/(sido|sgg|dongs|ris)$/, (req, res, next) => {
+  if (req.method !== 'GET') return next();
+  const 키 = req.originalUrl, 있 = _지역캐시.get(키);
+  if (있 && Date.now() - 있.t < 600000) { res.set('X-Area-Cache', 'hit'); return res.json(있.v); }
+  const 원래 = res.json.bind(res);
+  res.json = v => {
+    if (res.statusCode === 200 && v && !v.error) {
+      if (_지역캐시.size > 3000) _지역캐시.clear();
+      _지역캐시.set(키, { t: Date.now(), v });
+    }
+    return 원래(v);
+  };
+  next();
+});
+
 app.get('/api/areas/sido', async (req, res) => {
   try {
     const pool = await getPool();
