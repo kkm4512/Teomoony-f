@@ -1912,8 +1912,20 @@ table.cned td.sm { line-height: 1.6; }
 .udays:has(.ud.on) .ud:not(.on) i{opacity:.35}
 .udays .ud.on i{outline:2px solid var(--ink-3);outline-offset:1px}
 .udays .ud.on span{color:var(--ink);font-weight:600}
-.udaypick{flex-wrap:nowrap;overflow-x:auto;margin:6px 0 4px;padding-bottom:2px}
+.udaypick{position:relative;margin:6px 0 4px}
 .udaypick .achip{flex:0 0 auto}
+/* 10-30 날짜: 단추 하나 + 펼치는 목록 */
+.udaybtn{display:inline-flex;align-items:center;gap:4px}
+.udaybtn b{font:600 11px var(--mono);color:var(--ink-2)}
+.udaylist{position:absolute;left:0;top:calc(100% + 4px);z-index:30;min-width:190px;max-height:300px;overflow-y:auto;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.25);padding:4px}
+.udaylist[hidden]{display:none}
+.udayit{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:7px 10px;border:0;border-radius:6px;
+  background:none;color:var(--ink-2);font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
+.udayit:hover{background:var(--paper)}
+.udayit[aria-selected="true"]{color:var(--ink);background:var(--paper);font-weight:600}
+.udayit b{font:400 11px var(--mono);color:var(--ink-4)}
+.udayit[aria-selected="true"] b{color:var(--mark)}
 .uhours .ud span{font-size:10px}
 
 /* 2026-10-24 사장님(폰): 상세를 볼 땐 검색 틀이 접혀 다시 검색할 길이 없었다 → 시트 오른쪽 위에 '검색' 단추(누르면 상세 닫고 검색칸에 초점) */

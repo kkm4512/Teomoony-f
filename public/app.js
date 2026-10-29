@@ -5268,6 +5268,7 @@ async function 홈그리기() {
    ★ 2026-10-24 11:26 사장님 "날짜별로 분리 · 사람이 이용하는 게 맨 위" — 맨 위 합계(사람) · 14일 막대(누르면 그날) · 날짜 칩(전체 · 각 날) ·
      그 아래 **사람 동작 → 시간대 → 갈래 → 나라** 가 고른 날 하루로 바뀐다. 합계 · 14일은 /api/usage(전체), 고른 날은 /api/usage?day= 로 따로. */
 let 이용날 = null;                         // null = 전체
+let 이용날펼침 = false;                     // 10-30 날짜 목록을 펼쳤나
 const 이용캐시 = new Map();
 function 한국날(ms) { return new Date(ms + 9 * 3600000).toISOString().slice(0, 10); }
 async function 이용그리기(강제 = false) {
@@ -5289,8 +5290,11 @@ async function 이용그리기(강제 = false) {
     날.innerHTML = 칸.map((k, i) => `<button type="button" class="ud${값[i] ? '' : ' zero'}${이용날 === k ? ' on' : ''}" data-uday="${k}" title="${esc(날짜(k))} · ${fmt(값[i])}회">
         <i style="height:${값[i] ? Math.max(3, 값[i] / 큰 * 100).toFixed(1) : 2}%"></i>
         <span>${(i % 3 === 1 || i === 13) ? esc(날짜(k).slice(5)) : ''}</span></button>`).join('');
-    $('#udaypick').innerHTML = [`<button type="button" class="achip" data-uday="" aria-selected="${이용날 == null}">전체</button>`,
-      ...칸.slice().reverse().map((k, i) => `<button type="button" class="achip" data-uday="${k}" aria-selected="${이용날 === k}">${esc(날짜(k))}${i === 0 ? ' 오늘' : ''}<b>${fmt(표.get(k) || 0)}</b></button>`)].join('');
+    /* ★ 2026-10-30 사장님 "일자를 나열하는 게 아니라 버튼 하나로 — 누르면 그 일자들이 나오게": 단추 하나 + 펼치는 목록 */
+    const 지금날말 = 이용날 ? `${날짜(이용날)}${이용날 === 한국날(이제) ? ' 오늘' : ''}` : '전체';
+    $('#udaypick').innerHTML = `<button type="button" class="achip udaybtn" aria-expanded="${이용날펼침}" aria-haspopup="listbox">날짜 · <b>${esc(지금날말)}</b> ▾</button>
+      <div class="udaylist" role="listbox"${이용날펼침 ? '' : ' hidden'}>${[`<button type="button" class="udayit" role="option" data-uday="" aria-selected="${이용날 == null}">전체<b>${fmt(u.합계.전체)}</b></button>`,
+        ...칸.slice().reverse().map((k, i) => `<button type="button" class="udayit" role="option" data-uday="${k}" aria-selected="${이용날 === k}">${esc(날짜(k))}${i === 0 ? ' 오늘' : ''}<b>${fmt(표.get(k) || 0)}</b></button>`)].join('')}</div>`;
 
     /* 고른 날 */
     let d = u;
@@ -5353,10 +5357,18 @@ async function 이용그리기(강제 = false) {
   }
 }
 document.addEventListener('click', e => {
+  const 단추 = e.target.closest('#view-usage .udaybtn');
+  const 목록 = document.querySelector('#view-usage .udaylist');
+  if (단추) { 이용날펼침 = !이용날펼침; if (목록) 목록.hidden = !이용날펼침; 단추.setAttribute('aria-expanded', String(이용날펼침)); return; }
   const b = e.target.closest('#view-usage [data-uday]');
-  if (!b) return;
+  if (!b) {                                         // 바깥을 누르면 접는다
+    if (이용날펼침 && !e.target.closest('#view-usage .udaylist')) { 이용날펼침 = false; if (목록) 목록.hidden = true;
+      const t = document.querySelector('#view-usage .udaybtn'); if (t) t.setAttribute('aria-expanded', 'false'); }
+    return;
+  }
   const k = b.dataset.uday || null;
   이용날 = (이용날 === k && k) ? null : k;      // 같은 날을 다시 누르면 전체
+  이용날펼침 = false;
   이용그리기();
 });
 
