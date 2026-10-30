@@ -277,12 +277,29 @@ function 이용_날(밀리) {
 const 이용_모음 = new Map();      /* '시각\t동작' -> 횟수 */
 let 이용_내보내는중 = false;
 
+/* ★ 2026-10-30 사장님 "ㅇㅇ": 사람처럼 꾸민 수집 로봇 — 남미·아프리카 가정용 회선 300여 곳이 단지 페이지(/c/번호)만 한 번씩 열고
+     그 단지 API 는 한 번도 안 불렀다(브라우저라면 화면을 그리려고 반드시 부른다). 그래서:
+     '사람' 갈래의 **단지 페이지 열기** 는 바로 세지 않고 기다린다 — 5분 안에 같은 IP 가 그 단지 API(/api/complexes/번호…)를 부르면 '사람',
+     안 부르면 '수집 추정' 으로 센다. 얻는 것: 꾸민 로봇이 사람 수에서 빠진다 / 잃는 것: 열자마자 닫은 사람도 '수집 추정'. */
+const 페이지대기 = new Map();     /* 'ip|단지' -> { 시, t } */
+function 이용_더하기(시, 동작, 갈) { const 키 = 시 + '\t' + 동작 + '\t' + 갈; 이용_모음.set(키, (이용_모음.get(키) || 0) + 1); }
+setInterval(() => {
+  const 끝 = Date.now() - 5 * 60000;
+  for (const [k, v] of 페이지대기) if (v.t < 끝) { 페이지대기.delete(k); 이용_더하기(v.시, '단지 페이지 열기', '수집 추정'); }
+}, 60000).unref();
 app.use((req, res, next) => {
+  const 단지api = /^\/api\/complexes\/(\d{1,9})(?:\/|$)/.exec(req.path);
+  if (단지api && 페이지대기.size) {
+    const k = 진짜IP(req) + '|' + 단지api[1], v = 페이지대기.get(k);
+    if (v) { 페이지대기.delete(k); 이용_더하기(v.시, '단지 페이지 열기', '사람'); }
+  }
   const 동작 = 이용_동작(req);
   if (동작) res.on('finish', () => {
     if (res.statusCode >= 400) return;        /* 실패한 요청은 쓰임이 아니다 */
-    const 키 = 이용_시() + '\t' + 동작 + '\t' + 갈래(req.headers['user-agent']);
-    이용_모음.set(키, (이용_모음.get(키) || 0) + 1);
+    const 갈 = 갈래(req.headers['user-agent']);
+    const 페이지 = 동작 === '단지 페이지 열기' && 갈 === '사람' && /^\/c\/(\d+)\/?$/.exec(req.path);
+    if (페이지) { if (페이지대기.size < 20000) 페이지대기.set(진짜IP(req) + '|' + 페이지[1], { 시: 이용_시(), t: Date.now() }); return; }
+    이용_더하기(이용_시(), 동작, 갈);
   });
   next();
 });
@@ -574,10 +591,16 @@ app.get('/api/_usage_rebuild', async (req, res) => {
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       DECLARE @시작 DATETIME2(0) = (SELECT DATEADD(HOUR, DATEDIFF(HOUR, 0, MIN(때)) + 1, 0) FROM ops.req_log);
       SELECT 시작 = @시작;
-      SELECT 시 = DATEADD(HOUR, DATEDIFF(HOUR, 0, 때), 0), 경로, 질의, ip, ua, n = COUNT(*)
-        FROM ops.req_log
-       WHERE 때 >= @시작 AND 내부 = 0 AND 상태 < 400 AND (동작 IS NOT NULL OR 경로 LIKE '/c/%') AND ISNULL(동작, N'') <> N'로그인'
-       GROUP BY DATEADD(HOUR, DATEDIFF(HOUR, 0, 때), 0), 경로, 질의, ip, ua;`);
+      /* 10-30: 단지 페이지(/c/번호)를 연 뒤 5분 안에 같은 IP 가 그 단지 API 를 불렀나(이음) — 실시간 세기와 같은 규칙 */
+      SELECT 시 = DATEADD(HOUR, DATEDIFF(HOUR, 0, x.때), 0), x.경로, x.질의, x.ip, x.ua, n = COUNT(*), 이음 = MAX(x.이음)
+        FROM (SELECT l.때, l.경로, l.질의, l.ip, l.ua,
+                     이음 = CASE WHEN l.경로 LIKE '/c/%' AND EXISTS (SELECT 1 FROM ops.req_log l2
+                              WHERE l2.ip = l.ip AND l2.때 >= l.때 AND l2.때 <= DATEADD(MINUTE, 5, l.때)
+                                AND (l2.경로 = '/api/complexes/' + REPLACE(SUBSTRING(l.경로, 4, 20), '/', '')
+                                     OR l2.경로 LIKE '/api/complexes/' + REPLACE(SUBSTRING(l.경로, 4, 20), '/', '') + '/%')) THEN 1 ELSE 0 END
+                FROM ops.req_log l
+               WHERE l.때 >= @시작 AND l.내부 = 0 AND l.상태 < 400 AND (l.동작 IS NOT NULL OR l.경로 LIKE '/c/%') AND ISNULL(l.동작, N'') <> N'로그인') x
+       GROUP BY DATEADD(HOUR, DATEDIFF(HOUR, 0, x.때), 0), x.경로, x.질의, x.ip, x.ua;`);
     const 시작 = r.recordsets[0][0].시작;
     const 모음 = new Map(); let 뺀 = 0;
     for (const x of r.recordsets[1]) {
@@ -585,7 +608,8 @@ app.get('/api/_usage_rebuild', async (req, res) => {
       const 가짜 = { method: 'GET', path: x.경로, query: Object.fromEntries(new URLSearchParams(x.질의 || '')) };
       const 동작 = 이용_이름(가짜); if (!동작) continue;
       const 시 = new Date(x.시).toISOString().slice(0, 19);
-      const k = 시 + '\t' + 동작 + '\t' + 갈래(x.ua);
+      const 갈0 = 갈래(x.ua);
+      const k = 시 + '\t' + 동작 + '\t' + (동작 === '단지 페이지 열기' && 갈0 === '사람' && !x.이음 ? '수집 추정' : 갈0);
       모음.set(k, (모음.get(k) || 0) + x.n);
     }
     const 줄 = [...모음.entries()].map(([k, n]) => { const [t, a, g] = k.split('\t'); return { t, a, g, n }; });
