@@ -4403,7 +4403,7 @@ async function 가상허가(pool, pnu) {
   if (!/^\d{19}$/.test(String(pnu || ''))) return { permits: [], permitDongs: [] };
   const r = await pool.request().input('pnu', sql.Char(19), pnu).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
     IF OBJECT_ID('tempdb..#p') IS NOT NULL DROP TABLE #p;
-    SELECT TOP 20 a.mgm_pmsrgst_pk, a.bld_nm, a.main_purps_nm, a.arch_gb_nm, a.hhld_cnt, a.tot_area, a.plat_area, a.tot_pkng_cnt,
+    SELECT TOP 20 a.mgm_pmsrgst_pk, bld_nm = gold.fn_name_mask(a.bld_nm), a.main_purps_nm, a.arch_gb_nm, a.hhld_cnt, a.tot_area, a.plat_area, a.tot_pkng_cnt,
            a.arch_pms_day, a.stcns_sched_day, a.real_stcns_day, a.use_apr_day, a.stcns_delay_day,
            지연일수 = DATEDIFF(DAY, TRY_CONVERT(DATE, a.stcns_sched_day), TRY_CONVERT(DATE, a.real_stcns_day)),
            기한초과 = DATEDIFF(DAY, TRY_CONVERT(DATE, a.stcns_delay_day), TRY_CONVERT(DATE, a.real_stcns_day)),
@@ -4411,7 +4411,7 @@ async function 가상허가(pool, pnu) {
       INTO #p FROM silver.arch_permit a WHERE a.pnu = @pnu AND a.is_current = 1 ORDER BY a.arch_pms_day DESC, a.mgm_pmsrgst_pk;
     SELECT * FROM #p ORDER BY arch_pms_day DESC, mgm_pmsrgst_pk;
     SELECT * FROM (
-      SELECT d.mgm_pmsrgst_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
+      SELECT d.mgm_pmsrgst_pk, bld_nm = gold.fn_name_mask(d.bld_nm), d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
              d.hhld_cnt, d.ho_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt, 동총수 = COUNT(*) OVER (PARTITION BY d.mgm_pmsrgst_pk),
              rn = ROW_NUMBER() OVER (PARTITION BY d.mgm_pmsrgst_pk ORDER BY d.main_atch_gb_nm, d.bld_nm, d.mgm_dong_ouln_pk)
         FROM #p JOIN silver.arch_permit_dong d ON d.mgm_pmsrgst_pk = #p.mgm_pmsrgst_pk AND d.is_current = 1) x
@@ -4425,8 +4425,8 @@ async function 가상몸(pool, kind, pk, 번호) {
     let 몸;
     if (kind === 'p') {
       const r = await pool.request().input('pk', sql.VarChar(50), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-        SELECT a.*, 처음월 = (SELECT TOP 1 처음월 FROM hub.t0101 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL) FROM silver.arch_permit a WHERE a.mgm_pmsrgst_pk = @pk AND a.is_current = 1;
-        SELECT d.mgm_dong_ouln_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.tot_area, d.hhld_cnt, d.ho_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt
+        SELECT a.*, 가린이름 = gold.fn_name_mask(a.bld_nm), 처음월 = (SELECT TOP 1 처음월 FROM hub.t0101 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL) FROM silver.arch_permit a WHERE a.mgm_pmsrgst_pk = @pk AND a.is_current = 1;
+        SELECT d.mgm_dong_ouln_pk, bld_nm = gold.fn_name_mask(d.bld_nm), d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.tot_area, d.hhld_cnt, d.ho_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt
           FROM silver.arch_permit_dong d WHERE d.mgm_pmsrgst_pk = @pk AND d.is_current = 1
          ORDER BY CASE WHEN d.main_atch_gb_nm = N'주건축물' THEN 0 ELSE 1 END, d.mgm_dong_ouln_pk;
         IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_hub_t0103_pms' AND object_id = OBJECT_ID('hub.t0103'))
@@ -4444,7 +4444,7 @@ async function 가상몸(pool, kind, pk, 번호) {
       const 동들 = r.recordsets[1] || [], 층들 = r.recordsets[2] || [], 주 = (r.recordsets[3] || [])[0] || {};
       const 동층 = new Map();
       for (const f of 층들) { const x = 동층.get(f.동PK) || { 지상: 0, 지하: 0 }; if (f.층 > 0) x.지상 = Math.max(x.지상, f.층); else if (f.층 < 0) x.지하 = Math.max(x.지하, -f.층); 동층.set(f.동PK, x); }
-      const 이름 = (d, i) => (d.bld_nm && String(d.bld_nm).replace(/\s/g, '') !== String(a.bld_nm || '').replace(/\s/g, '') ? d.bld_nm : `${i + 1}`);
+      const 이름 = (d, i) => (d.bld_nm && String(d.bld_nm).replace(/\s/g, '') !== String(a.가린이름 || '').replace(/\s/g, '') ? d.bld_nm : `${i + 1}`);
       const dongs = 동들.map((d, i) => { const f = 동층.get(String(d.mgm_dong_ouln_pk)) || {};
         return { mgm_bldrgst_pk: 'P:' + d.mgm_dong_ouln_pk, is_recap: false, regstr_kind_nm: d.main_atch_gb_nm, dong_nm: 이름(d, i), bld_nm: d.bld_nm,
                  main_purps_nm: d.main_purps_nm, strct_nm: d.strct_nm, hhld_cnt: d.hhld_cnt || null, tot_area: d.tot_area,   /* 호(오피스텔)를 세대로 적지 않는다 */
@@ -4459,13 +4459,13 @@ async function 가상몸(pool, kind, pk, 번호) {
       const 세대 = Number(a.hhld_cnt) || null, 호 = Number(a.ho_cnt) || null;
       const [주변, 허가, 땅] = await Promise.all([가상주변(pool, 점.centroid_lat, 점.centroid_lng, a.sigungu_cd), 가상허가(pool, a.pnu), 땅묶음(pool, a.pnu)]);
       몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors,
-        complex: { complex_id: 번호 ?? null, complex_nm: a.bld_nm || a.plat_plc, rep_plat_plc: a.plat_plc, rep_road_addr: null, has_recap: dongs.length > 1,
+        complex: { complex_id: 번호 ?? null, complex_nm: a.가린이름 || a.plat_plc, rep_plat_plc: a.plat_plc, rep_road_addr: null, has_recap: dongs.length > 1,
                    dong_cnt: dongs.filter(d => d.regstr_kind_nm === '주건축물').length || dongs.length, bld_cnt: dongs.length,
                    hhld_cnt_sum: 세대, max_floor: Math.max(0, ...층들.map(f => f.층)) || null, tot_area_sum: a.tot_area, oldest_use_apr: null,
                    rep_jibun: 점.jibun || null, rep_pnu: a.pnu, centroid_lat: 점.centroid_lat ?? null, centroid_lng: 점.centroid_lng ?? null,
                    sigungu_cd: a.sigungu_cd, bjdong_cd: a.bjdong_cd, 실거래이름: null },
         spec: { 기준: '건축허가(설계) 원문', 동별건수: dongs.length, 용도지역: a.jiyuk_nm, 용도지구: a.jigu_nm, 용도구역: a.guyuk_nm,
-                대지면적: a.plat_area, 건축면적: a.arch_area, 건폐율: a.bc_rat, 용적률: a.vl_rat, 세대: 세대,
+                대지면적: a.plat_area, 건축면적: a.arch_area, 건폐율: a.bc_rat, 용적률: a.vl_rat, 세대: 세대, 호: 호,   /* 10-30 QA: 오피스텔은 세대 대신 호 */
                 주건축물: a.main_bld_cnt, 부속건축물: a.atch_bld_dong_cnt, 허가일: a.arch_pms_day, 착공일: a.real_stcns_day, 사용승인: null,
                 주차: 주차합 || a.tot_pkng_cnt || null, 주차_자주: (Number(주.옥내자주) || 0) + (Number(주.옥외자주) || 0) || null,
                 주차_기계: (Number(주.옥내기계) || 0) + (Number(주.옥외기계) || 0) || null,
@@ -4482,7 +4482,7 @@ async function 가상몸(pool, kind, pk, 번호) {
       const r = await pool.request().input('pk', sql.VarChar(40), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT h.*, b.시군구_코드, b.법정동_코드, b.구조_코드_명, b.처음월 AS 원문처음월
           FROM gold.house_plan h JOIN hub.t0201 b ON b.관리_주택대장_PK = h.hp_pk AND b.마지막월 IS NULL WHERE h.hp_pk = @pk;
-        SELECT 동PK = CAST(관리_동별_개요_PK AS VARCHAR(50)), 동명, 주부속 = 주_부속_구분_코드_명, 용도 = 주_용도_코드_명,
+        SELECT 동PK = CAST(관리_동별_개요_PK AS VARCHAR(50)), 동명 = gold.fn_name_mask(동명), 주부속 = 주_부속_구분_코드_명, 용도 = 주_용도_코드_명,
                세대 = ISNULL(TRY_CAST(세대_수_민간_분양 AS INT), 0) + ISNULL(TRY_CAST(세대_수_공공_분양 AS INT), 0) + ISNULL(TRY_CAST(세대_수_국민_임대 AS INT), 0)
                     + ISNULL(TRY_CAST(세대_수_공공_임대_계 AS INT), 0) + ISNULL(TRY_CAST(세대_수_민간_임대 AS INT), 0) + ISNULL(TRY_CAST(세대_수_사원_임대 AS INT), 0)
                     + ISNULL(TRY_CAST(세대_수_근로_복지 AS INT), 0),
@@ -4492,7 +4492,7 @@ async function 가상몸(pool, kind, pk, 번호) {
         IF OBJECT_ID('hub.t0207') IS NOT NULL SELECT 자주 = ISNULL(TRY_CAST(옥내_자주식_대수 AS INT), 0) + ISNULL(TRY_CAST(옥외_자주식_대수 AS INT), 0),
                기계 = ISNULL(TRY_CAST(옥내_기계식_대수 AS INT), 0) + ISNULL(TRY_CAST(옥외_기계식_대수 AS INT), 0)
           FROM hub.t0207 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 자주 = 0;
-        IF OBJECT_ID('hub.t0211') IS NOT NULL SELECT TOP 1 단지명 = NULLIF(단지_명, '') FROM hub.t0211 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL AND NULLIF(단지_명, '') IS NOT NULL ELSE SELECT TOP 0 단지명 = '';`);
+        IF OBJECT_ID('hub.t0211') IS NOT NULL SELECT TOP 1 단지명 = gold.fn_name_mask(NULLIF(단지_명, '')) FROM hub.t0211 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL AND NULLIF(단지_명, '') IS NOT NULL ELSE SELECT TOP 0 단지명 = '';`);
       const h = r.recordsets[0][0];
       if (!h) return null;
       const 동들 = r.recordsets[1] || [], 주 = (r.recordsets[2] || [])[0] || {}, 단지명 = ((r.recordsets[3] || [])[0] || {}).단지명;
@@ -4598,7 +4598,7 @@ async function 땅묶음(pool, pnu) {
            석면_천장재, 석면_단열재, 석면_지붕재, 석면_보온재, 석면_바닥재, 석면_기타, 석면_해당없음
       FROM gold.pms_demolish WHERE pnu = @pnu ORDER BY COALESCE(멸실일, 종료일, 시작일, '00000000') DESC;
     ELSE SELECT TOP 0 x = 1;
-    SELECT TOP 15 mgm_pmsrgst_pk, bld_nm, arch_gb_nm, main_purps_nm, hhld_cnt, ho_cnt, tot_area, arch_pms_day, real_stcns_day, use_apr_day
+    SELECT TOP 15 mgm_pmsrgst_pk, bld_nm = gold.fn_name_mask(bld_nm), arch_gb_nm, main_purps_nm, hhld_cnt, ho_cnt, tot_area, arch_pms_day, real_stcns_day, use_apr_day
       FROM silver.arch_permit WHERE pnu = @pnu AND is_current = 1 ORDER BY arch_pms_day DESC;`);
   const R = r.recordsets;
   return { 필지: R[0][0] || null, 토지: R[1][0] || null, 이동: R[2] || [], 철거: R[3] || [], 허가: R[4] || [] };
@@ -4646,7 +4646,7 @@ app.get('/api/prebuilds/:pk', async (req, res) => {
       SELECT a.*, p.lat, p.lng, 핀 = CASE WHEN p.pk IS NULL THEN 0 ELSE 1 END
         FROM silver.arch_permit a LEFT JOIN gold.pre_build p ON p.pk = a.mgm_pmsrgst_pk
        WHERE a.mgm_pmsrgst_pk = @pk AND a.is_current = 1;
-      SELECT d.mgm_dong_ouln_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
+      SELECT d.mgm_dong_ouln_pk, bld_nm = gold.fn_name_mask(d.bld_nm), d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
              d.hhld_cnt, d.ho_cnt, d.fmly_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt
         FROM silver.arch_permit_dong d WHERE d.mgm_pmsrgst_pk = @pk AND d.is_current = 1
        ORDER BY CASE WHEN d.main_atch_gb_nm = N'주건축물' THEN 0 ELSE 1 END, ISNULL(d.hhld_cnt, 0) + ISNULL(d.ho_cnt, 0) DESC, d.mgm_dong_ouln_pk;
@@ -5867,7 +5867,7 @@ const 분양권줄SQL = `
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`;
 const 폐쇄칸 = `s.site_key, s.pnu, s.shter_day, s.이름, s.이름출처, s.주용도, s.동수, s.총괄세대, s.사용승인일, s.폐쇄구분,
                 s.plat_plc, s.new_plat_plc, s.lat, s.lng, s.now_complex_id, now_nm = c.complex_nm, s.위치근거`;   /* 319: 지금 필지가 없는 자리는 어떻게 찍었는지 */
-const 폐쇄동칸 = `t.mgm_shtreg_pk, t.pnu, t.shter_day, t.shter_gb_nm, t.regstr_kind_nm, t.bld_nm, t.dong_nm, t.main_atch_gb_nm,
+const 폐쇄동칸 = `t.mgm_shtreg_pk, t.pnu, t.shter_day, t.shter_gb_nm, t.regstr_kind_nm, bld_nm = gold.fn_name_mask(t.bld_nm), t.dong_nm, t.main_atch_gb_nm,
                   t.main_purps_nm, t.etc_purps, t.strct_nm, t.hhld_cnt, t.fmly_cnt, t.ho_cnt, t.grnd_flr_cnt, t.ugrnd_flr_cnt,
                   t.tot_area, t.plat_area, t.use_apr_day`;
 app.get('/api/closed/pins', async (req, res) => {
@@ -5932,7 +5932,7 @@ app.get('/api/closed/site/:key', async (req, res) => {
       /* ===== 2026-10-23 사장님 "폐쇄 말소대장도 기존 단지상세처럼 동호나 그런 정보들을 동일하게" (323) =====
          동 = 이 지번의 폐쇄 표제부 전부 · 층 = 폐쇄 층별개요(표제부 번호로 이음 = 코드) · 호 = 폐쇄 전유부 · 전용면적 = 폐쇄 전유공용면적의 '전유' 합(호 번호로 이음).
          ★ 호 → 동은 **잇지 않는다** — 폐쇄 기본개요 32칸에 '상위 대장 번호' 가 없다(probe_closed_ops2 · XML 원문 확인). 이름으로 잇지 않는다. */
-      SELECT mgm_bldrgst_pk = t.mgm_shtreg_pk, t.dong_nm, t.bld_nm, is_recap = CAST(0 AS BIT), t.hhld_cnt, t.ho_cnt, t.main_purps_nm, t.tot_area,
+      SELECT mgm_bldrgst_pk = t.mgm_shtreg_pk, t.dong_nm, bld_nm = gold.fn_name_mask(t.bld_nm), is_recap = CAST(0 AS BIT), t.hhld_cnt, t.ho_cnt, t.main_purps_nm, t.tot_area,
              t.regstr_kind_nm, t.grnd_flr_cnt, t.ugrnd_flr_cnt, t.shter_day, 이묶음 = CASE WHEN ISNULL(t.shter_day, '0') = ISNULL(s.shter_day, '0') THEN 1 ELSE 0 END
         FROM gold.closed_site s JOIN silver.bld_closed_title t ON t.pnu = s.pnu
        WHERE s.site_key = @k ORDER BY t.dong_nm, t.mgm_shtreg_pk;
@@ -6651,8 +6651,8 @@ app.get('/api/complexes/:id', async (req, res) => {
 
     const _q_dongs = () => pool.request().input('id', sql.Int, id).query(`
       SELECT cb.mgm_bldrgst_pk, cb.regstr_kind_cd, cb.is_recap,
-             b.regstr_kind_nm, b.bld_nm AS basis_nm,
-             t.dong_nm, t.bld_nm, t.main_purps_nm, t.strct_nm,
+             b.regstr_kind_nm, gold.fn_name_mask(b.bld_nm) AS basis_nm,
+             t.dong_nm, bld_nm = gold.fn_name_mask(t.bld_nm), t.main_purps_nm, t.strct_nm,
              t.hhld_cnt, t.tot_area, t.grnd_flr_cnt, t.ugrnd_flr_cnt, t.use_apr_day,
              /* 349 (2026-10-24 사장님 "위반건축물 표시하면 좋긴해"): GIS건물통합정보의 위반건축물 표시(Y/N) · 그 자료의 기준일.
                 대장PK 끝자리 + 필지 + 사용승인일/연면적으로 하나만 맞을 때만 이어 둔 것 — 안 이어진 동은 NULL(모름) */
@@ -6970,7 +6970,7 @@ app.get('/api/complexes/:id', async (req, res) => {
     const _q_permits = () => pool.request().input('id', sql.Int, id).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-21: 적재 중 표의 잠금을 기다리지 않는다 (11-145) */
       
-      SELECT TOP 20 a.mgm_pmsrgst_pk, a.bld_nm, a.main_purps_nm, a.arch_gb_nm,
+      SELECT TOP 20 a.mgm_pmsrgst_pk, bld_nm = gold.fn_name_mask(a.bld_nm), a.main_purps_nm, a.arch_gb_nm,
              a.hhld_cnt, a.tot_area, a.plat_area, a.tot_pkng_cnt,
              a.arch_pms_day, a.stcns_sched_day, a.real_stcns_day, a.use_apr_day,
              a.stcns_delay_day,
@@ -7019,7 +7019,7 @@ app.get('/api/complexes/:id', async (req, res) => {
          ORDER BY a.arch_pms_day DESC, a.mgm_pmsrgst_pk
       ),
       d AS (
-        SELECT d.mgm_pmsrgst_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm,
+        SELECT d.mgm_pmsrgst_pk, bld_nm = gold.fn_name_mask(d.bld_nm), d.main_atch_gb_nm, d.main_purps_nm,
                d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
                d.hhld_cnt, d.ho_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt,
                동총수 = COUNT(*) OVER (PARTITION BY d.mgm_pmsrgst_pk),
@@ -8124,7 +8124,7 @@ app.get('/api/complexes/:id/history', async (req, res) => {
         LEFT JOIN gold.redev_plan_link l ON l.present_sn = h.present_sn
         LEFT JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
        WHERE h.complex_id = @id AND h.xarea >= 0.01 * h.parea ORDER BY h.xarea DESC;
-      SELECT TOP 10 a.arch_gb_nm, a.main_purps_nm, a.bld_nm, a.hhld_cnt, a.tot_area, a.arch_pms_day, a.real_stcns_day, a.use_apr_day
+      SELECT TOP 10 a.arch_gb_nm, a.main_purps_nm, bld_nm = gold.fn_name_mask(a.bld_nm), a.hhld_cnt, a.tot_area, a.arch_pms_day, a.real_stcns_day, a.use_apr_day
         FROM silver.arch_permit a WHERE a.is_current = 1 AND a.pnu IN (SELECT pnu FROM #p)
        ORDER BY ISNULL(a.tot_area, 0) DESC;
       SELECT TOP 10 p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.tot_suply, p.mvn_prearnge_ym
@@ -8464,7 +8464,7 @@ const 날짜표기 = d => (d && String(d).length >= 8 ? `${String(d).slice(0, 4)
 
 app.get('/c/:id', async (req, res, next) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id < 1 || id > 2147483647) return next();
+  if (!Number.isInteger(id) || id < 1 || id > 2147483647) return 없는쪽(req, res);   /* 10-30 QA: '/c/abc' 가 JSON 404 로 나갔다 — 화면 틀(404 · 색인 안 함) */
   try {
     const 틀 = await fs.promises.readFile(쪽틀, 'utf8');
     const pool = await getPool();
@@ -8554,7 +8554,19 @@ app.get('/c/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.use((req, res) => res.status(404).json({ error: 'not found' }));
+/* 10-30 QA: 화면 주소(/api 밖 · 브라우저가 HTML 을 원함)의 404 는 JSON 대신 화면 틀로 — 첫 화면이 뜨고 앱이 '없는 단지' 를 보인다. 검색엔진에는 noindex. */
+async function 없는쪽(req, res) {
+  try {
+    const 틀 = await fs.promises.readFile(쪽틀, 'utf8');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    return res.status(404).send(틀.replace('</head>', '<meta name="robots" content="noindex">\n</head>'));
+  } catch (e) { return res.status(404).json({ error: 'not found' }); }
+}
+app.use((req, res) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/') && (req.headers.accept || '').includes('text/html')) return 없는쪽(req, res);
+  return res.status(404).json({ error: 'not found' });
+});
 
 /* ---------- 마지막 그물 (2026-10-21 QA) ----------
    길에서 안 잡힌 오류는 Express **기본 처리기**가 받는데, 그게 스택 추적을 통째로
