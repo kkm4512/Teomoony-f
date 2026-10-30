@@ -4325,6 +4325,197 @@ SELECT n = ${받았나SQL('유치원', 점시군구SQL)}`,
         FROM silver.academy WHERE is_current = 1 AND reg_sttus_nm = N'개원';`
   };
 }
+/* ---------- 대장 전 건물을 **단지 상세와 같은 모양**으로 (2026-10-30 사장님 "새 UI 말고 일반 건대장 있는 단지상세처럼만") ----------
+   /api/virtual/p/:pk = 공사 중 건물(건축허가 · 387) · /api/virtual/h/:pk = 사업승인 아파트(주택인허가 · 384).
+   응답 칸 이름은 /api/complexes/:id 와 같다(complex · dongs · spec · floors · parcels · zones · redev · permits · poi · schools …) — 화면이 renderDetail 로 그대로 그린다.
+   ★ 값은 전부 허가(설계) · 승인 원문이다. 대장에서 오는 칸(호 · 실거래 · 공시가격 · 관리비)은 비워 두고 `가상` 이 그 까닭을 들고 간다.
+   ★ 동 키(mgm_bldrgst_pk 자리)는 허가 동별개요 PK — 대장 PK 와 섞이지 않게 앞에 'P:' · 'H:' 를 붙인다. */
+async function 가상필지(pool, pnu) {
+  if (!/^\d{19}$/.test(String(pnu || ''))) return { parcels: [], zones: [], redev: [], geo: { type: 'FeatureCollection', features: [] } };
+  const r = await pool.request().input('pnu', sql.Char(19), pnu).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    SELECT TOP 1 pnu, pnu_role = 'MAIN', is_representative = CAST(1 AS BIT), jibun, addr, jiga, gosi_year, centroid_lat, centroid_lng, geojson
+      FROM silver.cadastral_parcel WHERE pnu = @pnu AND is_current = 1;
+    IF OBJECT_ID('gold.fn_pnu_zone') IS NOT NULL
+      SELECT 용도지역 = v.uname, 비중 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(SUM(v.xarea)) OVER (), 0) AS DECIMAL(5,1))
+        FROM gold.fn_pnu_zone(@pnu) v GROUP BY v.uname ORDER BY SUM(v.xarea) DESC;
+    ELSE SELECT TOP 0 용도지역 = '';
+    IF OBJECT_ID('gold.fn_pnu_redev') IS NOT NULL
+      SELECT 구역 = v.zone_nm, 대분류 = v.biz_lclas_nm, 사업 = v.biz_nm, 단계 = v.propel_nm, 단계코드 = v.propel_cd, 구역면적 = v.area_m2, sn = v.present_sn,
+             포함률 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(v.parea), 0) AS DECIMAL(5,1)),
+             계획용적률 = MAX(pl.용적률), 계획건폐율 = MAX(pl.건폐율), 계획세대 = MAX(pl.공급세대), 계획층수 = MAX(pl.층수)
+        FROM gold.fn_pnu_redev(@pnu) v
+        LEFT JOIN gold.redev_plan_link lk ON lk.present_sn = v.present_sn
+        LEFT JOIN silver.seoul_redev_plan pl ON pl.basic_info_seq = lk.basic_info_seq
+       GROUP BY v.zone_nm, v.biz_lclas_nm, v.biz_nm, v.propel_nm, v.propel_cd, v.area_m2, v.present_sn ORDER BY v.area_m2;
+    ELSE SELECT TOP 0 구역 = '';`);
+  const p = r.recordsets[0][0] || null;
+  const geo = { type: 'FeatureCollection', features: [] };
+  if (p && p.geojson) { try { geo.features.push({ type: 'Feature', properties: { pnu: p.pnu }, geometry: JSON.parse(p.geojson) }); } catch (e) { /* 모양 못 읽음 — 점만 */ } }
+  if (p) delete p.geojson;
+  return { parcels: p ? [p] : [], zones: r.recordsets[1] || [], redev: r.recordsets[2] || [], geo };
+}
+async function 가상주변(pool, lat, lng, sgg) {
+  if (lat == null || lng == null) return { 좌표없음: true };
+  const Q = 점주변SQL();
+  const 이름 = Object.keys(Q);
+  const rs = await Promise.all(이름.map(k => pool.request().input('id', sql.Int, 0).input('lat', sql.Float, Number(lat)).input('lng', sql.Float, Number(lng))
+    .input('psgg', sql.Char(5), /^\d{5}$/.test(String(sgg || '')) ? String(sgg) : null).query(Q[k])));
+  const 답 = Object.fromEntries(rs.map((r, i) => [이름[i], r]));
+  const { poi, poiSum, poiBrand, poiLife, subways, busStops, busList, busRoutes, schoolZone, szScope, schools, kinders, kinderN, aca } = 답;
+  return { 좌표없음: false,
+    poi: poi.recordset, poiSum: poiSum.recordset[0] || null, poiBrand: poiBrand.recordset, poiLife: poiLife.recordset,
+    schools: schools.recordsets[0] || [], schoolList: schools.recordsets[1] || [], kinders: kinders.recordset,
+    academy: { 묶음: (aca.recordsets && aca.recordsets[0]) || [], 가까운: (aca.recordsets && aca.recordsets[1]) || [], ...(((aca.recordsets && aca.recordsets[2]) || [])[0] || {}) },
+    kinderLoaded: (kinderN.recordset[0] || {}).n || 0,
+    schoolZone: schoolZone.recordsets[0] || [], schoolGroups: schoolZone.recordsets[1] || [],
+    schoolZoneLoaded: ((szScope.recordset[0] || {}).받았나) ? 1 : 0,
+    busRoutes: busRoutes.recordset, subways: subways.recordset, busStops: (busStops.recordset && busStops.recordset[0]) || null, busList: busList.recordset };
+}
+/* 같은 필지의 건축인허가 — 단지 상세 _q_permits · _q_permitDongs 와 같은 칸(이 필지로 · match_by 'PNU') */
+async function 가상허가(pool, pnu) {
+  if (!/^\d{19}$/.test(String(pnu || ''))) return { permits: [], permitDongs: [] };
+  const r = await pool.request().input('pnu', sql.Char(19), pnu).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    IF OBJECT_ID('tempdb..#p') IS NOT NULL DROP TABLE #p;
+    SELECT TOP 20 a.mgm_pmsrgst_pk, a.bld_nm, a.main_purps_nm, a.arch_gb_nm, a.hhld_cnt, a.tot_area, a.plat_area, a.tot_pkng_cnt,
+           a.arch_pms_day, a.stcns_sched_day, a.real_stcns_day, a.use_apr_day, a.stcns_delay_day,
+           지연일수 = DATEDIFF(DAY, TRY_CONVERT(DATE, a.stcns_sched_day), TRY_CONVERT(DATE, a.real_stcns_day)),
+           기한초과 = DATEDIFF(DAY, TRY_CONVERT(DATE, a.stcns_delay_day), TRY_CONVERT(DATE, a.real_stcns_day)),
+           a.jimok_nm, a.jiyuk_nm, a.pnu, match_by = 'PNU'
+      INTO #p FROM silver.arch_permit a WHERE a.pnu = @pnu AND a.is_current = 1 ORDER BY a.arch_pms_day DESC, a.mgm_pmsrgst_pk;
+    SELECT * FROM #p ORDER BY arch_pms_day DESC, mgm_pmsrgst_pk;
+    SELECT * FROM (
+      SELECT d.mgm_pmsrgst_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
+             d.hhld_cnt, d.ho_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt, 동총수 = COUNT(*) OVER (PARTITION BY d.mgm_pmsrgst_pk),
+             rn = ROW_NUMBER() OVER (PARTITION BY d.mgm_pmsrgst_pk ORDER BY d.main_atch_gb_nm, d.bld_nm, d.mgm_dong_ouln_pk)
+        FROM #p JOIN silver.arch_permit_dong d ON d.mgm_pmsrgst_pk = #p.mgm_pmsrgst_pk AND d.is_current = 1) x
+     WHERE rn <= 60 ORDER BY mgm_pmsrgst_pk, rn;`);
+  return { permits: r.recordsets[0] || [], permitDongs: r.recordsets[1] || [] };
+}
+const 가상빈칸 = { tradeStats: [], 거래목록: [], jeonse: [], offsite: [], hos: [], 호총수: 0, 호공시: [], 공시적재: null, kapt: null, cost: null, vlrat: [], 전용률: null };
+app.get('/api/virtual/:kind/:pk', async (req, res) => {
+  const kind = String(req.params.kind || ''), pk = String(req.params.pk || '');
+  if (!/^[ph]$/.test(kind) || !/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad key' });
+  try {
+    const pool = await getPool();
+    const 범 = await 범위표();
+    let 몸;
+    if (kind === 'p') {
+      const r = await pool.request().input('pk', sql.VarChar(50), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT a.*, 처음월 = (SELECT TOP 1 처음월 FROM hub.t0101 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL) FROM silver.arch_permit a WHERE a.mgm_pmsrgst_pk = @pk AND a.is_current = 1;
+        SELECT d.mgm_dong_ouln_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.tot_area, d.hhld_cnt, d.ho_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt
+          FROM silver.arch_permit_dong d WHERE d.mgm_pmsrgst_pk = @pk AND d.is_current = 1
+         ORDER BY CASE WHEN d.main_atch_gb_nm = N'주건축물' THEN 0 ELSE 1 END, d.mgm_dong_ouln_pk;
+        IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_hub_t0103_pms' AND object_id = OBJECT_ID('hub.t0103'))
+          SELECT TOP 2000 동PK = CAST(관리_동별_개요_PK AS VARCHAR(50)), 층구분 = 층_구분_코드_명,
+                 층 = CASE WHEN 층_구분_코드_명 = N'지하' THEN -1 ELSE 1 END * TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 층_번호)),
+                 용도 = 주_용도_코드_명, 면적 = TRY_CONVERT(DECIMAL(18,2), TRY_CONVERT(FLOAT, 층_면적))
+            FROM hub.t0103 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL AND 층_구분_코드_명 IN (N'지상', N'지하')
+           ORDER BY 1, 3 DESC;
+        ELSE SELECT TOP 0 동PK = '';
+        SELECT 옥내자주 = SUM(TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_자주식_대수))), 옥외자주 = SUM(TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_자주식_대수))),
+               옥내기계 = SUM(TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_기계식_대수))), 옥외기계 = SUM(TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_기계식_대수)))
+          FROM hub.t0110 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL;`);
+      const a = r.recordsets[0][0];
+      if (!a) return res.status(404).json({ error: 'not found' });
+      const 동들 = r.recordsets[1] || [], 층들 = r.recordsets[2] || [], 주 = (r.recordsets[3] || [])[0] || {};
+      const 동층 = new Map();
+      for (const f of 층들) { const x = 동층.get(f.동PK) || { 지상: 0, 지하: 0 }; if (f.층 > 0) x.지상 = Math.max(x.지상, f.층); else if (f.층 < 0) x.지하 = Math.max(x.지하, -f.층); 동층.set(f.동PK, x); }
+      const 이름 = (d, i) => (d.bld_nm && String(d.bld_nm).replace(/\s/g, '') !== String(a.bld_nm || '').replace(/\s/g, '') ? d.bld_nm : `${i + 1}`);
+      const dongs = 동들.map((d, i) => { const f = 동층.get(String(d.mgm_dong_ouln_pk)) || {};
+        return { mgm_bldrgst_pk: 'P:' + d.mgm_dong_ouln_pk, is_recap: false, regstr_kind_nm: d.main_atch_gb_nm, dong_nm: 이름(d, i), bld_nm: d.bld_nm,
+                 main_purps_nm: d.main_purps_nm, strct_nm: d.strct_nm, hhld_cnt: d.hhld_cnt || null, tot_area: d.tot_area,   /* 호(오피스텔)를 세대로 적지 않는다 */
+                 grnd_flr_cnt: f.지상 || null, ugrnd_flr_cnt: f.지하 || null, use_apr_day: null }; });
+      const 동이름 = new Map(dongs.map(d => [d.mgm_bldrgst_pk, d.dong_nm]));
+      const floors = 층들.map(f => ({ mgm_bldrgst_pk: 'P:' + f.동PK, 동: 동이름.get('P:' + f.동PK) || '', 층: f.층, 층명: `${f.층 < 0 ? '지' : ''}${Math.abs(f.층)}층`, 용도: f.용도, 면적: f.면적, 구획수: 1, 주부속: null }));
+      const 오피 = 층들.some(f => /오피스텔/.test(f.용도 || ''));
+      const 주차합 = ['옥내자주', '옥외자주', '옥내기계', '옥외기계'].reduce((t, k) => t + (Number(주[k]) || 0), 0);
+      const 승 = 동들.reduce((t, d) => t + (Number(d.ride_use_elvt_cnt) || 0), 0), 비 = 동들.reduce((t, d) => t + (Number(d.emgen_use_elvt_cnt) || 0), 0);
+      const 필 = await 가상필지(pool, a.pnu);
+      const 점 = 필.parcels[0] || {};
+      const 세대 = Number(a.hhld_cnt) || null, 호 = Number(a.ho_cnt) || null;
+      const [주변, 허가, 땅] = await Promise.all([가상주변(pool, 점.centroid_lat, 점.centroid_lng, a.sigungu_cd), 가상허가(pool, a.pnu), 땅묶음(pool, a.pnu)]);
+      몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors,
+        complex: { complex_id: null, complex_nm: a.bld_nm || a.plat_plc, rep_plat_plc: a.plat_plc, rep_road_addr: null, has_recap: dongs.length > 1,
+                   dong_cnt: dongs.filter(d => d.regstr_kind_nm === '주건축물').length || dongs.length, bld_cnt: dongs.length,
+                   hhld_cnt_sum: 세대, max_floor: Math.max(0, ...층들.map(f => f.층)) || null, tot_area_sum: a.tot_area, oldest_use_apr: null,
+                   rep_jibun: 점.jibun || null, rep_pnu: a.pnu, centroid_lat: 점.centroid_lat ?? null, centroid_lng: 점.centroid_lng ?? null,
+                   sigungu_cd: a.sigungu_cd, bjdong_cd: a.bjdong_cd, 실거래이름: null },
+        spec: { 기준: '건축허가(설계) 원문', 동별건수: dongs.length, 용도지역: a.jiyuk_nm, 용도지구: a.jigu_nm, 용도구역: a.guyuk_nm,
+                대지면적: a.plat_area, 건축면적: a.arch_area, 건폐율: a.bc_rat, 용적률: a.vl_rat, 세대: 세대,
+                주건축물: a.main_bld_cnt, 부속건축물: a.atch_bld_dong_cnt, 허가일: a.arch_pms_day, 착공일: a.real_stcns_day, 사용승인: null,
+                주차: 주차합 || a.tot_pkng_cnt || null, 주차_자주: (Number(주.옥내자주) || 0) + (Number(주.옥외자주) || 0) || null,
+                주차_기계: (Number(주.옥내기계) || 0) + (Number(주.옥외기계) || 0) || null,
+                주용도: a.main_purps_nm === '업무시설' && 오피 ? '오피스텔(업무시설)' : a.main_purps_nm,
+                승강기: 동들.length ? 승 : null, 비상용: 동들.length ? 비 : null, 높이: null,
+                지상층: Math.max(0, ...층들.map(f => f.층)) || null, 지하층: Math.max(0, ...층들.map(f => -f.층)) || null,
+                구조: (동들.find(d => d.strct_nm) || {}).strct_nm || null, 지붕: (동들.find(d => d.roof_nm) || {}).roof_nm || null },
+        scope: { 필지: 1, 인허가: 1, 전유부: 0, 층별: 1, 가상: 1 },
+        받은자료: (() => { const z = 받은자료(범, a.sigungu_cd); return z ? Object.fromEntries(Object.entries(z).map(([k, v]) => [k, v.n])) : null; })(),
+        geo: 필.geo,
+        가상: { 종류: 'p', pk, 상태말: '공사 중 · 사용승인 전', 키말: '허가대장', 출처: '건축HUB 건축인허가 원문(기본개요 · 동별개요 · 층별개요 · 주차장)',
+                착공일: a.real_stcns_day, 허가일: a.arch_pms_day, 원문처음월: a.처음월, 호, 땅 } };
+    } else {
+      const r = await pool.request().input('pk', sql.VarChar(40), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT h.*, b.시군구_코드, b.법정동_코드, b.구조_코드_명, b.처음월 AS 원문처음월
+          FROM gold.house_plan h JOIN hub.t0201 b ON b.관리_주택대장_PK = h.hp_pk AND b.마지막월 IS NULL WHERE h.hp_pk = @pk;
+        SELECT 동PK = CAST(관리_동별_개요_PK AS VARCHAR(50)), 동명, 주부속 = 주_부속_구분_코드_명, 용도 = 주_용도_코드_명,
+               세대 = ISNULL(TRY_CAST(세대_수_민간_분양 AS INT), 0) + ISNULL(TRY_CAST(세대_수_공공_분양 AS INT), 0) + ISNULL(TRY_CAST(세대_수_국민_임대 AS INT), 0)
+                    + ISNULL(TRY_CAST(세대_수_공공_임대_계 AS INT), 0) + ISNULL(TRY_CAST(세대_수_민간_임대 AS INT), 0) + ISNULL(TRY_CAST(세대_수_사원_임대 AS INT), 0)
+                    + ISNULL(TRY_CAST(세대_수_근로_복지 AS INT), 0),
+               구조 = 구조_코드_명, 지하층 = TRY_CAST(지하_층_수 AS INT), 지상층 = TRY_CAST(지상_층_수 AS INT), 높이 = TRY_CAST(높이 AS DECIMAL(9,2)),
+               연면적 = TRY_CAST(연면적 AS DECIMAL(18,2)), 승용 = TRY_CAST(승용_승강기_인용_수 AS INT), 비상 = TRY_CAST(비상용_승강기_인용_수 AS INT)
+          FROM hub.t0202 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ORDER BY 주_부속_구분_코드, 동명;
+        IF OBJECT_ID('hub.t0207') IS NOT NULL SELECT 자주 = ISNULL(TRY_CAST(옥내_자주식_대수 AS INT), 0) + ISNULL(TRY_CAST(옥외_자주식_대수 AS INT), 0),
+               기계 = ISNULL(TRY_CAST(옥내_기계식_대수 AS INT), 0) + ISNULL(TRY_CAST(옥외_기계식_대수 AS INT), 0)
+          FROM hub.t0207 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 자주 = 0;
+        IF OBJECT_ID('hub.t0211') IS NOT NULL SELECT TOP 1 단지명 = NULLIF(단지_명, '') FROM hub.t0211 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL AND NULLIF(단지_명, '') IS NOT NULL ELSE SELECT TOP 0 단지명 = '';`);
+      const h = r.recordsets[0][0];
+      if (!h) return res.status(404).json({ error: 'not found' });
+      const 동들 = r.recordsets[1] || [], 주 = (r.recordsets[2] || [])[0] || {}, 단지명 = ((r.recordsets[3] || [])[0] || {}).단지명;
+      const dongs = 동들.map(d => ({ mgm_bldrgst_pk: 'H:' + d.동PK, is_recap: false, regstr_kind_nm: d.주부속, dong_nm: d.동명, bld_nm: d.동명,
+        main_purps_nm: d.용도, strct_nm: d.구조, hhld_cnt: d.세대 || null, tot_area: d.연면적, grnd_flr_cnt: d.지상층, ugrnd_flr_cnt: d.지하층, use_apr_day: null }));
+      const 주동 = 동들.filter(d => String(d.주부속 || '').includes('주'));
+      const 필 = await 가상필지(pool, h.pnu);
+      const 점 = 필.parcels[0] || {};
+      const lat = h.lat ?? 점.centroid_lat, lng = h.lng ?? 점.centroid_lng;
+      const [주변, 허가, 땅, 청] = await Promise.all([가상주변(pool, lat, lng, h.시군구_코드), 가상허가(pool, h.pnu), 땅묶음(pool, h.pnu),
+        pool.request().input('pnu', sql.Char(19), h.pnu || '').query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+          /* 승인 상세(/api/houseplans/:pk)와 같은 규칙 — 같은 지번(법정동 · 산 · 본번 · 부번)일 때만 */
+          SELECT TOP 10 p.house_manage_no, p.pblanc_no, p.house_nm, p.rcrit_pblanc_de, p.tot_suply, p.mvn_prearnge_ym, p.pblanc_url, p.cnstrct_entrps_nm, p.bsns_mby_nm,
+                 최고분양가 = (SELECT MAX(m.top_amount_man) FROM silver.applyhome_mdl m WHERE m.house_manage_no = p.house_manage_no AND m.pblanc_no = p.pblanc_no)
+            FROM silver.applyhome_pblanc p
+           WHERE LEN(@pnu) = 19 AND p.lawd_cd = LEFT(@pnu, 10)
+             AND TRY_CAST(p.주소_본번 AS INT) = CAST(SUBSTRING(@pnu, 12, 4) AS INT)
+             AND ISNULL(TRY_CAST(p.주소_부번 AS INT), 0) = CAST(SUBSTRING(@pnu, 16, 4) AS INT)
+             AND ISNULL(p.주소_산, '0') = CASE SUBSTRING(@pnu, 11, 1) WHEN '2' THEN '1' ELSE '0' END
+           ORDER BY p.rcrit_pblanc_de DESC`)]);
+      몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors: [],
+        complex: { complex_id: null, complex_nm: h.이름 || 단지명 || h.대지위치, rep_plat_plc: h.대지위치, rep_road_addr: null, has_recap: dongs.length > 1,
+                   dong_cnt: 주동.length || h.주건축물수 || dongs.length, bld_cnt: dongs.length, hhld_cnt_sum: h.세대,
+                   max_floor: Math.max(0, ...동들.map(d => Number(d.지상층) || 0)) || null, tot_area_sum: h.연면적, oldest_use_apr: null,
+                   rep_jibun: 점.jibun || null, rep_pnu: h.pnu, centroid_lat: lat ?? null, centroid_lng: lng ?? null,
+                   sigungu_cd: h.시군구_코드, bjdong_cd: h.법정동_코드, 실거래이름: null },
+        spec: { 기준: '주택 사업계획승인 원문', 동별건수: dongs.length, 용도지역: null, 용도지구: null, 용도구역: null,
+                대지면적: null, 건축면적: null, 건폐율: null, 용적률: null, 세대: h.세대, 주건축물: 주동.length || h.주건축물수, 부속건축물: dongs.length - 주동.length || null,
+                허가일: h.승인일, 착공일: h.착공일 || null, 사용승인: null,
+                주차: (Number(주.자주) || 0) + (Number(주.기계) || 0) || null, 주차_자주: Number(주.자주) || null, 주차_기계: Number(주.기계) || null,
+                /* 주택인허가 동별개요의 승강기 칸은 '인용 수'(몇 인승) — 대수가 아니라 넣지 않는다 */
+                주용도: h.용도, 승강기: null, 비상용: null,
+                높이: Math.max(0, ...동들.map(d => Number(d.높이) || 0)) || null,
+                지상층: Math.max(0, ...동들.map(d => Number(d.지상층) || 0)) || null, 지하층: Math.max(0, ...동들.map(d => Number(d.지하층) || 0)) || null,
+                구조: h.구조_코드_명 || (동들.find(d => d.구조) || {}).구조 || null, 지붕: null },
+        scope: { 필지: 1, 인허가: 1, 전유부: 0, 층별: 0, 가상: 1 },
+        받은자료: (() => { const z = 받은자료(범, h.시군구_코드); return z ? Object.fromEntries(Object.entries(z).map(([k, v]) => [k, v.n])) : null; })(),
+        geo: 필.geo,
+        가상: { 종류: 'h', pk, 상태말: '사업승인 · 사용검사 전', 키말: '주택대장', 출처: '건축HUB 주택인허가 원문(기본개요 · 동별개요 · 주차장)',
+                착공일: h.착공일 || null, 착공예정일: h.착공예정일, 허가일: h.승인일, 사용검사예정일: h.사용검사예정일, 원문처음월: h.원문처음월,
+                단지명, 청약: 청.recordset || [], 땅 } };
+    }
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(몸);
+  } catch (e) { fail(res, e, 'virtual'); }
+});
+
 app.get('/api/near/at', async (req, res) => {
   const lat = Number(req.query.lat), lng = Number(req.query.lng);
   const sgg = /^\d{5}$/.test(String(req.query.sgg || '')) ? String(req.query.sgg) : null;
