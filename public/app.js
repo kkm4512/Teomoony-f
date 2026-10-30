@@ -1033,6 +1033,18 @@ async function loadMarkers() {
 let newbuildItems = [];
 let redevItems = [], selectedRedev = null;
 let ahItems = [];   /* 2026-10-23: Enter 목록의 청약 공고(단지에 아직 안 이어진 것) */
+let hpItems = [];   /* 2026-10-30: Enter 목록의 사업승인 아파트(주택인허가 — 공고 전 · 공사 중) */
+/* 승인 아파트로 가기: 좌표가 있으면 그 자리로 옮기고 핀 말풍선을 연다(핀은 줌 15 이상에서 그려진다) */
+async function 승인으로(h) {
+  if (h.lat == null || h.lng == null) return toast(`${esc(h.이름 || '이름 없음')} — 지번이 블록이라 지도 자리를 못 찾았습니다(${esc(h.대지위치 || '')})`, 5000);
+  map.setView([h.lat, h.lng], Math.max(map.getZoom(), 17));
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 400));
+    let 찾음 = null;
+    newbuildLayer.eachLayer(l => { if (l._hpid === h.hp_pk) 찾음 = l; });
+    if (찾음) { 찾음.openPopup(); return; }
+  }
+}
 let selectedKapt = null;
 let newbuildLayer = null;
 let 분양핀층 = null, 분양핀켜짐 = false, 분양핀차례 = 0;   /* 12:32 버튼을 뺐다 — 검색 제안 '청약 공고' 로 찾는다 */
@@ -1083,7 +1095,7 @@ function drawHousePlans(list) {
       zIndexOffset: 350, riseOnHover: true,
       title: `${h.이름 || '이름 없음'} · ${fmt(h.세대)}세대 · 사업계획승인 ${날8(h.승인일) || '—'}`,
     });
-    mk._hp = true;
+    mk._hp = true; mk._hpid = h.hp_pk;
     mk.bindPopup(hpPopup(h), { maxWidth: 300 });
     mk.on('popupopen', e => {                         // 위쪽 지역 고르기 줄(약 90px)에 안 가리게 — 돌아가는 지도에선 autoPan 여백이 안 먹어 직접 민다
       const 위 = e.popup.getElement().getBoundingClientRect().top - map.getContainer().getBoundingClientRect().top;
@@ -1317,6 +1329,18 @@ async function 제안부르기() {
         if (묶음.length) j = { ...j2, q, 묶음 };
       }
     }
+    /* 10-30 사장님 "호반써밋초량 안뜨는디": 사업승인 아파트(공고 전 · 공사 중)도 제안에 — 따로 받아 묶음 하나로 붙인다 */
+    try {
+      const hp = await fetch('/api/houseplans/search?q=' + encodeURIComponent(q)).then(r => r.json());
+      if (내차례 !== 제안.차례 || askMode) return;
+      if (hp && hp.items && hp.items.length) {
+        const 묶 = { 종류: '사업승인 아파트', 전체: hp.전체, 항목: hp.items.slice(0, 5).map(h => ({
+          이름: h.이름 || '이름 없음', 보조: [h.대지위치, fmt(h.세대) + '세대', h.승인일 ? '사업계획승인 ' + 날8(h.승인일) : null].filter(Boolean).join(' · '),
+          표: '사업승인 · 사용검사 전', 동작: { 종류: '승인', hp: h } })) };
+        j = { ...j, q: j.q || q, 묶음: [...(j.묶음 || []), 묶] };
+        delete j.안내;
+      }
+    } catch (e) { /* 보조 — 실패해도 제안은 그대로 */ }
     제안.마지막 = j;
     if (document.activeElement === $('#q')) 제안그리기(j);
   } catch (e) { if (내차례 === 제안.차례) 제안닫기(); }
@@ -1332,6 +1356,7 @@ async function 제안고르기(it) {
   const d = it.동작 || {};
   if (찾은점Layer.층) 찾은점Layer.층.clearLayers();
   if (d.종류 === '단지') return select(d.id, false);
+  if (d.종류 === '승인') return 승인으로(d.hp);
   if (d.종류 === '신축') return selectNewbuild(d.code, false);
   if (d.종류 === '법정동') {
     if (d.경계있음) return selectLawd(d.lawd_cd);
@@ -2067,6 +2092,8 @@ async function search() {
     newbuildItems = d.newbuilds || [];
     redevItems = d.redevs || [];
     ahItems = d.applyhomes || [];
+    try { const hp = q ? await fetch('/api/houseplans/search?q=' + encodeURIComponent(q)).then(r => r.json()) : null; hpItems = (hp && hp.items) || []; }
+    catch (e) { hpItems = []; }
     바뀜정보 = d.바뀜 || null;      // 308: 옛 행정동 이름으로 찾았을 때 — 지금 동 안내
     꼬리뗌정보 = d.꼬리뗌 || null;  // '드림아트빌라' → '드림아트빌' 로 찾았을 때
     /* ★ 상한에 걸렸으면 숫자 옆에 적는다 — '200개 단지' 가 '전부 200개' 로
@@ -2075,7 +2102,8 @@ async function search() {
       + (d.잘림 ? ` (상한 ${fmt(d.상한)} — 더 있습니다)` : '')
       + (lawdItems.length ? ` · 법정동 ${fmt(lawdItems.length)}` : '')
       + (newbuildItems.length ? ` · 신축 ${fmt(newbuildItems.length)}` : '')
-      + (ahItems.length ? ` · 청약 공고 ${fmt(ahItems.length)}` : '');
+      + (ahItems.length ? ` · 청약 공고 ${fmt(ahItems.length)}` : '')
+      + (hpItems.length ? ` · 사업승인 ${fmt(hpItems.length)}` : '');
     renderList();
   } catch (e) {
     $('#list').innerHTML = `<li class="muted">검색하지 못했습니다.</li>`;
@@ -2089,7 +2117,7 @@ function renderList() {
      깔아 두면 거리순 1등이 최근 목록 **아래**로 밀려서, 가장 가까운 건물이
      화면 밖에 있다. 거리순이라는 약속이 깨진다. */
   const rec = myPos ? '' : recentRows();
-  if (!items.length && !lawdItems.length && !newbuildItems.length && !redevItems.length && !ahItems.length) {
+  if (!items.length && !lawdItems.length && !newbuildItems.length && !redevItems.length && !ahItems.length && !hpItems.length) {
     ul.innerHTML = rec || `<li class="muted">결과가 없습니다. <span class="sm">(${esc(범위말로())}만 다룹니다)</span></li>`; return;
   }
   /* 법정동을 단지보다 위에 둔다. 동을 치는 사람은 그 동으로 이동하려는 것이다. */
@@ -2154,7 +2182,15 @@ function renderList() {
           ? (c.거리m < 1000 ? c.거리m + 'm' : (c.거리m / 1000).toFixed(1) + 'km')
             + '<br>' + c.dong_cnt + '동'
           : c.dong_cnt + '동<br>' + c.pnu_cnt + '필'}</span>
-    </button></li>`).join('') + ahRows;   // 청약 공고는 단지 뒤(이어진 공고는 위 단지 줄로 이미 나온다)
+    </button></li>`).join('') + ahRows + hpItems.map((h, i) => `
+    <li><button class="row hp" data-hpi="${i}">
+      <span class="sw nb"></span>
+      <span class="mid">
+        <span class="nm">${esc(h.이름 || '이름 없음')} <span class="tag">사업승인 · 사용검사 전</span></span>
+        <span class="ad">${esc([h.대지위치, h.승인일 ? '승인 ' + 날8(h.승인일) : null, h.사용검사예정일 ? '사용검사 ' + 날8(h.사용검사예정일) + ' 예정' : null].filter(Boolean).join(' · '))}</span>
+      </span>
+      <span class="d">${fmt(h.세대)}세대</span>
+    </button></li>`).join('');   // 청약 공고는 단지 뒤(이어진 공고는 위 단지 줄로 이미 나온다) · 10-30 사업승인 아파트는 맨 뒤
 }
 
 /* ---------------- 주변 점 찍기 (2026-10-20) ----------------
@@ -2450,7 +2486,7 @@ async function 내위치찾기() {
     closeDetail();
     selectedLawd = null; selectedKapt = null;
     items = r.단지 || [];
-    lawdItems = []; newbuildItems = [];
+    lawdItems = []; newbuildItems = []; hpItems = [];
     lastSearchQ = null;            // 다음 검색에서 상세를 닫게 둔다
 
     const 단위 = GEO_반경 >= 1000 ? (GEO_반경 / 1000) + 'km' : GEO_반경 + 'm';
@@ -5169,6 +5205,7 @@ async function boot() {
     if (b.dataset.rkLawd || b.dataset.rkSgg) return;   // 지역 순위 줄은 문서 단위 처리기가 받는다 — 여기서 select(NaN) 로 /c/NaN 이 열렸다(문의 #1)
     if (b.dataset.lawd) selectLawd(b.dataset.lawd);
     else if (b.dataset.kapt) selectNewbuild(b.dataset.kapt, true);
+    else if (b.dataset.hpi != null && hpItems[Number(b.dataset.hpi)]) 승인으로(hpItems[Number(b.dataset.hpi)]);
     else if (b.dataset.ah) 공고상세(b.dataset.ah, b.dataset.lat ? Number(b.dataset.lat) : null, b.dataset.lng ? Number(b.dataset.lng) : null);
     else if (b.dataset.id && Number.isInteger(Number(b.dataset.id))) select(Number(b.dataset.id), true);
   });

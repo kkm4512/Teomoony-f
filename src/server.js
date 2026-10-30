@@ -4041,6 +4041,29 @@ app.get('/api/_my', (req, res, next) => {
 /* ★ 2026-10-30 사장님 "ㄱㄱ" — 주택 사업계획승인(주택인허가, 건축HUB 대용량 원문 · deploy/sql/384 gold.house_plan).
      공고(청약홈) 전 · 공사 중 아파트를 지도에 '승인' 핀으로. 사용검사일이 원문에 비어 있는 것만 · 그 필지에 사용승인 대장이 생긴 것은 뺀다.
      ★ 원문 값 그대로(이름 · 세대 · 날짜). 사용검사 예정일이 지났는데 사용검사일이 없으면 '완공 여부 모름' — 추측하지 않는다. */
+/* 10-30 사장님 "호반써밋초량 안뜨는디": 검색에도 승인 아파트를. 원문 이름은 '호반 써밋' 이라 검색어가 이름보다 길다 —
+     ① 이름(띄어쓰기 뺌)이 검색어에 들어 있음(이름 4글자+ · 일반 말 제외) 또는 검색어가 이름에 들어 있음 ② 주소에 검색어가 들어 있음.
+     남은 말(검색어 − 이름, 예: '초량')이 주소에 있으면 맨 위. 찾기일 뿐 — 단지와 잇지 않는다. */
+app.get('/api/houseplans/search', async (req, res) => {
+  const q = String(req.query.q || '').replace(/\s+/g, '').slice(0, 40);
+  if ([...q].length < 2) return res.json({ items: [], 전체: 0 });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('q', sql.NVarChar(40), q).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      WITH h AS (SELECT *, nm = REPLACE(ISNULL(이름, N''), N' ', N''), ad = REPLACE(ISNULL(대지위치, N''), N' ', N'') FROM gold.house_plan WHERE 상태 <> N'완공 대장 있음'),
+      m AS (SELECT *, 점수 = CASE WHEN nm <> N'' AND nm LIKE N'%' + @q + N'%' THEN 3
+                                 WHEN LEN(nm) >= 4 AND nm NOT LIKE N'%공동주택%' AND nm NOT LIKE N'%신축%' AND nm NOT LIKE N'%아파트' AND @q LIKE N'%' + nm + N'%' THEN 2
+                                 WHEN ad LIKE N'%' + @q + N'%' THEN 1 END
+              FROM h),
+      k AS (SELECT *, 남은 = CASE WHEN 점수 = 2 THEN REPLACE(@q, nm, N'') END FROM m WHERE 점수 IS NOT NULL)
+      SELECT TOP 8 hp_pk, 이름, 대지위치, 세대, 승인일, 사용검사예정일, 상태, lat, lng, 전체 = COUNT(*) OVER (),
+             남은맞음 = CASE WHEN 남은 <> N'' AND LEN(남은) >= 2 AND ad LIKE N'%' + 남은 + N'%' THEN 1 ELSE 0 END
+        FROM k ORDER BY 남은맞음 DESC, 점수 DESC, 세대 DESC, hp_pk`);
+    const 전체 = r.recordset.length ? r.recordset[0].전체 : 0;
+    res.json({ 전체, items: r.recordset });
+  } catch (e) { fail(res, e, 'houseplans-search'); }
+});
+
 app.get('/api/houseplans', async (req, res) => {
   const b = String(req.query.bbox || '').split(',').map(Number);
   if (!(b.length === 4 && b.every(Number.isFinite))) return res.status(400).json({ error: 'bbox 가 필요합니다 (minLng,minLat,maxLng,maxLat)' });
