@@ -7514,6 +7514,68 @@ app.get('/api/complexes/:id/history', async (req, res) => {
   } catch (e) { fail(res, e, 'complex-history'); }
 });
 
+/* ---------- 건축인허가 부가 원문 (386 · 2026-10-30 사장님 "ㄱㄱ+") ----------
+   받아만 두고 안 쓰던 건축HUB 건축인허가 원문을 단지 상세의 허가 줄(같은 TOP 20)에 붙인다.
+   · 평형(전유공용면적 + 호별개요) · 층별 용도(층별개요) — gold.pms_unit_type · pms_floor_use(파생, 386)
+   · 대수선 · 가설건축물 · 주차장 — 원문 표(hub.t0105 · t0108 · t0110)를 관리_허가대장_PK 로 바로
+   · 철거멸실 — 원문에 허가대장 번호가 비어 있어 **지번(PNU)** 으로(gold.pms_demolish) · 이 단지 필지만
+   ★ 모두 **허가(설계 · 신고) 기준**이다 — 사용승인 뒤 대장 값과 다를 수 있다(화면이 그렇게 적는다).
+   ★ 표가 아직 없으면(첫 적재 전) 빈 목록 — 화면은 칸을 안 그린다. 지나며 담기(resp_cache 24시간). */
+app.get('/api/complexes/:id/permitx', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1 || id > 2147483647) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    if (!(await 단지있나(pool, id))) return res.status(404).json({ error: 'not found' });
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('tempdb..#p') IS NOT NULL DROP TABLE #p;
+      SELECT TOP 20 pk = a.mgm_pmsrgst_pk INTO #p
+        FROM gold.v_complex_permit v
+        JOIN silver.arch_permit a ON a.mgm_pmsrgst_pk = v.mgm_pmsrgst_pk AND a.is_current = 1
+       WHERE v.complex_id = @id
+       ORDER BY a.arch_pms_day DESC, a.mgm_pmsrgst_pk;
+      IF OBJECT_ID('gold.pms_unit_type') IS NOT NULL
+        SELECT pk, 평형, 호수, 전유, 공용, 용도, 기타용도, 종류수 FROM (
+          SELECT pk = u.mgm_pmsrgst_pk, u.평형, u.호수, 전유 = CAST(u.전유 AS DECIMAL(14,2)), 공용 = CAST(u.공용 AS DECIMAL(14,2)), u.용도, u.기타용도,
+                 종류수 = COUNT(*) OVER (PARTITION BY u.mgm_pmsrgst_pk),
+                 rn = ROW_NUMBER() OVER (PARTITION BY u.mgm_pmsrgst_pk ORDER BY ISNULL(u.호수, 0) DESC, u.전유 DESC, u.평형)
+            FROM gold.pms_unit_type u JOIN #p ON #p.pk = u.mgm_pmsrgst_pk) x
+         WHERE rn <= 40 ORDER BY pk, rn;
+      ELSE SELECT TOP 0 pk = 1;
+      IF OBJECT_ID('gold.pms_floor_use') IS NOT NULL
+        SELECT pk = f.mgm_pmsrgst_pk, f.층구분, f.용도, f.최저층, f.최고층, f.층줄수, f.면적
+          FROM gold.pms_floor_use f JOIN #p ON #p.pk = f.mgm_pmsrgst_pk
+         ORDER BY f.mgm_pmsrgst_pk, CASE f.층구분 WHEN N'지하' THEN 0 WHEN N'지상' THEN 1 ELSE 2 END, f.최저층, f.면적 DESC;
+      ELSE SELECT TOP 0 pk = 1;
+      SELECT pk = CAST(관리_허가대장_PK AS VARCHAR(50)), 구분 = 대수선_구분_코드_명, 변경 = 대수선_변경_구분_코드_명, 생성일 = 생성_일자
+        FROM hub.t0105 WHERE 마지막월 IS NULL AND 관리_허가대장_PK IN (SELECT pk FROM #p)
+       ORDER BY 1, 2;
+      SELECT pk = CAST(관리_허가대장_PK AS VARCHAR(50)), 용도 = 주_용도_코드_명, 구조 = 구조_코드_명,
+             연면적 = TRY_CONVERT(DECIMAL(14,2), TRY_CONVERT(FLOAT, NULLIF(LTRIM(연면적), N''))),
+             지상층 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, NULLIF(LTRIM(지상_층_수), N''))),
+             존치만료 = 가설건축물_존치_만료_일
+        FROM hub.t0108 WHERE 마지막월 IS NULL AND 관리_허가대장_PK IN (SELECT pk FROM #p)
+       ORDER BY 1;
+      SELECT pk = CAST(관리_허가대장_PK AS VARCHAR(50)),
+             옥내자주 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_자주식_대수)), 옥외자주 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_자주식_대수)),
+             옥내기계 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_기계식_대수)), 옥외기계 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_기계식_대수)),
+             인근자주 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 인근_자주식_대수)), 인근기계 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 인근_기계식_대수)),
+             면제 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 면제_대수))
+        FROM hub.t0110 WHERE 마지막월 IS NULL AND 관리_허가대장_PK IN (SELECT pk FROM #p)
+       ORDER BY 1;
+      IF OBJECT_ID('gold.pms_demolish') IS NOT NULL
+        SELECT TOP 50 d.pnu, d.대지위치, d.건물명, d.구분, d.시작일, d.종료일, d.멸실일, d.연면적, d.건축물수, d.용도, d.구조, d.세대, d.가구, d.호,
+               d.석면_천장재, d.석면_단열재, d.석면_지붕재, d.석면_보온재, d.석면_바닥재, d.석면_기타, d.석면_해당없음
+          FROM gold.pms_demolish d
+         WHERE d.pnu IN (SELECT pnu FROM gold.complex_pnu WHERE complex_id = @id)
+         ORDER BY COALESCE(d.멸실일, d.종료일, d.시작일, '00000000') DESC, d.행_sk DESC;
+      ELSE SELECT TOP 0 pnu = 1;`);
+    const R = r.recordsets;
+    res.json({ 평형: R[0] || [], 층: R[1] || [], 대수선: R[2] || [], 가설: R[3] || [], 주차: R[4] || [], 철거: R[5] || [] });
+  } catch (e) { fail(res, e, 'complex-permitx'); }
+});
+
 /* ---------- 심평원 병원·약국 (295 · load_hira.py, 2026-10-21) ----------
    ★ 상가정보(semas)와 **다른 출처**다 — 건강보험 요양기관 신고. 종별(상급종합·종합병원·병원·의원 …)과 의사 수가 있다.
    ★ 진료과목은 내지 않는다(신고 과목이 넓어 '소아과 133곳' 같은 거짓말이 된다 — CONTEXT 11-168).

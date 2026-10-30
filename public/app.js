@@ -3831,7 +3831,7 @@ function kaptBlock(k) {
    **집계하지 않고 건별로 나열한다.** 허가만 받고 안 짓거나, 취소되거나,
    설계변경으로 여러 건이 쌓인다(62-1 한 지번에 15건). 재개발·재건축은
    주택법 사업계획승인 대상이라 이 체계에 아예 안 들어온다(CONTEXT 4-14). */
-function permitBlock(rows, scope, dongs) {
+function permitBlock(rows, scope, dongs, 단지번호) {
   /* ★ 허가 안의 **동 내역** (2026-10-21). 55,214건을 받아만 두고 안 쓰고 있었다.
      허가 줄에는 **구조·지붕·건축면적이 없다** - 그건 동 행에만 있다.
      ★ 접어 둔다. 허가당 동이 평균 1.11개라 늘 펴 두면 줄만 는다.
@@ -3885,7 +3885,8 @@ function permitBlock(rows, scope, dongs) {
     return sect('건축인허가', 'permit') +
       `<p class="note">${gapCell('', loaded ? 'EMPTY' : 'SCOPE',
         loaded ? '이 단지 지번에 등록된 허가가 없습니다'
-               : '이 법정동의 건축인허가를 아직 받아오지 않았습니다')}</p>`;
+               : '이 법정동의 건축인허가를 아직 받아오지 않았습니다')}</p>
+      <div class="pxdemo" data-pxid="${esc(String(단지번호 || ''))}"></div>`;
   }
   const ym = v => (v ? 날짜(v, null) : null);     /* 2026-10-24: 'yy.mm' 이던 것 — 일자까지(날짜 하나로) */
   const ymd = ym;
@@ -3926,8 +3927,10 @@ function permitBlock(rows, scope, dongs) {
         <div class="pb"><span>${steps.map(([k, v]) => `${k} ${v}`).join(' → ') || '—'}</span></div>
         ${tags.length ? `<div class="pm">${tags.join('<em>·</em>')}</div>` : ''}
         ${동블록(a.mgm_pmsrgst_pk, a.bld_nm)}
+        <div class="pxtra" data-pxpk="${esc(a.mgm_pmsrgst_pk)}" data-pxapr="${a.use_apr_day ? 1 : 0}"></div>
       </div>`;
     }).join('')}</div>
+    <div class="pxdemo" data-pxid="${esc(String(단지번호 || ''))}"></div>
     `;
 }
 
@@ -4783,7 +4786,7 @@ function renderDetail(payload) {
 
   const paneI = `
     ${specBlock(spec, c, vlrat, 전용률, 호총수, kapt, dongs)}
-    ${permitBlock(permits, scope, permitDongs)}
+    ${permitBlock(permits, scope, permitDongs, c.complex_id)}
     ${sect('단지 요약', 'bld')}
     <dl>
       ${row('단지코드', c.complex_id)}
@@ -5087,6 +5090,7 @@ function renderDetail(payload) {
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   역사채우기();            // 이 땅의 역사 — 토지 탭 맨 위
+  허가덧채우기();          // 건축인허가 부가 원문(평형 · 층 · 주차 · 대수선 · 가설 · 철거멸실) — 단지정보 탭
   폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
   용도채우기(c.complex_id); // 머리 용도 표 — 대장 원문 주용도 · 기타용도 · 전유부 호별 용도
   /* 14:05 QA: 다른 단지로 옮겨도 탭 제목이 첫 단지 그대로였다 — 서버 /c/:id 제목과 같은 규칙으로 맞춘다 */
@@ -5642,6 +5646,8 @@ const 정책 = [
     '재개발 단지는 준공 때 본번이 바뀌어 지번으로 안 붙는 경우가 있어, <b>신축 · 150세대 이상 · 그 법정동에서 세대수가 유일</b>할 때만 법정동 + 세대수로 이었습니다(추정).',
     '착공지연은 착공예정일과 실제 착공일의 차이만 씁니다. 착공기한은 날짜이지 일수가 아닙니다.',
     '<b>허가 건물</b>(2026-10-24): 허가마다 딸린 건물(원문 \'동별개요\')을 한 줄씩 적습니다. 원문에는 <b>동 이름 칸이 없고</b> 건물명 칸에 사업명이 들어 있는 경우가 많아, 몇 동인지는 알 수 없습니다 — 그래서 \'동\' 이라 부르지 않고 번호로 적으며(원문에 동 이름이 있으면 그 이름), 주건축물 · 세대 많은 순으로 세웁니다. 대장의 동과 면적 · 세대로 맞춰 \'몇 동\' 이라고 짐작하지 않습니다(허가는 짓기 전 설계값). 실제 동은 동·호 탭(건축물대장)에 있습니다.',
+    '<b>허가 설계 · 대수선 · 가설 · 철거</b>(2026-10-30): 건축HUB 건축인허가 원문의 평형(전유공용면적 · 호별개요) · 층별 용도(층별개요) · 계획 주차(주차장) · 대수선 내용 · 가설건축물을 그 허가 줄에 붙입니다. 모두 <b>허가(설계 · 신고) 기준</b>이라 설계변경 · 사용승인 뒤 값과 다를 수 있고, 사용승인이 난 허가는 건축물대장 칸이 기준입니다. 평형 이름은 원문 그대로(84A · 301 …)이고, 층별 용도는 여러 동을 합친 층 범위입니다.',
+    '<b>철거 · 멸실 신고</b>는 원문에 허가 번호가 비어 있어 <b>이 단지 필지(지번)</b>로만 잇습니다. 날짜 · 석면 함유 표시는 원문 그대로입니다(오타처럼 보이는 날짜도 고치지 않습니다). 모델하우스(견본주택)는 원문 용도 코드에 없어 골라내지 않습니다.',
   ] },
   { 키: 'zone', 제목: '용도지역 · 토지이용', 글: [
     '단지의 용도지역 비중은 <b>필지와 용도지역 폴리곤의 교차 면적</b>입니다 — 땅으로 잰 값이라 대장 경계와 정확히 같지는 않습니다.',
@@ -6806,6 +6812,99 @@ document.addEventListener('click', e => {
   detailTab = 'land'; renderDetail(lastDetail);
   setTimeout(() => { const b = document.querySelector('#detail .clbox'); if (b) b.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 400);
 });
+/* ---------------- 건축인허가 부가 원문 (2026-10-30 사장님 "ㄱㄱ+") ----------------
+   /api/complexes/:id/permitx — 받아만 두고 안 쓰던 건축HUB 건축인허가 원문(386).
+   ★ 허가 줄마다: 평형(전유 · 공용 · 호수) · 층별 용도 · 계획 주차 · 대수선 내용 · 가설건축물. 전부 **허가(설계 · 신고) 기준**이라고 적는다.
+     사용승인이 난 허가는 접어 두고 "지금 값은 대장 칸" 이라고 적는다(대장이 먼저).
+   ★ 철거멸실은 원문에 허가 번호가 비어 있어 **이 단지 필지(지번)** 로만 잇는다 — 칸 아래 한 묶음.
+   ★ 못 받으면 아무것도 안 그린다(덤). */
+const 허가덧캐시 = new Map();
+async function 허가덧받기(키) {
+  if (허가덧캐시.has(키)) return 허가덧캐시.get(키);
+  try {
+    const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/permitx`);
+    if (!x.ok) return null;
+    const r = await x.json(); 허가덧캐시.set(키, r); return r;
+  } catch { return null; }
+}
+const 허가면 = v => (v == null || v === '' ? '—' : `${fmt(Math.round(Number(v) * 100) / 100)}㎡`);
+function 층말(f) {
+  const 구 = f.층구분 || '';
+  const a = f.최저층, b = f.최고층;
+  if (a == null && b == null) return 구 || '층 원문 없음';
+  if (구 === '옥탑') return a === b || b == null ? `옥탑 ${a}층` : `옥탑 ${a}~${b}층`;
+  return a === b || b == null ? `${구} ${a}층` : `${구} ${a}~${b}층`;
+}
+function 허가덧줄(pk, d, 끝남) {
+  const 평 = d.평형.filter(x => x.pk === pk), 층 = d.층.filter(x => x.pk === pk), 주 = d.주차.filter(x => x.pk === pk);
+  const 대 = d.대수선.filter(x => x.pk === pk), 가 = d.가설.filter(x => x.pk === pk);
+  const 묶 = [];
+  if (대.length) {
+    묶.push(`<div class="pxl"><b>대수선 내용</b> ${대.map(x => esc([x.구분, x.변경].filter(Boolean).join(' ') || '구분 원문 없음')).join('<em>·</em>')}</div>`);
+  }
+  if (가.length) {
+    묶.push(`<div class="pxl"><b>가설건축물</b> ${가.map(x => esc([x.용도 === '가설건축물' ? '' : x.용도, x.구조, x.지상층 ? `지상 ${x.지상층}층` : '', x.연면적 ? `연면적 ${fmt(Math.round(x.연면적))}㎡` : '',
+      x.존치만료 ? `존치 기한 ${날짜(x.존치만료, null) || x.존치만료}` : ''].filter(Boolean).join(' · ') || '원문 칸 비어 있음')).join('<em>·</em>')}</div>`);
+  }
+  const 설계 = [];
+  if (평.length) {
+    const 종 = Number(평[0].종류수) || 평.length;
+    const 호합 = 평.reduce((t, x) => t + (Number(x.호수) || 0), 0);
+    설계.push(`<table class="pdtab"><thead><tr><th>평형(원문)</th><th class="n">호수</th><th class="n">전유</th><th class="n">공용</th><th>용도</th></tr></thead><tbody>
+      ${평.map(x => `<tr><td>${esc(x.평형)}</td><td class="n">${x.호수 ? fmt(x.호수) : '—'}</td><td class="n">${허가면(x.전유)}</td><td class="n">${허가면(x.공용)}</td>
+        <td class="muted">${esc(x.용도 || '—')}${x.기타용도 && x.기타용도 !== x.용도 ? ` · ${esc(x.기타용도)}` : ''}</td></tr>`).join('')}
+      </tbody></table>${종 > 평.length ? `<p class="note sm">${fmt(종)}종 중 호수 많은 ${fmt(평.length)}종만 보여 줍니다.</p>` : ''}`);
+    설계.unshift(`<div class="pxl"><b>평형</b> ${fmt(종)}종${호합 ? ` · 호 ${fmt(호합)}개` : ''}</div>`);
+  }
+  if (층.length) {
+    설계.push(`<div class="pxl"><b>층별 용도</b> ${층.map(f => `${esc(층말(f))} ${esc(f.용도 || '용도 원문 없음')}`).join('<em>·</em>')}</div>`);
+  }
+  if (주.length) {
+    const z = 주.reduce((t, x) => { for (const k of ['옥내자주', '옥외자주', '옥내기계', '옥외기계', '인근자주', '인근기계', '면제']) t[k] = (t[k] || 0) + (Number(x[k]) || 0); return t; }, {});
+    const 말 = [['옥내 자주식', z.옥내자주], ['옥외 자주식', z.옥외자주], ['옥내 기계식', z.옥내기계], ['옥외 기계식', z.옥외기계],
+               ['인근 자주식', z.인근자주], ['인근 기계식', z.인근기계], ['면제', z.면제]].filter(([, v]) => v > 0);
+    const 합 = z.옥내자주 + z.옥외자주 + z.옥내기계 + z.옥외기계 + z.인근자주 + z.인근기계;
+    설계.push(`<div class="pxl"><b>계획 주차</b> ${말.length ? `${fmt(합)}대 — ${말.map(([k, v]) => `${k} ${fmt(v)}`).join(' · ')}` : '원문에 대수 0'}</div>`);
+  }
+  if (설계.length) {
+    const 머리 = [평.length ? `평형 ${fmt(Number(평[0].종류수) || 평.length)}종` : '', 층.length ? '층별 용도' : '', 주.length ? '계획 주차' : ''].filter(Boolean).join(' · ');
+    묶.push(`<details class="pdong"><summary>허가 설계 — ${머리}</summary>
+      <div class="pdlist">
+        <p class="note sm">허가(설계) 기준 원문입니다. 설계변경 · 사용승인 뒤 값과 다를 수 있습니다.${끝남 ? ' 이 허가는 사용승인이 났습니다 — 지금 값은 제원 · 평형(건축물대장) 칸이 기준입니다.' : ''}</p>
+        ${설계.join('')}
+      </div></details>`);
+  }
+  return 묶.join('');
+}
+function 철거블록(rows) {
+  if (!rows || !rows.length) return '';
+  const 석 = x => {
+    const 있 = [['천장재', x.석면_천장재], ['단열재', x.석면_단열재], ['지붕재', x.석면_지붕재], ['보온재', x.석면_보온재], ['바닥재', x.석면_바닥재], ['기타', x.석면_기타]]
+      .filter(([, v]) => /^(1|Y|y|유|있음)$/.test(String(v || '').trim())).map(([k]) => k);
+    return 있.length ? `석면 함유 신고: ${있.join(' · ')}` : '';
+  };
+  return `<details class="pdong pxdemo-in"><summary>이 필지의 철거 · 멸실 신고 ${fmt(rows.length)}건</summary>
+    <div class="pdlist">${rows.map(x => {
+      const 날 = [x.시작일 ? `시작 ${날짜(x.시작일, null) || x.시작일}` : '', x.종료일 ? `종료 ${날짜(x.종료일, null) || x.종료일}` : '',
+                  x.멸실일 ? `멸실 ${날짜(x.멸실일, null) || x.멸실일}` : ''].filter(Boolean).join(' → ');
+      const 덧 = [x.용도, x.구조, x.건축물수 ? `건물 ${fmt(x.건축물수)}개` : '', x.연면적 ? `연면적 ${fmt(Math.round(x.연면적))}㎡` : '',
+                  x.세대 ? `${fmt(x.세대)}세대` : '', x.가구 ? `${fmt(x.가구)}가구` : '', x.호 ? `${fmt(x.호)}호` : '', 석(x)].filter(Boolean).join(' · ');
+      return `<div class="pdrow"><b>${esc(x.구분 || '구분 원문 없음')}</b><span>${esc(날 || '날짜 원문 없음')}</span>
+        <span>${esc(x.건물명 || x.대지위치 || '')}</span>${덧 ? `<span class="muted">${esc(덧)}</span>` : ''}</div>`;
+    }).join('')}
+    <p class="note sm">건축HUB 건축인허가 철거멸실관리대장 원문 · 허가 번호가 비어 있어 이 단지 필지(지번)로만 잇습니다.</p></div></details>`;
+}
+async function 허가덧채우기() {
+  const box = document.querySelector('#detail .pxdemo');
+  if (!box) return;
+  const 키 = box.dataset.pxid;
+  if (!키) return;
+  const d = await 허가덧받기(키);
+  const 지금 = document.querySelector('#detail .pxdemo');
+  if (!d || !지금 || 지금.dataset.pxid !== 키) return;
+  for (const el of document.querySelectorAll('#detail .pxtra[data-pxpk]')) el.innerHTML = 허가덧줄(el.dataset.pxpk, d, el.dataset.pxapr === '1');
+  지금.innerHTML = 철거블록(d.철거);
+}
 /* ---------------- 이 땅의 역사 (2026-10-23 사장님 "2번은 좋은거같아") ----------------
    ★ 새로 잇지 않는다 — 이미 이어 둔 것(옛 대장 · 옛 거래 · 정비구역 · 인허가 · 청약 · 분양권 · 지금 대장 · 실거래)을 **시간순 목차**로.
    ★ 사장님 원칙(18:11) "중복 데이터 없고 · 연계된 데이터를 보기 좋게 · 틀린 데이터 없고" — 숫자(건수 · 세대 · 면적)는 **다시 적지 않는다**.
@@ -6844,6 +6943,12 @@ async function 역사채우기() {
     if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, ['info', '건축인허가'], '건축인허가');
   }
   for (const p of (d.청약 || [])) 넣(p.rcrit_pblanc_de, `청약 공고 — ${p.house_nm || ''}`, ['sale', '분양'], '청약홈');
+  /* 10-30 사장님 "ㄱㄱ+": 철거 · 멸실 신고(건축인허가 철거멸실관리대장 원문 · 이 단지 필지) — 날짜가 있는 것만 · 칸은 건축인허가 아래 묶음 */
+  const 덧 = await 허가덧받기(키);
+  /* 철거는 시작일(없으면 종료 · 멸실일) — 다섯 건이 넘으면(재개발 터) 한 줄로 묶는다: 첫 날에 'N건' (목차가 철거로 덮이지 않게) */
+  const 철 = ((덧 && 덧.철거) || []).map(x => ({ x, 날: 숫(x.시작일 || x.종료일 || x.멸실일) })).filter(o => o.날.length === 8).sort((a, b) => a.날.localeCompare(b.날));
+  if (철.length > 5) 넣(철[0].날, `철거·멸실 신고 ${fmt(철.length)}건 시작 (마지막 ${날(철[철.length - 1].날)})`, ['info', '건축인허가'], '철거멸실관리대장');
+  else for (const { x, 날: d8 } of 철) 넣(d8, `${x.구분 || '철거·멸실'} 신고 — ${x.용도 || x.건물명 || '건물'}`, ['info', '건축인허가'], '철거멸실관리대장');
   /* 348 용도지역 바뀜(토지특성 기준연도 사이) · 토지이동(원문 사유 · 일자). 필지가 여럿이면 몇 곳인지만(값은 필지 칸) */
   for (const g of (d.토지바뀜 || [])) {
     const 곳 = Number(g.필지) > 1 ? ` (필지 ${fmt(g.필지)}곳)` : '';
@@ -6895,6 +7000,7 @@ document.addEventListener('click', async e => {
       if (줄 && 줄.closest('tr')) 줄 = 줄.closest('tr');
     }
     const 칠 = 줄 || t;
+    for (let dt = 줄 && 줄.closest('details'); dt; dt = dt.parentElement && dt.parentElement.closest('details')) dt.open = true;   /* 접힌 묶음 안 줄이면 펴고 간다 */
     칠.scrollIntoView({ block: 줄 ? 'center' : 'start', behavior: 'smooth' });
     칠.classList.remove('histflash'); void 칠.offsetWidth; 칠.classList.add('histflash');
     setTimeout(() => 칠.classList.remove('histflash'), 2600);
