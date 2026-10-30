@@ -4064,6 +4064,59 @@ app.get('/api/houseplans/search', async (req, res) => {
   } catch (e) { fail(res, e, 'houseplans-search'); }
 });
 
+/* 10-30 사장님 "123 ㄱㄱ" — 승인 단지 상세(단지 상세 형식). 전부 건축HUB 주택인허가 원문(hub.t02xx) + 청약홈 공고(같은 지번일 때만).
+     ★ 시공사 · 분양가 · 분양 일정은 공고 전엔 공식 자료가 없다 → 비워 두고 까닭을 적는다(화면). 공고가 나면 청약홈 원문으로 채운다.
+     ★ 관리공동형별개요(0212)는 주택대장 PK 가 달라 **같은 지번 + 같은 사업승인일** 일 때만 붙인다. 이름으로 잇지 않는다. */
+app.get('/api/houseplans/:pk', async (req, res) => {
+  const pk = String(req.params.pk || '');
+  if (!/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad pk' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('pk', sql.VarChar(40), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT h.*, b.시군구_코드, b.법정동_코드, b.대지_구분_코드, b.번, b.지, b.블록, b.로트, b.구조_코드_명, b.철거_멸실_구분_코드_명, b.처음월 AS 원문처음월
+        FROM gold.house_plan h JOIN hub.t0201 b ON b.관리_주택대장_PK = h.hp_pk AND b.마지막월 IS NULL WHERE h.hp_pk = @pk;
+      SELECT 동PK = 관리_동별_개요_PK, 동명, 주부속 = 주_부속_구분_코드_명, 용도 = 주_용도_코드_명,
+             민간분양 = TRY_CAST(세대_수_민간_분양 AS INT), 공공분양 = TRY_CAST(세대_수_공공_분양 AS INT), 국민임대 = TRY_CAST(세대_수_국민_임대 AS INT),
+             공공임대 = TRY_CAST(세대_수_공공_임대_계 AS INT), 민간임대 = TRY_CAST(세대_수_민간_임대 AS INT), 사원임대 = TRY_CAST(세대_수_사원_임대 AS INT),
+             근로복지 = TRY_CAST(세대_수_근로_복지 AS INT), 구조 = 구조_코드_명, 지하층 = TRY_CAST(지하_층_수 AS INT), 지상층 = TRY_CAST(지상_층_수 AS INT),
+             높이 = TRY_CAST(높이 AS DECIMAL(9,2)), 연면적 = TRY_CAST(연면적 AS DECIMAL(18,2)), 승용승강기 = TRY_CAST(승용_승강기_인용_수 AS INT), 비상승강기 = TRY_CAST(비상용_승강기_인용_수 AS INT)
+        FROM hub.t0202 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ORDER BY 주_부속_구분_코드, 동명;
+      IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_hub_t0204_dong') SELECT 평형 = NULLIF(LTRIM(RTRIM(x.평형_구분_명)), ''), 호수 = COUNT(*)
+        FROM hub.t0204 x WHERE x.마지막월 IS NULL AND x.관리_동별_개요_PK IN (SELECT 관리_동별_개요_PK FROM hub.t0202 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL)
+       GROUP BY NULLIF(LTRIM(RTRIM(x.평형_구분_명)), '') ORDER BY COUNT(*) DESC ELSE SELECT TOP 0 x = 1;
+      IF OBJECT_ID('hub.t0211') IS NOT NULL SELECT DISTINCT 행위 = 행위_구분_코드_명, 단지명 = NULLIF(단지_명, ''), 총사업비 = TRY_CAST(총_사업비 AS BIGINT), 층수동수 = NULLIF(단지_층_수_동_수, ''),
+             세대 = TRY_CAST(세대_수 AS INT), 착공예정 = NULLIF(착공_예정_일, ''), 사용검사예정 = NULLIF(사용_검사_예정_일, ''), 시설 = NULLIF(시설_명, '')
+        FROM hub.t0211 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 x = 1;
+      IF OBJECT_ID('hub.t0207') IS NOT NULL SELECT 옥내자주 = TRY_CAST(옥내_자주식_대수 AS INT), 옥외자주 = TRY_CAST(옥외_자주식_대수 AS INT), 옥내기계 = TRY_CAST(옥내_기계식_대수 AS INT),
+             옥외기계 = TRY_CAST(옥외_기계식_대수 AS INT), 인근자주 = TRY_CAST(인근_자주식_대수 AS INT), 인근기계 = TRY_CAST(인근_기계식_대수 AS INT), 면제 = TRY_CAST(면제_대수 AS INT)
+        FROM hub.t0207 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 x = 1;
+      IF OBJECT_ID('hub.t0205') IS NOT NULL SELECT 종류 = COALESCE(NULLIF(부대시설_종류_코드_명, ''), 기타_시설_종류), 설치 = NULLIF(설치_현황, ''), 단지내 = NULLIF(단지내_현황, ''), 단지외 = NULLIF(단지외_현황, '')
+        FROM hub.t0205 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 x = 1;
+      IF OBJECT_ID('hub.t0216') IS NOT NULL SELECT 종류 = COALESCE(NULLIF(복리분양시설_종류_코드_명, ''), 기타_시설), 용도 = COALESCE(NULLIF(용도_코드_명, ''), 기타_용도), 면적 = TRY_CAST(면적 AS DECIMAL(18,2)), 개소 = TRY_CAST(개소 AS INT)
+        FROM hub.t0216 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 x = 1;
+      DECLARE @sgg VARCHAR(5), @bj VARCHAR(5), @bun INT, @ji INT, @gb VARCHAR(1), @ap VARCHAR(8);
+      SELECT @sgg = 시군구_코드, @bj = 법정동_코드, @bun = TRY_CAST(번 AS INT), @ji = ISNULL(TRY_CAST(지 AS INT), 0), @gb = ISNULL(대지_구분_코드, '0'), @ap = 승인_일
+        FROM hub.t0201 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL;
+      IF OBJECT_ID('hub.t0212') IS NOT NULL SELECT 사업주체 = NULLIF(사업_주체_명, ''), 단지명 = NULLIF(단지_명, ''), 전용면적 = TRY_CAST(전용_면적 AS DECIMAL(9,2)), 세대 = TRY_CAST(세대_수 AS INT),
+             형별 = COALESCE(NULLIF(형별_구분, ''), NULLIF(기타_형별, '')), 난방 = NULLIF(난방_방식_코드_명, ''), 복도 = NULLIF(복도_형식_코드_명, ''), 최고층 = TRY_CAST(최고_층_수 AS INT)
+        FROM hub.t0212 WHERE 마지막월 IS NULL AND @bun > 0 AND 시군구_코드 = @sgg AND 법정동_코드 = @bj AND TRY_CAST(번 AS INT) = @bun AND ISNULL(TRY_CAST(지 AS INT), 0) = @ji
+         AND 사업_승인_일 = @ap ORDER BY TRY_CAST(전용_면적 AS DECIMAL(9,2)) ELSE SELECT TOP 0 x = 1;
+      SELECT p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.rcept_bgnde, p.rcept_endde, p.przwner_de, p.mvn_prearnge_ym,
+             p.tot_suply, p.bsns_mby_nm, p.cnstrct_entrps_nm, p.pblanc_url, p.hssply_adres,
+             최고분양가 = (SELECT MAX(m.top_amount_man) FROM silver.applyhome_mdl m WHERE m.house_manage_no = p.house_manage_no AND m.pblanc_no = p.pblanc_no),
+             주택형 = (SELECT COUNT(*) FROM silver.applyhome_mdl m WHERE m.house_manage_no = p.house_manage_no AND m.pblanc_no = p.pblanc_no)
+        FROM silver.applyhome_pblanc p
+       WHERE @bun > 0 AND @gb IN ('0', '1') AND p.lawd_cd = @sgg + @bj AND TRY_CAST(p.주소_본번 AS INT) = @bun AND ISNULL(TRY_CAST(p.주소_부번 AS INT), 0) = @ji
+         AND ISNULL(p.주소_산, '0') = CASE WHEN @gb = '1' THEN '1' ELSE '0' END
+       ORDER BY p.rcrit_pblanc_de DESC;`);
+    const rs = r.recordsets;
+    if (!rs[0].length) return res.status(404).json({ error: 'not found' });
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ 출처: '건축HUB 주택인허가(주택법 사업계획승인) 원문 · 청약홈 분양정보(같은 지번 공고)',
+               기본: rs[0][0], 동별: rs[1], 평형: rs[2], 행위: rs[3], 주차: rs[4][0] || null, 부대: rs[5], 복리분양: rs[6], 형별: rs[7], 청약: rs[8] });
+  } catch (e) { fail(res, e, 'houseplan'); }
+});
+
 app.get('/api/houseplans', async (req, res) => {
   const b = String(req.query.bbox || '').split(',').map(Number);
   if (!(b.length === 4 && b.every(Number.isFinite))) return res.status(400).json({ error: 'bbox 가 필요합니다 (minLng,minLat,maxLng,maxLat)' });

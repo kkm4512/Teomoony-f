@@ -435,13 +435,13 @@ function recentRows() {
   return `<li class="rechead">최근 본 단지
       <button type="button" class="reclear" id="reclear">지우기</button></li>` +
     list.map(e => `
-    <li><button class="row recent${e.k === 'n' ? ' nb' : ''}"
-            ${e.k === 'n' ? `data-kapt="${esc(e.id)}"` : `data-id="${esc(e.id)}"`}
-            aria-current="${e.k === 'n' ? e.id === selectedKapt : Number(e.id) === selected}">
-      <span class="sw ${e.k === 'n' ? 'nb' : 'rec'}"></span>
+    <li><button class="row recent${e.k === 'n' || e.k === 'h' ? ' nb' : ''}"
+            ${e.k === 'n' ? `data-kapt="${esc(e.id)}"` : e.k === 'h' ? `data-hpk="${esc(e.id)}"` : `data-id="${esc(e.id)}"`}
+            aria-current="${e.k === 'n' ? e.id === selectedKapt : e.k === 'h' ? e.id === 고른승인 : Number(e.id) === selected}">
+      <span class="sw ${e.k === 'n' || e.k === 'h' ? 'nb' : 'rec'}"></span>
       <span class="mid">
         <span class="nm">${esc(e.nm || '(이름 없음)')}${
-          e.k === 'n' ? ' <span class="tag">대장없음</span>' : ''}</span>
+          e.k === 'n' ? ' <span class="tag">대장없음</span>' : e.k === 'h' ? ' <span class="tag">사업승인</span>' : ''}</span>
         <span class="ad">${esc(e.sub || '')}</span>
       </span>
     </button></li>`).join('');
@@ -1036,6 +1036,9 @@ let ahItems = [];   /* 2026-10-23: Enter 목록의 청약 공고(단지에 아�
 let hpItems = [];   /* 2026-10-30: Enter 목록의 사업승인 아파트(주택인허가 — 공고 전 · 공사 중) */
 /* 승인 아파트로 가기: 좌표가 있으면 그 자리로 옮기고 핀 말풍선을 연다(핀은 줌 15 이상에서 그려진다) */
 async function 승인으로(h) {
+  return selectHousePlan(h.hp_pk);
+}
+async function 승인으로_옛(h) {
   if (h.lat == null || h.lng == null) return toast(`${esc(h.이름 || '이름 없음')} — 지번이 블록이라 지도 자리를 못 찾았습니다(${esc(h.대지위치 || '')})`, 5000);
   map.setView([h.lat, h.lng], Math.max(map.getZoom(), 17));
   for (let i = 0; i < 20; i++) {
@@ -1096,7 +1099,7 @@ function drawHousePlans(list) {
       title: `${h.이름 || '이름 없음'} · ${fmt(h.세대)}세대 · 사업계획승인 ${날8(h.승인일) || '—'}`,
     });
     mk._hp = true; mk._hpid = h.hp_pk;
-    mk.bindPopup(hpPopup(h), { maxWidth: 300 });
+    mk.on('click', () => selectHousePlan(h.hp_pk));   // 10-30 "123 ㄱㄱ": 말풍선 대신 단지 상세 형식
     mk.on('popupopen', e => {                         // 위쪽 지역 고르기 줄(약 90px)에 안 가리게 — 돌아가는 지도에선 autoPan 여백이 안 먹어 직접 민다
       const 위 = e.popup.getElement().getBoundingClientRect().top - map.getContainer().getBoundingClientRect().top;
       if (위 < 100) map.panBy([0, 위 - 100]);
@@ -1116,6 +1119,98 @@ async function loadNewbuilds() {
     if (!r.error) drawNewbuilds(r.markers || []);
     if (h && !h.error) drawHousePlans(h.markers || []);
   } catch (e) { /* 보조 축이다. 실패해도 단지 화면을 막지 않는다 */ }
+}
+
+/* ---------------- 승인 단지 상세 (2026-10-30 사장님 "123 ㄱㄱ") ----------------
+   단지 상세와 같은 그릇(#detail). 전부 원문 — 주택인허가(건축HUB) + 같은 지번의 청약홈 공고.
+   ★ 시공사 · 분양가 · 분양 일정 · 분양사무소는 **공고 전엔 공식 자료가 없다** → '모름(공고 전)' 과 그 까닭. 민간 사이트 값은 쓰지 않는다. */
+let 고른승인 = null;
+async function selectHousePlan(pk) {
+  고른승인 = pk; selected = null; selectedKapt = null;
+  주소맞춤('/', 상세쌓기());
+  시트('full'); 목록자동(true);
+  const box = $('#detail'); box.hidden = false; box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  try {
+    const d = await fetch(`/api/houseplans/${encodeURIComponent(pk)}`).then(r => r.json());
+    if (고른승인 !== pk) return;
+    if (d.error) { box.innerHTML = `<p class="muted">${esc(d.error === 'not found' ? '이 승인 건은 지금 목록에 없습니다(사용검사가 났거나 원문에서 빠졌습니다).' : '불러오지 못했습니다.')}</p>`; return; }
+    renderHousePlan(d);
+    const b = d.기본;
+    focusLayer.clearLayers(); focusBldLayer.clearLayers();
+    if (b.lat != null) map.setView([b.lat, b.lng], Math.max(map.getZoom(), 17));
+    recentPush('h', pk, b.이름 || '이름 없음', `${b.대지위치 || ''} · ${fmt(b.세대)}세대`);
+  } catch (e) { box.innerHTML = `<p class="muted">불러오지 못했습니다.<br>${esc(e.message)}</p>`; }
+}
+function renderHousePlan(d) {
+  lastDetail = null; lastGeo = null; lastBgeo = null; clearShots();
+  const b = d.기본, 동 = d.동별 || [], 행 = d.행위 || [], 청 = d.청약 || [], 형 = d.형별 || [];
+  const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+  const 오늘 = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const 합 = k => 동.reduce((t, x) => t + (Number(x[k]) || 0), 0);
+  const 종류칸 = [['민간분양', '민간분양'], ['공공분양', '공공분양'], ['국민임대', '국민임대'], ['공공임대', '공공임대'], ['민간임대', '민간임대'], ['사원임대', '사원임대'], ['근로복지', '근로복지']]
+    .map(([k, 말]) => [말, 합(k)]).filter(([, n]) => n > 0);
+  const 주동 = 동.filter(x => (x.주부속 || '').includes('주'));
+  const 최고층 = Math.max(0, ...동.map(x => Number(x.지상층) || 0));
+  const 단지명 = (행.find(x => x.단지명) || {}).단지명;
+  const 사업비 = (행.find(x => x.총사업비) || {}).총사업비;
+  const 층동 = (행.find(x => x.층수동수) || {}).층수동수;
+  const 사업주체 = (형.find(x => x.사업주체) || {}).사업주체 || (청.find(x => x.bsns_mby_nm) || {}).bsns_mby_nm;
+  const 시공 = (청.find(x => x.cnstrct_entrps_nm) || {}).cnstrct_entrps_nm;
+  const 지남 = b.사용검사예정일 && b.사용검사예정일 < 오늘;
+  const 공고없음 = !청.length;
+  const 공고전말 = '청약홈에 같은 지번 공고가 아직 없습니다 — 공고가 나면(청약홈 · 매일 05:10 받음) 이 칸이 채워집니다. 민간 사이트의 분양 일정 · 분양가 · 분양사무소는 공식 경로가 없어 쓰지 않습니다.';
+  const 주차 = d.주차;
+  const 주차합 = 주차 ? ['옥내자주', '옥외자주', '옥내기계', '옥외기계', '인근자주', '인근기계'].reduce((t, k) => t + (Number(주차[k]) || 0), 0) : 0;
+  const 평형 = (d.평형 || []).filter(x => x.평형);
+  $('#detail').innerHTML = `
+    <span class="pill nb" title="주택법 사업계획승인 — 사용검사(준공) 기록이 아직 없는 공동주택. 건축물대장은 사용검사 뒤에 생긴다">사업승인 · 사용검사 전</span>
+    <h2>${esc(b.이름 || 단지명 || '(이름 없음)')}</h2>
+    <p class="sub">${esc(b.대지위치 || '')}${단지명 && 단지명 !== b.이름 ? '<br>행위개요 단지명: ' + esc(단지명) : ''}</p>
+    ${sect('규모', 'houseplan', '', '기본개요 · 동별개요')}
+    <dl>
+      ${row('총세대', fmt(b.세대) + '세대')}
+      ${종류칸.length ? row('세대 구분', 종류칸.map(([말, n]) => `${말} ${fmt(n)}`).join(' · ')) : ''}
+      ${row('동', `${fmt(주동.length || b.주건축물수 || 0)}개 동${동.length > 주동.length ? ` (부속 ${fmt(동.length - 주동.length)})` : ''}`)}
+      ${최고층 ? row('최고 층수', `지상 ${fmt(최고층)}층`) : ''}
+      ${b.연면적 ? row('연면적', fmt(Math.round(b.연면적)) + '㎡') : ''}
+      ${층동 ? row('단지 층수 · 동수', esc(층동)) : ''}
+      ${b.구조_코드_명 ? row('구조', esc(b.구조_코드_명)) : ''}
+      ${row('용도', esc(b.용도 || '—'))}
+    </dl>
+    ${sect('일정', 'houseplan', '', '기본개요')}
+    <dl>
+      ${row('사업계획승인', 날8(b.승인일) || '—')}
+      ${row('착공', 날8(b.착공일) || (날8(b.착공예정일) ? 날8(b.착공예정일) + ' <span class="muted">(예정)</span>' : '—'))}
+      ${row('사용검사', 날8(b.사용검사예정일) ? 날8(b.사용검사예정일) + ' <span class="muted">(예정)</span>' + (지남 ? ' <span class="warnx">예정일이 지났는데 사용검사 기록이 없음 — 완공 여부 모름</span>' : '') : '—')}
+      ${row('분양(청약 공고)', 공고없음 ? `<span class="gapw" title="${esc(공고전말)}">모름 · 공고 전</span>` : 청.map(a => `${esc(String(a.rcrit_pblanc_de || '').trim())} 공고`).slice(0, 3).join('<br>'))}
+    </dl>
+    ${sect('사업', 'houseplan', '', '행위개요 · 관리공동형별개요 · 청약홈')}
+    <dl>
+      ${row('사업주체(시행)', 사업주체 ? esc(사업주체) : `<span class="gapw" title="주택인허가 관리공동형별개요(같은 지번 · 같은 승인일)와 청약 공고 모두에 없습니다">모름</span>`)}
+      ${row('시공사', 시공 ? esc(시공) + ' <span class="muted">(청약 공고)</span>' : `<span class="gapw" title="주택인허가에는 시공사 칸이 없습니다. ${esc(공고전말)}">모름 · 공고 전</span>`)}
+      ${row('분양가', 청.some(a => a.최고분양가) ? 청.filter(a => a.최고분양가).slice(0, 1).map(a => `최고 ${eok(Number(a.최고분양가) * 10000)} <span class="muted">(주택형 ${fmt(a.주택형)}개 중 최고 · 청약 공고)</span>`).join('') : `<span class="gapw" title="${esc(공고전말)}">모름 · 공고 전</span>`)}
+      ${사업비 ? row('총사업비', eok(Number(사업비) * 1000) + ' <span class="muted">(원문 천원 단위로 봄)</span>') : ''}
+    </dl>
+    ${동.length ? `${sect(`동별 <span class="muted">${fmt(동.length)}</span>`, 'houseplan', '', '동별개요')}
+      <table><thead><tr><th>동</th><th>용도</th><th class="n">세대</th><th class="n">층</th><th class="n">높이</th></tr></thead><tbody>
+      ${동.map(x => { const 세 = ['민간분양', '공공분양', '국민임대', '공공임대', '민간임대', '사원임대', '근로복지'].reduce((t, k) => t + (Number(x[k]) || 0), 0);
+        return `<tr><td>${esc(x.동명 || '—')}${(x.주부속 || '').includes('부속') ? ' <span class="muted">부속</span>' : ''}</td><td class="muted">${esc(x.용도 || '')}</td>
+          <td class="n">${세 ? fmt(세) : '—'}</td><td class="n">${x.지상층 ? `${fmt(x.지상층)}${x.지하층 ? `/B${fmt(x.지하층)}` : ''}` : '—'}</td><td class="n">${x.높이 ? Number(x.높이).toFixed(1) + 'm' : '—'}</td></tr>`; }).join('')}
+      </tbody></table>` : ''}
+    ${평형.length ? `${sect('평형', 'houseplan', '', '호별개요')}<table><thead><tr><th>평형 구분(원문)</th><th class="n">호</th></tr></thead><tbody>
+      ${평형.map(x => `<tr><td>${esc(x.평형)}</td><td class="n">${fmt(x.호수)}</td></tr>`).join('')}</tbody></table>` :
+      (형.length ? `${sect('전용면적별', 'houseplan', '', '관리공동형별개요')}<table><thead><tr><th>전용</th><th class="n">세대</th></tr></thead><tbody>
+      ${형.map(x => `<tr><td>${x.전용면적 != null ? Number(x.전용면적).toFixed(2) + '㎡' : esc(x.형별 || '—')}</td><td class="n">${fmt(x.세대)}</td></tr>`).join('')}</tbody></table>` :
+      `${sect('평형', 'houseplan')}<p class="note"><span class="gapw" title="호별개요 · 관리공동형별개요에 이 승인 건의 평형 원문이 없습니다(승인 단계에서는 비어 있는 경우가 많습니다)">원문에 없음</span></p>`)}
+    ${주차 ? `${sect('주차', 'houseplan', '', '주차장')}<dl>${row('합계', fmt(주차합) + '대')}
+      ${['옥내자주', '옥외자주', '옥내기계', '옥외기계', '인근자주', '인근기계', '면제'].filter(k => Number(주차[k])).map(k => row(k.replace('자주', ' 자주식').replace('기계', ' 기계식'), fmt(주차[k]) + '대')).join('')}</dl>` : ''}
+    ${(d.부대 || []).length ? `${sect('부대시설', 'houseplan', '', '부대시설')}<ul class="plain">${d.부대.map(x => `<li>${esc(x.종류 || '')}${x.설치 ? ` <span class="muted">${esc(x.설치)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+    ${(d.복리분양 || []).length ? `${sect('복리 · 분양시설', 'houseplan', '', '복리분양시설')}<ul class="plain">${d.복리분양.map(x => `<li>${esc(x.종류 || '')}${x.용도 ? ' · ' + esc(x.용도) : ''}${x.면적 ? ` <span class="muted">${fmt(Math.round(x.면적))}㎡</span>` : ''}</li>`).join('')}</ul>` : ''}
+    ${sect(`청약 공고 <span class="muted">${fmt(청.length)}</span>`, 'houseplanah')}
+    ${청.length ? `<ul class="plain">${청.map(a => `<li><b>${esc(a.house_nm || '')}</b> <span class="muted">${esc(String(a.rcrit_pblanc_de || '').trim())} 공고 · ${fmt(a.tot_suply)}세대${a.mvn_prearnge_ym ? ` · 입주 ${esc(String(a.mvn_prearnge_ym).slice(0, 4))}.${esc(String(a.mvn_prearnge_ym).slice(4, 6))} 예정` : ''}</span>
+        ${a.pblanc_url ? `<a href="${esc(a.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>` : ''}</li>`).join('')}</ul>`
+      : `<p class="note"><span class="gapw" title="${esc(공고전말)}">같은 지번의 청약 공고가 아직 없습니다</span></p>`}
+    <p class="note sm muted">출처: 건축HUB 주택인허가 원문(주택대장 ${esc(b.hp_pk)} · ${esc(b.원문처음월 || '')}부터) · 청약홈 공고는 <b>같은 지번</b>일 때만 붙입니다(이름으로 잇지 않음). 위치는 ${esc(b.위치근거 || '모름')}.</p>`;
 }
 
 async function selectNewbuild(code, fromList) {
@@ -3856,6 +3951,8 @@ const SRC = {
   kinder: { t: '유치원알리미', s: '교육부 · 한국교육학술정보원 (유치원 공시정보)',
             note: '연 2회 공시 · 직선거리' },
   applyhome: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 APT 분양정보)', note: '추정 연결' },
+  houseplan: { t: '주택인허가', s: '국토교통부 건축HUB 주택인허가(주택법 사업계획승인) 대용량 월 파일', note: '원문 그대로' },
+  houseplanah: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 APT 분양정보)', note: '같은 지번 공고' },
   applyhome0: { t: '청약홈 분양정보', s: '한국부동산원 (청약홈 분양정보) — 단지에 아직 안 이어진 공고' },
   closed: { t: '폐쇄·말소 건축물대장', s: '국토교통부 건축HUB 폐쇄말소대장정보', note: '현재 대장과 따로' },
   childcare: { t: '보육정보공개', s: '교육부 · 한국사회보장정보원 (어린이집별 기본정보)', note: '기준일 값 · 직선거리' },
@@ -5206,6 +5303,7 @@ async function boot() {
     if (b.dataset.lawd) selectLawd(b.dataset.lawd);
     else if (b.dataset.kapt) selectNewbuild(b.dataset.kapt, true);
     else if (b.dataset.hpi != null && hpItems[Number(b.dataset.hpi)]) 승인으로(hpItems[Number(b.dataset.hpi)]);
+    else if (b.dataset.hpk) selectHousePlan(b.dataset.hpk);
     else if (b.dataset.ah) 공고상세(b.dataset.ah, b.dataset.lat ? Number(b.dataset.lat) : null, b.dataset.lng ? Number(b.dataset.lng) : null);
     else if (b.dataset.id && Number.isInteger(Number(b.dataset.id))) select(Number(b.dataset.id), true);
   });
@@ -5591,6 +5689,13 @@ const 정책 = [
     '<b>정비계획</b>(계획 용적률·건폐율·층수·공급 세대)은 서울시 도시계획사업(서울플랜+) 자료입니다. 구역 자료와 번호가 달라 <b>자치구 코드 · 사업 소분류 코드 · 사업 면적(소수점까지)</b>이 모두 같은 후보가 하나일 때, 또는 사업 위치 지번이 구역 안이고 면적이 5% 안일 때만 이었습니다. 원문에 0으로 적힌 칸은 \'안 적음\' 이라 비웁니다.',
     '지도 색은 사업 종류, 테두리는 추진 정도(점선 초기 · 실선 인가 이후 · 굵은 실선 착공·준공)입니다. 지구 안에 구역이 겹친 곳은 위(작은 것)의 색만 보입니다.',
   ] },
+  { 키: 'houseplan', 제목: '주택인허가 — 사업승인 · 사용검사 전 아파트 (건축HUB)', 글: [
+    '30세대 이상 아파트는 건축허가가 아니라 <b>주택법 사업계획승인</b>을 받습니다. 건축HUB 주택인허가(대용량 월 파일)의 원문 그대로입니다 — 기본개요 · 동별개요 · 호별개요(평형) · 행위개요 · 주차장 · 부대시설 · 복리분양시설.',
+    '지도의 <b>승인</b> 핀: 총세대 20+ · 승인 2016년 이후 · 사용검사일이 원문에 비어 있는 것. 그 필지에 사용승인된 건축물대장이 생겼으면 뺍니다. 예정일이 지났는데 사용검사 기록이 없으면 \'완공 여부 모름\' 입니다.',
+    '<b>시공사 · 분양가 · 분양 일정 · 분양사무소</b>는 청약 공고 전에는 공식 자료가 없습니다. 민간 사이트의 분양계획은 공식 경로가 없어 쓰지 않습니다. 청약홈에 <b>같은 지번</b> 공고가 나오면 그 원문으로 채웁니다(이름으로 잇지 않음).',
+    '사업주체(시행)는 관리공동형별개요에서 <b>같은 지번 + 같은 사업승인일</b>일 때만 가져옵니다(주택대장 번호가 달라서).'] },
+  { 키: 'houseplanah', 제목: '청약홈 분양정보 — 승인 단지에 붙이는 법', 글: [
+    '승인 단지의 대표 지번(시군구 · 법정동 · 산 · 본번 · 부번)이 청약 공고 주소에서 풀어낸 지번과 <b>똑같을 때만</b> 붙입니다. 블록 주소(택지지구 ○○BL)는 지번이 없어 붙이지 않습니다.'] },
   { 키: 'applyhome', 제목: '청약홈 분양정보 (한국부동산원)', 글: [
     '공고는 지번·입주월·세대·거리로 단지에 잇습니다(추정 연결, 이름으로 잇지 않음). 다섯 길과 막는 조건은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',
     '공고 지번이 지금 지적도에 없으면 같은 본번 필지들의 가운데에 <b>근처</b>로 놓습니다(정확한 자리 아님). 그것도 없으면 <b>자리 모름</b>으로 법정동에 모읍니다.',
