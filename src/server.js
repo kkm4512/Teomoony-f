@@ -176,6 +176,7 @@ const 이용_정확 = {
   '/api/complexes/near':    '내 위치 주변',
   '/api/ask':               'AI 검색',
   '/api/newbuilds':         '신축 단지',
+  '/api/houseplans':        '사업승인 아파트',
   '/api/zones':             '용도지역 겹쳐보기',
   '/api/redev':             '정비사업 겹쳐보기',
   '/api/lawds':             '법정동 목록',
@@ -4037,6 +4038,26 @@ app.get('/api/_my', (req, res, next) => {
 /* ---------- 대장이 아직 없는 신축 ----------
    CONTEXT 4-13 의 세 번째 경우. "거래가 없는 것" 도 "영영 매칭 불가" 도 아니고,
    대장이 나오면 저절로 붙는다. 그때 이 목록에서 사라진다. */
+/* ★ 2026-10-30 사장님 "ㄱㄱ" — 주택 사업계획승인(주택인허가, 건축HUB 대용량 원문 · deploy/sql/384 gold.house_plan).
+     공고(청약홈) 전 · 공사 중 아파트를 지도에 '승인' 핀으로. 사용검사일이 원문에 비어 있는 것만 · 그 필지에 사용승인 대장이 생긴 것은 뺀다.
+     ★ 원문 값 그대로(이름 · 세대 · 날짜). 사용검사 예정일이 지났는데 사용검사일이 없으면 '완공 여부 모름' — 추측하지 않는다. */
+app.get('/api/houseplans', async (req, res) => {
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (!(b.length === 4 && b.every(Number.isFinite))) return res.status(400).json({ error: 'bbox 가 필요합니다 (minLng,minLat,maxLng,maxLat)' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3])
+      .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT TOP 300 hp_pk, 이름, 대지위치, 세대, 주건축물수, 용도, 승인일, 착공예정일, 착공일, 사용검사예정일, 상태, lat, lng, 위치근거
+          FROM gold.house_plan
+         WHERE lat BETWEEN @y0 AND @y1 AND lng BETWEEN @x0 AND @x1 AND 상태 <> N'완공 대장 있음'
+         ORDER BY 세대 DESC, hp_pk`);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ 출처: '건축HUB 주택인허가(주택법 사업계획승인) — 원문', markers: r.recordset });
+  } catch (e) { fail(res, e, 'houseplans'); }
+});
+
 app.get('/api/newbuilds', async (req, res) => {
   /* ★ 2026-10-21 QA: bbox 가 **깨져 있어도 조용히 무시**하고 전국 상위 200을 줬다.
      (`?bbox=1,2,3` → 200 + 장위자이레디언트… 화면 밖 단지가 마커로 나온다.)

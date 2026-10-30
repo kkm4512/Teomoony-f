@@ -1060,13 +1060,49 @@ function drawNewbuilds(list) {
   });
 }
 
+/* ★ 2026-10-30 사장님 "ㄱㄱ": 주택 사업계획승인(주택인허가) — 공고 전 · 공사 중 아파트를 '승인' 핀으로(신축 핀과 같은 층).
+     원문 값 그대로. 사용검사 예정일이 지났는데 사용검사일이 비어 있으면 '완공 여부 모름'(추측하지 않는다). */
+function hpMarkerHtml(h) {
+  return `<div class="nbmark hpmark"><b>승인</b><span>${esc(shortNm(h.이름 || '') || '이름 없음')}</span><i>${fmt(h.세대)}세대</i></div>`;
+}
+function hpPopup(h) {
+  const 오늘 = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const 지남 = h.사용검사예정일 && h.사용검사예정일 < 오늘;
+  const 줄 = (k, v) => v ? `<tr><th>${k}</th><td>${v}</td></tr>` : '';
+  return `<div class="hppop"><b>${esc(h.이름 || '이름 없음')}</b>
+    <p class="muted">${esc(h.대지위치 || '')}</p>
+    <table>${줄('세대', fmt(h.세대) + '세대')}${줄('주 건축물', h.주건축물수 ? fmt(h.주건축물수) + '동' : '')}${줄('용도', esc(h.용도 || ''))}
+      ${줄('사업계획승인', 날8(h.승인일))}${줄('착공', 날8(h.착공일) || (날8(h.착공예정일) ? 날8(h.착공예정일) + ' (예정)' : ''))}
+      ${줄('사용검사', 날8(h.사용검사예정일) ? 날8(h.사용검사예정일) + ' (예정)' + (지남 ? ' — 예정일이 지났는데 사용검사 기록이 없어 완공 여부는 모름' : '') : '')}</table>
+    <p class="hpsrc">출처: 건축HUB 주택인허가(주택법 사업계획승인) 원문 · 위치는 ${esc(h.위치근거 || '')} · 청약 공고 전일 수 있습니다</p></div>`;
+}
+function drawHousePlans(list) {
+  list.forEach(h => {
+    const mk = L.marker([h.lat, h.lng], {
+      icon: L.divIcon({ className: 'cmark-wrap', html: hpMarkerHtml(h), iconSize: null, iconAnchor: [0, 0] }),
+      zIndexOffset: 350, riseOnHover: true,
+      title: `${h.이름 || '이름 없음'} · ${fmt(h.세대)}세대 · 사업계획승인 ${날8(h.승인일) || '—'}`,
+    });
+    mk._hp = true;
+    mk.bindPopup(hpPopup(h), { maxWidth: 300 });
+    mk.on('popupopen', e => {                         // 위쪽 지역 고르기 줄(약 90px)에 안 가리게 — 돌아가는 지도에선 autoPan 여백이 안 먹어 직접 민다
+      const 위 = e.popup.getElement().getBoundingClientRect().top - map.getContainer().getBoundingClientRect().top;
+      if (위 < 100) map.panBy([0, 위 - 100]);
+    });
+    mk.addTo(newbuildLayer);
+  });
+}
 async function loadNewbuilds() {
   if (map.getZoom() < LAWD_ZOOM) { newbuildLayer.clearLayers(); return; }
+  if (map._popup && map._popup.isOpen() && map._popup._source && map._popup._source._hp) return;   // 승인 핀 말풍선이 열려 있으면 다시 그리지 않는다(지우면 말풍선이 닫힌다)
   const b = map.getBounds();
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(n => n.toFixed(7)).join(',');
   try {
-    const r = await fetch(`/api/newbuilds?bbox=${bbox}`).then(r => r.json());
+    const [r, h] = await Promise.all([
+      fetch(`/api/newbuilds?bbox=${bbox}`).then(r => r.json()),
+      fetch(`/api/houseplans?bbox=${bbox}`).then(r => r.json()).catch(() => ({ markers: [] }))]);
     if (!r.error) drawNewbuilds(r.markers || []);
+    if (h && !h.error) drawHousePlans(h.markers || []);
   } catch (e) { /* 보조 축이다. 실패해도 단지 화면을 막지 않는다 */ }
 }
 
