@@ -4044,6 +4044,102 @@ app.get('/api/_my', (req, res, next) => {
 /* 10-30 사장님 "호반써밋초량 안뜨는디": 검색에도 승인 아파트를. 원문 이름은 '호반 써밋' 이라 검색어가 이름보다 길다 —
      ① 이름(띄어쓰기 뺌)이 검색어에 들어 있음(이름 4글자+ · 일반 말 제외) 또는 검색어가 이름에 들어 있음 ② 주소에 검색어가 들어 있음.
      남은 말(검색어 − 이름, 예: '초량')이 주소에 있으면 맨 위. 찾기일 뿐 — 단지와 잇지 않는다. */
+/* ---------- 공사 중 건물 (387 · 2026-10-30 사장님 "그냥 일반 건대장 나온 단지처럼" · "ㄱㄱ") ----------
+   건축허가 신축 · 2022+ 착공 · 사용승인 전 · 대장 아직 없음 · 공동주택/오피스텔 10세대(호)+ → 지도 '공사 중' 핀 + 단지 상세 같은 틀.
+   ★ 전부 허가(설계) 원문. 대장 · 실거래 · 공시가격은 사용승인 뒤에 생긴다(화면이 그렇게 적는다).
+   ★ 땅(필지 · 토지특성 · 토지이동 · 철거멸실 · 같은 필지의 다른 허가)은 지번(PNU)으로 — 승인 아파트 상세와 같이 쓴다. */
+async function 땅묶음(pool, pnu) {
+  if (!/^\d{19}$/.test(String(pnu || ''))) return { 필지: null, 토지: null, 이동: [], 철거: [], 허가: [] };
+  const r = await pool.request().input('pnu', sql.Char(19), pnu).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    SELECT TOP 1 pnu, jibun, addr, jiga, gosi_year, centroid_lat, centroid_lng FROM silver.cadastral_parcel WHERE pnu = @pnu AND is_current = 1;
+    SELECT TOP 1 base_year, 지목 = lndcgr_nm, 면적 = lndpcl_ar, 용도지역1 = prpos_area1_nm, 용도지역2 = prpos_area2_nm, 이용상황 = lad_use_sittn_nm,
+           지형고저 = tpgrph_hg_code_nm, 지형형상 = tpgrph_frm_code_nm, 도로접면 = road_side_code_nm, 공시지가 = pblntf_pclnd
+      FROM silver.land_char WHERE pnu = @pnu AND is_current = 1 ORDER BY base_year DESC, base_month DESC;
+    IF OBJECT_ID('silver.land_move_hist') IS NOT NULL SELECT TOP 12 이동일, 이동사유 FROM silver.land_move_hist WHERE pnu = @pnu AND 이동일 IS NOT NULL ORDER BY 이동일 DESC;
+    ELSE SELECT TOP 0 x = 1;
+    IF OBJECT_ID('gold.pms_demolish') IS NOT NULL SELECT TOP 30 구분, 시작일, 종료일, 멸실일, 연면적, 건축물수, 용도, 구조, 세대, 가구, 호, 건물명, 대지위치,
+           석면_천장재, 석면_단열재, 석면_지붕재, 석면_보온재, 석면_바닥재, 석면_기타, 석면_해당없음
+      FROM gold.pms_demolish WHERE pnu = @pnu ORDER BY COALESCE(멸실일, 종료일, 시작일, '00000000') DESC;
+    ELSE SELECT TOP 0 x = 1;
+    SELECT TOP 15 mgm_pmsrgst_pk, bld_nm, arch_gb_nm, main_purps_nm, hhld_cnt, ho_cnt, tot_area, arch_pms_day, real_stcns_day, use_apr_day
+      FROM silver.arch_permit WHERE pnu = @pnu AND is_current = 1 ORDER BY arch_pms_day DESC;`);
+  const R = r.recordsets;
+  return { 필지: R[0][0] || null, 토지: R[1][0] || null, 이동: R[2] || [], 철거: R[3] || [], 허가: R[4] || [] };
+}
+app.get('/api/prebuilds', async (req, res) => {
+  const b = String(req.query.bbox || '').split(',').map(Number);
+  if (!(b.length === 4 && b.every(Number.isFinite))) return res.status(400).json({ error: 'bbox 가 필요합니다 (minLng,minLat,maxLng,maxLat)' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3])
+      .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        IF OBJECT_ID('gold.pre_build') IS NOT NULL
+          SELECT TOP 300 pk, 이름, 대지위치, 용도, 세대, 호, 착공일, lat, lng FROM gold.pre_build
+           WHERE lat BETWEEN @y0 AND @y1 AND lng BETWEEN @x0 AND @x1 ORDER BY ISNULL(세대, 0) + ISNULL(호, 0) DESC, pk;
+        ELSE SELECT TOP 0 pk = 1;`);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ 출처: '건축HUB 건축인허가 기본개요 원문 — 착공 · 사용승인 전', markers: r.recordset });
+  } catch (e) { fail(res, e, 'prebuilds'); }
+});
+app.get('/api/prebuilds/search', async (req, res) => {
+  const q = String(req.query.q || '').replace(/\s+/g, '').slice(0, 40);
+  if ([...q].length < 2) return res.json({ items: [], 전체: 0 });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('q', sql.NVarChar(40), q).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('gold.pre_build') IS NULL BEGIN SELECT TOP 0 pk = 1; RETURN; END;
+      WITH h AS (SELECT *, nm = REPLACE(ISNULL(이름, N''), N' ', N''), ad = REPLACE(ISNULL(대지위치, N''), N' ', N'') FROM gold.pre_build),
+      m AS (SELECT *, 점수 = CASE WHEN nm <> N'' AND nm LIKE N'%' + @q + N'%' THEN 3
+                                 WHEN LEN(nm) >= 4 AND nm NOT LIKE N'%신축%' AND nm NOT LIKE N'%공동주택%' AND @q LIKE N'%' + nm + N'%' THEN 2
+                                 WHEN ad LIKE N'%' + @q + N'%' THEN 1 END FROM h)
+      SELECT TOP 8 pk, 이름, 대지위치, 용도, 세대, 호, 착공일, lat, lng, 전체 = COUNT(*) OVER ()
+        FROM m WHERE 점수 IS NOT NULL ORDER BY 점수 DESC, ISNULL(세대, 0) + ISNULL(호, 0) DESC, pk`);
+    res.json({ 전체: r.recordset.length ? r.recordset[0].전체 : 0, items: r.recordset });
+  } catch (e) { fail(res, e, 'prebuilds-search'); }
+});
+app.get('/api/prebuilds/:pk', async (req, res) => {
+  const pk = String(req.params.pk || '');
+  if (!/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad pk' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('pk', sql.VarChar(50), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT a.*, p.lat, p.lng, 핀 = CASE WHEN p.pk IS NULL THEN 0 ELSE 1 END
+        FROM silver.arch_permit a LEFT JOIN gold.pre_build p ON p.pk = a.mgm_pmsrgst_pk
+       WHERE a.mgm_pmsrgst_pk = @pk AND a.is_current = 1;
+      SELECT d.mgm_dong_ouln_pk, d.bld_nm, d.main_atch_gb_nm, d.main_purps_nm, d.strct_nm, d.roof_nm, d.arch_area, d.tot_area,
+             d.hhld_cnt, d.ho_cnt, d.fmly_cnt, d.ride_use_elvt_cnt, d.emgen_use_elvt_cnt
+        FROM silver.arch_permit_dong d WHERE d.mgm_pmsrgst_pk = @pk AND d.is_current = 1
+       ORDER BY CASE WHEN d.main_atch_gb_nm = N'주건축물' THEN 0 ELSE 1 END, ISNULL(d.hhld_cnt, 0) + ISNULL(d.ho_cnt, 0) DESC, d.mgm_dong_ouln_pk;
+      IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_hub_t0103_pms' AND object_id = OBJECT_ID('hub.t0103'))
+        SELECT 동PK = CAST(관리_동별_개요_PK AS VARCHAR(50)),
+               지상 = MAX(CASE WHEN 층_구분_코드_명 = N'지상' THEN TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 층_번호)) END),
+               지하 = MAX(CASE WHEN 층_구분_코드_명 = N'지하' THEN TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 층_번호)) END)
+          FROM hub.t0103 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL GROUP BY 관리_동별_개요_PK;
+      ELSE SELECT TOP 0 동PK = '';
+      IF OBJECT_ID('gold.pms_floor_use') IS NOT NULL SELECT 층구분, 용도, 최저층, 최고층, 층줄수, 면적 FROM gold.pms_floor_use WHERE mgm_pmsrgst_pk = @pk
+         ORDER BY CASE 층구분 WHEN N'지하' THEN 0 WHEN N'지상' THEN 1 ELSE 2 END, 최저층, 면적 DESC;
+      ELSE SELECT TOP 0 x = 1;
+      IF OBJECT_ID('gold.pms_unit_type') IS NOT NULL SELECT TOP 60 평형, 호수, 전유 = CAST(전유 AS DECIMAL(14,2)), 공용 = CAST(공용 AS DECIMAL(14,2)), 용도
+          FROM gold.pms_unit_type WHERE mgm_pmsrgst_pk = @pk ORDER BY ISNULL(호수, 0) DESC, 전유 DESC;
+      ELSE SELECT TOP 0 x = 1;
+      SELECT 옥내자주 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_자주식_대수)), 옥외자주 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_자주식_대수)),
+             옥내기계 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_기계식_대수)), 옥외기계 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_기계식_대수)),
+             인근자주 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 인근_자주식_대수)), 인근기계 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 인근_기계식_대수)),
+             면제 = TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 면제_대수))
+        FROM hub.t0110 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL;
+      SELECT TOP 1 처음월 FROM hub.t0101 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL;`);
+    const R = r.recordsets;
+    if (!R[0].length) return res.status(404).json({ error: 'not found' });
+    const a = R[0][0];
+    const 땅 = await 땅묶음(pool, a.pnu);
+    if (a.lat == null && 땅.필지) { a.lat = 땅.필지.centroid_lat; a.lng = 땅.필지.centroid_lng; }
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ 출처: '건축HUB 건축인허가 원문(기본개요 · 동별개요 · 층별개요 · 전유공용면적 · 주차장) · 필지 · 토지특성 · 토지이동 · 철거멸실(지번)',
+               기본: a, 동: R[1], 동층: R[2] || [], 층: R[3] || [], 평형: R[4] || [], 주차: R[5] || [], 원문처음월: (R[6][0] || {}).처음월 || null, 땅 });
+  } catch (e) { fail(res, e, 'prebuild'); }
+});
+
 app.get('/api/houseplans/search', async (req, res) => {
   const q = String(req.query.q || '').replace(/\s+/g, '').slice(0, 40);
   if ([...q].length < 2) return res.json({ items: [], 전체: 0 });
@@ -4113,7 +4209,8 @@ app.get('/api/houseplans/:pk', async (req, res) => {
     if (!rs[0].length) return res.status(404).json({ error: 'not found' });
     res.set('Cache-Control', 'public, max-age=300');
     res.json({ 출처: '건축HUB 주택인허가(주택법 사업계획승인) 원문 · 청약홈 분양정보(같은 지번 공고)',
-               기본: rs[0][0], 동별: rs[1], 평형: rs[2], 행위: rs[3], 주차: rs[4][0] || null, 부대: rs[5], 복리분양: rs[6], 형별: rs[7], 청약: rs[8] });
+               기본: rs[0][0], 동별: rs[1], 평형: rs[2], 행위: rs[3], 주차: rs[4][0] || null, 부대: rs[5], 복리분양: rs[6], 형별: rs[7], 청약: rs[8],
+               땅: await 땅묶음(pool, rs[0][0].pnu) });   /* 10-30: 공사 중 상세와 같은 '땅' 탭 */
   } catch (e) { fail(res, e, 'houseplan'); }
 });
 
@@ -5948,7 +6045,10 @@ app.get('/api/complexes/markers', async (req, res) => {
         WHERE c.centroid_lat IS NOT NULL
           AND c.centroid_lng BETWEEN @x0 AND @x1
           AND c.centroid_lat BETWEEN @y0 AND @y1
-        ORDER BY c.dong_cnt DESC, c.hhld_cnt_sum DESC, c.complex_id`);   /* 2026-10-25: 동점은 단지번호 순(잘릴 때 어느 것이 남는지 정해 둔다 — 서비스DB 와 같은 답) */
+        /* ★ 2026-10-30 사장님 "실거래 있는 건 확실하게 보여주는 거 맞지?" — 400개를 동 수 · 세대 순으로만 자르니 빽빽한 동네에서
+             가격 있는 단지가 빠졌다(망원 2km: 가격 있는 단지 831곳+ 중 305곳만). → 최근 3년 매매 · 옛 매매 · 매매 없음 순으로 먼저 고른다 */
+        ORDER BY CASE WHEN t.max_amount IS NULL THEN 2 WHEN t.max_ymd >= @cut THEN 0 ELSE 1 END,
+                 c.dong_cnt DESC, c.hhld_cnt_sum DESC, c.complex_id`);   /* 2026-10-25: 동점은 단지번호 순(잘릴 때 어느 것이 남는지 정해 둔다 — 서비스DB 와 같은 답) */
     /* ★ 상한에 걸렸는지 **정확히** 알려면 한 줄 더 받아 본다 (2026-10-20).
        길이가 상한과 같다는 것만으로는 '딱 그만큼'인지 '잘렸는지' 모른다.
        TOP 을 lim+1 로 받고 넘치면 잘린 것이다 — 추측이 아니라 사실이 된다.

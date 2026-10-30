@@ -2014,3 +2014,6 @@ table.cned td.sm { line-height: 1.6; }
 .pxl b{font-weight:600;color:var(--ink);margin-right:4px}
 .pxl em{font-style:normal;color:var(--ink-3);margin:0 4px}
 .pxdemo{margin-top:8px}
+/* 2026-10-30 공사 중 건물 핀(건축허가 · 착공 · 사용승인 전) — 승인 핀과 같은 꼴, 색만 다르게 */
+.pbmark { border-style: dashed !important; }
+.pbmark b { color: #7c3aed !important; }

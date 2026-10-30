@@ -192,8 +192,9 @@ async function 마커(req, res, next) {
                                        trade_cnt, rent_cnt, area_grp, max_amount, max_ymd, max_dealing, "실거래이름"
                                   FROM svc.complex_marker
                                  WHERE centroid_lng BETWEEN $1 AND $3 AND centroid_lat BETWEEN $2 AND $4
-                                 ORDER BY dong_cnt DESC NULLS LAST, hhld_cnt_sum DESC NULLS LAST, complex_id LIMIT $5`,
-                              [bbox[0], bbox[1], bbox[2], bbox[3], limit + 1]);
+                                 ORDER BY CASE WHEN max_amount IS NULL THEN 2 WHEN max_ymd >= $6 THEN 0 ELSE 1 END,   -- 10-30: 가격 있는 단지 먼저(적재DB 경로와 같은 순서)
+                                          dong_cnt DESC NULLS LAST, hhld_cnt_sum DESC NULLS LAST, complex_id LIMIT $5`,
+                              [bbox[0], bbox[1], bbox[2], bbox[3], limit + 1, 기준]);
     실패 = 0; 세기('markers', 'hit');
     const 잘림 = r.rows.length > limit;
     const 행 = (잘림 ? r.rows.slice(0, limit) : r.rows).map(m => ({ ...m, 최근3년: m.max_ymd ? m.max_ymd >= 기준 : null }));
