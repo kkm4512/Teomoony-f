@@ -2806,6 +2806,46 @@ let lastDetail = null;      // 직거래 토글 시 재요청 없이 다시 그�
 let hideDirect = false;     // 직거래 제외하고 볼 것인가
 let lastGeo = null, lastBgeo = null;   // 상세 썸네일용. select() 가 채운다
 let detailTab = 'info';
+/* 10-31 사장님 "실거래 → 교통 → 다음으로 넘어갈 때 탭으로 확실하게 분리되고, 오른쪽 · 왼쪽을 눌러서 이동 · 마우스로 꾹 눌러 좌우로" —
+   상세 탭 줄이 패널보다 길면 양 끝에 ‹ › 단추(누르면 한 화면씩 민다) · 마우스로 잡아 끌기 · 휠 굴리기를 붙인다.
+   끄는 중에 손을 떼면 탭이 눌린 것으로 치지 않는다(5px 넘게 움직였으면). 폰(터치)은 원래대로 손가락으로 민다. */
+function 탭줄손잡이(bar) {
+  if (!bar || bar.dataset.grip) return;
+  bar.dataset.grip = '1';
+  const wrap = document.createElement('div'); wrap.className = 'tabwrap';
+  bar.parentNode.insertBefore(wrap, bar); wrap.appendChild(bar);
+  const 단추 = (cls, 글, 방향) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'tabnav ' + cls;
+    b.setAttribute('aria-label', 방향 < 0 ? '탭 왼쪽으로' : '탭 오른쪽으로'); b.textContent = 글;
+    b.addEventListener('click', () => bar.scrollBy({ left: 방향 * Math.max(120, bar.clientWidth * 0.7), behavior: 'smooth' })); wrap.appendChild(b); return b; };
+  const L = 단추('l', '‹', -1), R = 단추('r', '›', 1);
+  const 맞춤 = () => { const 끝 = bar.scrollWidth - bar.clientWidth;
+    L.hidden = bar.scrollLeft <= 2; R.hidden = 끝 <= 2 || bar.scrollLeft >= 끝 - 2; 탭줄위치 = bar.scrollLeft; };
+  bar.addEventListener('scroll', 맞춤, { passive: true });
+  new ResizeObserver(맞춤).observe(bar);
+  맞춤();
+  /* 휠: 세로로 굴려도 탭 줄이 가로로 움직인다(넘칠 때만 · 페이지 스크롤은 끝에 닿으면 그대로) */
+  bar.addEventListener('wheel', e => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    const 끝 = bar.scrollWidth - bar.clientWidth; if (끝 <= 2) return;
+    if ((e.deltaY < 0 && bar.scrollLeft <= 0) || (e.deltaY > 0 && bar.scrollLeft >= 끝)) return;
+    e.preventDefault(); bar.scrollLeft += e.deltaY;
+  }, { passive: false });
+  /* 마우스로 잡아 끌기 */
+  let 잡음 = null, 끌었음 = false;
+  bar.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    잡음 = { x: e.clientX, l: bar.scrollLeft, id: e.pointerId }; 끌었음 = false;
+  });
+  bar.addEventListener('pointermove', e => {
+    if (!잡음 || e.pointerId !== 잡음.id) return;
+    const dx = e.clientX - 잡음.x;
+    if (!끌었음 && Math.abs(dx) > 5) { 끌었음 = true; bar.setPointerCapture(e.pointerId); bar.classList.add('dragging'); }
+    if (끌었음) bar.scrollLeft = 잡음.l - dx;
+  });
+  const 놓기 = e => { if (!잡음 || (e && e.pointerId !== 잡음.id)) return; 잡음 = null; bar.classList.remove('dragging'); };
+  bar.addEventListener('pointerup', 놓기); bar.addEventListener('pointercancel', 놓기);
+  bar.addEventListener('click', e => { if (끌었음) { e.stopPropagation(); e.preventDefault(); 끌었음 = false; } }, true);   // 끈 뒤의 '누름' 은 탭 고르기가 아니다
+}
 let 탭줄위치 = 0;                     // 2026-10-24 탭 줄 가로 위치(다시 그려도 유지)                // 단지정보 | 실거래 | 토지·건물 (왼쪽부터)
 let hoDong = null;                     // 동호배치도에서 펼쳐 둔 동 (null = 세대 많은 동)
 let tradeArea = null;                  // 실거래에서 고른 평형(area_grp). null = 전체
@@ -5177,6 +5217,8 @@ function renderDetail(payload) {
     b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs') || {}).scrollLeft || 0; detailTab = b.dataset.tab; renderDetail(lastDetail); }));
   /* ★ 2026-10-24 사장님 "상권 탭을 누르면 단지정보 탭으로 가" — 다시 그리면 탭 줄(폰에서 가로로 넘김)이 맨 왼쪽으로 돌아가
        오른쪽 끝 탭(상권 · 병원·약국)을 눌러도 '단지정보 · 동·호 …' 만 보였다. 누르기 전 위치를 되살리고, 고른 탭이 안 보이면 보이게 민다. */
+  { const 줄위치 = 탭줄위치;   /* 감싸면(요소를 옮기면) 가로 위치가 0 으로 돌아간다 — 감싼 뒤에 되살린다 */
+    탭줄손잡이($('#detail .tabs')); 탭줄위치 = 줄위치; }
   { const bar = $('#detail .tabs'), on = bar && bar.querySelector('.tab[aria-selected="true"]');
     if (bar && on) {
       bar.scrollLeft = 탭줄위치;
