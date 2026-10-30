@@ -1153,7 +1153,7 @@ function drawPreBuilds(list) {
   });
 }
 function 대장전말(V, 무엇) {
-  return `<p class="note"><span class="gapw">${esc(무엇)} 없음 · ${V.종류 === 'h' ? '사용검사' : '사용승인'} 전</span> 건축물대장이 아직 없어 ${esc(무엇)}이(가) 이어지지 않습니다 — 대장이 생기면 일반 단지로 넘어가 채워집니다.</p>`;
+  return `<p class="note"><span class="gapw">${esc(무엇)} 없음 · ${V.종류 === 'p' ? '사용승인' : '사용검사'} 전</span> 건축물대장이 아직 없어 ${esc(무엇)}이(가) 이어지지 않습니다 — 대장이 생기면 일반 단지로 넘어가 채워집니다.</p>`;
 }
 function 가상분양칸(V) {
   const 청 = V.청약 || [];
@@ -4083,7 +4083,7 @@ function 학원칸(a) {
 
 let 그리는가상 = null;   /* 10-30: 대장 전 건물(가상)을 그리는 동안 — 대장(bld) 배지를 허가 · 승인 원문 배지로 바꿔 단다(출처를 속이지 않게) */
 function sect(title, srcKey, extra = '', detail = '') {
-  if (그리는가상 && srcKey === 'bld') srcKey = 그리는가상.종류 === 'h' ? 'houseplan' : 'permit';
+  if (그리는가상 && srcKey === 'bld') srcKey = 그리는가상.종류 === 'h' ? 'houseplan' : 그리는가상.종류 === 'a' ? 'houseplanah' : 'permit';
   const x = SRC[srcKey];
   /* 2026-10-22 사장님 "단지정보 안 부가 설명은 '정책' 에 전부 정리" — 배지를 누르면 그 출처의 기준·설명(정책 화면)으로 */
   const badge = x ? `<a class="src" href="#policy" data-pol="${esc(detail === '주택가격' ? '주택가격' : srcKey)}" title="${esc(x.s)} — 누르면 이 칸의 기준·출처">${esc(x.t)}${
@@ -4261,7 +4261,8 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
     const 다른값 = [spec.세대 && Number(spec.세대) !== Number(대장) ? `총괄표제부 ${fmt(spec.세대)}` : '',
                    kh && kh !== Number(대장) && !(spec.세대 && kh === Number(spec.세대)) ? `K-apt ${fmt(kh)}` : ''].filter(Boolean);
     /* 10-30 QA: 대장 전(가상) 오피스텔은 허가 원문에 세대가 없고 호만 있다 — '값 없음' 대신 호를 적는다(세대로 바꿔 부르지 않는다) */
-    const 호만 = Number(spec.호) || 0;
+    const 호만 = Number(spec.호) || 0, 공급 = Number(spec.공급세대) || 0;
+    if (!대장 && 공급) add('세대', `공급 ${fmt(공급)}세대 <span class="muted">· 청약 공고 — 조합원 · 보류분은 빠질 수 있어 총 세대가 아닙니다</span>`); else
     add('세대', 대장 ? `${fmt(대장)}세대${호만 ? ` · ${fmt(호만)}호` : ''}${다른값.length ? ` <span class="muted">· ${다른값.join(' · ')}</span>` : ''}`
               : 호만 ? `${fmt(호만)}호 <span class="muted">· 오피스텔 — 세대가 아니라 호</span>` : '');
     add('동', c.dong_cnt != null ? `${fmt(c.dong_cnt)}동${k && Number(k.kapt_동수) && Number(k.kapt_동수) !== Number(c.dong_cnt) ? ` <span class="muted">· 주거동 ${fmt(k.kapt_동수)}</span>` : ''}` : '');
@@ -4846,6 +4847,8 @@ function renderDetail(payload) {
     V && V.착공일 ? `착공 ${날짜(V.착공일)}` : '',
     V && !V.착공일 && V.착공예정일 ? `착공 ${날짜(V.착공예정일)} 예정` : '',
     V && V.사용검사예정일 ? `사용검사 ${날짜(V.사용검사예정일)} 예정` : '',
+    V && V.공고일 ? `청약 공고 ${날짜(String(V.공고일).replace(/-/g, '').slice(0, 8))}` : '',
+    V && V.입주예정 ? `입주 ${날짜(V.입주예정)} 예정` : '',
   ].filter(Boolean).join(' · ');
   const ratios = spec && (spec.용적률 || spec.건폐율)
     ? `용적률 ${spec.용적률 ? Number(spec.용적률).toFixed(0) + '%' : '—'} · 건폐율 ${
@@ -5122,7 +5125,7 @@ function renderDetail(payload) {
   $('#detail').innerHTML = `
     ${shotsMarkup(c)}
     <!-- 13:21 '단독/총괄표제부'(대장 구조) 대신 **대장 원문 용도** — 용도채우기 가 채운다 -->
-    ${V ? `<a class="pill nb" href="#policy" data-pol="precomplex" title="${esc(V.출처)} — 건축물대장은 사용승인(사용검사) 뒤에 생깁니다. 값은 허가 · 승인(설계) 기준입니다. 누르면 가단지 기준">${esc(V.상태말)}${c.complex_id != null ? ` · 가단지 ${esc(String(c.complex_id))}` : ''}</a>
+    ${V ? `<a class="pill nb" href="#policy" data-pol="precomplex" title="${esc(V.출처)} — 건축물대장은 사용승인(사용검사) 뒤에 생깁니다. 값은 ${V.종류 === 'a' ? '청약 공고 원문' : '허가 · 승인(설계)'} 기준입니다. 누르면 가단지 기준">${esc(V.상태말)}${c.complex_id != null ? ` · 가단지 ${esc(String(c.complex_id))}` : ''}</a>
       <span class="pill">${c.has_recap ? '여러 동' : '한 동'}</span>${c.complex_id != null ? `
       <button type="button" class="favbtn" data-fav="${c.complex_id}" aria-pressed="${관심.has(c.complex_id)}"
             title="관심 단지 — 내 정보에 모아 봅니다(로그인)">${관심.has(c.complex_id) ? '★ 관심' : '☆ 관심'}</button>` : ''}` : `<span class="usebox" data-use="${esc(String(c.complex_id))}"><span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '여러 동' : '한 동'}</span></span>
@@ -5140,7 +5143,7 @@ function renderDetail(payload) {
       `${i && 묶 !== TABS[i - 1][2] ? '<span class="tabsep" aria-hidden="true"></span>' : ''}<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !(V ? V.종류 === 'h' || (V.청약 || []).length : 분양수(c.complex_id)) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
     <div class="pane">${({ info: paneI, near: paneN, shop: paneC, med: paneH, edu: paneE, dong: paneD, mgmt: paneM,
                            price: paneP, sale: paneS, land: paneL })[detailTab] || paneI}</div>
-    ${V ? `<p class="note sm muted">출처: ${esc(V.출처)} (${esc(V.키말)} ${esc(V.pk)}${V.원문처음월 ? ` · ${esc(V.원문처음월)}부터` : ''}) · 주변 · 땅은 그 지번 필지 기준. 이름은 원문 그대로이고 대장 단지와 이름으로 잇지 않습니다.</p>` : ''}`;
+    ${V ? `<p class="note sm muted">출처: ${esc(V.출처)} (${esc(V.키말)} ${esc(V.pk)}${V.원문처음월 ? ` · ${esc(V.원문처음월)}부터` : ''}) · ${V.지번없음 ? '공고 지번이 없는 택지 블록이라 지도 자리 · 주변 · 땅은 비어 있습니다' : '주변 · 땅은 그 지번 필지 기준'}. 이름은 원문 그대로이고 대장 단지와 이름으로 잇지 않습니다.</p>` : ''}`;
 
   그리는가상 = null;
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
@@ -5715,14 +5718,16 @@ const 정책 = [
     '<b>철거 · 멸실 신고</b>는 원문에 허가 번호가 비어 있어 <b>이 단지 필지(지번)</b>로만 잇습니다. 날짜 · 석면 함유 표시는 원문 그대로입니다(오타처럼 보이는 날짜도 고치지 않습니다). 모델하우스(견본주택)는 원문 용도 코드에 없어 골라내지 않습니다.',
     '<b>공사 중 건물</b>(지도 \'공사 중\' 핀 · 2026-10-30): 건축허가 신축 중 <b>2022년 이후 착공 · 사용승인 전 · 그 필지에 새 대장이 아직 없는</b> 공동주택 · 오피스텔(10세대 · 호 이상)입니다. 대장 단지와 같은 탭으로 보이지만 값은 전부 허가(설계) 원문이고, 평형 · 실거래 · 공시가격은 사용승인 · 대장 뒤에 생겨 비어 있습니다. 2019~2021년에 착공했는데 승인 기록이 없는 건은 공사 중인지 멈췄는지 알 수 없어 넣지 않습니다.',
   ] },
-  { 키: 'precomplex', 제목: '가단지 — 대장 전 건물의 단지 번호 (공사 중 · 사업승인)', 글: [
+  { 키: 'precomplex', 제목: '가단지 — 대장 전 건물의 단지 번호 (공사 중 · 사업승인 · 청약 공고)', 글: [
     '건축물대장은 사용승인(아파트는 사용검사) 뒤에 생깁니다. 그 전 건물도 단지처럼 볼 수 있게 <b>9억번대 번호</b>(900000001~)를 따로 붙였습니다. 일반 단지 수 · 지역별 개수 · 가격 마커 · 통계 · AI 검색에는 <b>섞지 않습니다</b> — 지도에는 \'공사 중\' · \'승인\' 핀으로만 보입니다.',
     '<b>사업승인 아파트</b>(건축HUB 주택인허가): 총세대 20 이상 · 사용검사일이 비어 있음 · 사업계획승인 2016년 이후 · 같은 필지에 승인일 뒤 사용승인된 건축물대장이 없음.',
     '<b>공사 중 건물</b>(건축HUB 건축인허가): 신축 · 2022년 이후 실제 착공 · 사용승인일이 비어 있음 · 같은 필지에 허가일 뒤 사용승인된 대장이 없음 · 공동주택이거나 오피스텔(층별 용도) · 세대 + 호 10 이상 · 한 필지에 여럿이면 가장 최근 허가 한 건.',
-    '<b>붙이지 않는 것</b>: 단독주택 · 상가 · 창고 · 공장 등, 10세대(호) 미만, 2019~2021년에 착공했는데 승인 기록이 없는 건(공사 중인지 멈췄는지 알 수 없음).',
+    '<b>청약 공고</b>(청약홈 입주자모집공고): 단지에 아직 안 이어진 공고 · 같은 지번에 위 두 가단지가 없음 · 같은 지번에 첫 공고일 뒤 사용승인된 대장이 없음 · 첫 공고의 입주 예정이 공고보다 뒤이고 이번 달 이후. 공고 때 이미 입주한 분양전환 · 잔여세대 · 공가 재공급은 다 지은 단지라 붙이지 않습니다. 세대 칸은 <b>공급 세대</b>(조합원 · 보류분이 빠질 수 있음)입니다. 매일 새 공고를 봅니다.',
+    '지도의 분양 핀이나 검색의 청약 공고를 누르면, 그 공고가 속한 가단지가 있으면 단지 상세로 열립니다. 사업승인 · 공사 중 가단지에도 같은 지번의 청약 공고가 \'분양 · 청약\' 칸에 붙습니다.',
+    '<b>붙이지 않는 것</b>: 단독주택 · 상가 · 창고 · 공장 등, 10세대(호) 미만, 2019~2021년에 착공했는데 승인 기록이 없는 건(공사 중인지 멈췄는지 알 수 없음), 건축허가만 받고 착공 전인 건(허가만 받고 안 짓거나 취소 · 설계변경이 흔해 \'짓는 중\' 으로 오해될 수 있음 — 착공하면 자동으로 붙습니다).',
     '번호는 한 번 주면 바뀌지 않습니다(공유 주소 유지). 매달 다시 보고, <b>같은 필지에 대장 단지가 생기면 그 단지로 넘어갑니다</b> — 옛 번호로 들어와도 정식 단지가 열립니다. 원문에서 빠지고 넘어갈 단지가 없으면 \'없어짐\' 으로 남깁니다. 이름으로 잇지 않습니다.',
     '화면의 값은 허가 · 승인(설계) 원문입니다. 호 · 실거래 · 공시가격 · 관리비는 대장 뒤에 생겨 비어 있습니다. 주변 · 토지의 기준점은 그 지번 필지의 가운데입니다.',
-    '알려진 한계: 승인 건 중 지번이 블록 · 로트인 곳(약 1,400)은 필지를 못 찾아 지도 핀이 없고 검색으로만 찾습니다. 사용검사 예정일이 지났는데 기록이 없는 곳(약 1,600)은 \'완공 여부 모름\' 입니다.',
+    '알려진 한계: 승인 건 중 지번이 블록 · 로트인 곳(약 1,400)과 청약 공고 중 지번이 없는 곳(약 210)은 필지를 못 찾아 지도 핀이 없고 검색으로만 찾습니다. 사용검사 예정일이 지났는데 기록이 없는 곳(약 1,600)은 \'완공 여부 모름\' 입니다. 청약 공고는 택지 블록 지번, 승인은 실제 지번으로 적혀 <b>같은 사업이 두 번 보일 수 있습니다</b>(이름으로 합치지 않음 — 많아야 약 50곳).',
   ] },
   { 키: 'namemask', 제목: '건물 이름 속 개인 이름 가림', 글: [
     '건축물대장 · 허가 원문의 건물 이름 끝에 <b>소유자 이름이 괄호로</b> 붙은 경우가 많습니다(예: \'단독주택 (홍길동)\'). 터무니는 대표자 이름을 보이지 않는 것과 같은 까닭으로, 화면 · 검색 · 지도에서 이 괄호를 <b>(개인 이름 가림)</b>으로 바꿔 보입니다.',
@@ -6690,7 +6695,16 @@ async function 분양핀불러오기() {
     mk.addTo(분양핀층);
   }
 }
+/* 10-30 청약 공고 → 그 공고가 속한 가단지(389) — 있으면 일반 단지처럼 상세를 연다(공고만 있는 사업도 단지 상세 그대로) */
+const 공고가단지 = new Map();
+async function 가단지찾기(house) {
+  if (공고가단지.has(house)) return 공고가단지.get(house);
+  let id = null;
+  try { const r = await fetch(`/api/precomplex-ah/${encodeURIComponent(house)}`).then(x => x.json()); id = r && r.complex_id ? Number(r.complex_id) : null; } catch (e) { /* 못 물어봄 — 옛 길(공고 칸) */ }
+  공고가단지.set(house, id); return id;
+}
 async function 분양핀열기(house, ll) {
+  { const g = await 가단지찾기(house); if (g) { map.closePopup(); return select(g, false); } }
   const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
     .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
   try {
@@ -7295,6 +7309,7 @@ function 지도맞추기(b, z = 18) {
   }, 280);
 }
 async function 공고상세(house, lat, lng) {
+  { const g = await 가단지찾기(house); if (g) return select(g, false); }   // 10-30 가단지가 있으면 단지 상세로
   const 표 = 'ah:' + house;
   보기전환('map');
   const 남길동 = 동공고지금;                 // 동 공고 점에서 열었으면 그 점들은 남긴다(옆 공고로 바로 옮겨 가게)

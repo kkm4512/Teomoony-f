@@ -505,7 +505,7 @@ app.use(async (req, res, next) => {
       if (!m[2]) return res.json({ 이동: g.이동_complex_id, 이유: '사용승인 — 이 자리에 건축물대장 단지가 생겨 그 단지로 옮겼습니다' });
       return res.status(404).json({ error: 'not found', 이동: g.이동_complex_id });
     }
-    if (g.상태 !== '살아있음') return res.status(404).json({ error: 'not found', 이유: '원문(건축인허가 · 주택인허가)에서 빠졌습니다' });
+    if (g.상태 !== '살아있음') return res.status(404).json({ error: 'not found', 이유: '원문(건축인허가 · 주택인허가 · 청약 공고)에서 빠졌습니다' });
     if (!m[2]) {
       const 몸 = await 가상몸(pool, g.종류, g.원문pk, id);
       if (!몸) return res.status(404).json({ error: 'not found' });
@@ -4418,6 +4418,18 @@ async function 가상허가(pool, pnu) {
      WHERE rn <= 60 ORDER BY mgm_pmsrgst_pk, rn;`);
   return { permits: r.recordsets[0] || [], permitDongs: r.recordsets[1] || [] };
 }
+/* 가단지의 청약 공고 — 같은 공고 지번(pnu) 이거나, 389 가 이 가단지에 묶은 공고(gold.pre_applyhome · 지번 없는 택지 블록 공고 포함). 10-30 */
+async function 가상청약(pool, pnu, 번호) {
+  return (await pool.request().input('pnu', sql.Char(19), /^\d{19}$/.test(String(pnu || '')) ? pnu : null).input('cid', sql.Int, 번호 ?? null).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+    SELECT TOP 20 p.house_manage_no, p.pblanc_no, p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.tot_suply, p.mvn_prearnge_ym, p.pblanc_url, p.cnstrct_entrps_nm, p.bsns_mby_nm,
+           p.hssply_adres, p.lawd_cd,
+           최고분양가 = (SELECT MAX(m.top_amount_man) FROM silver.applyhome_mdl m WHERE m.house_manage_no = p.house_manage_no AND m.pblanc_no = p.pblanc_no)
+      FROM silver.applyhome_pblanc p
+     WHERE (@pnu IS NOT NULL AND p.pnu = @pnu)
+        OR (@cid IS NOT NULL AND OBJECT_ID('gold.pre_applyhome') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM gold.pre_applyhome x WHERE x.complex_id = @cid AND x.house_manage_no = p.house_manage_no AND x.pblanc_no = p.pblanc_no))
+     ORDER BY p.rcrit_pblanc_de DESC, p.house_manage_no, p.pblanc_no`)).recordset || [];
+}
 const 가상빈칸 = { tradeStats: [], 거래목록: [], jeonse: [], offsite: [], hos: [], 호총수: 0, 호공시: [], 공시적재: null, kapt: null, cost: null, vlrat: [], 전용률: null };
 async function 가상몸(pool, kind, pk, 번호) {
   {
@@ -4457,7 +4469,7 @@ async function 가상몸(pool, kind, pk, 번호) {
       const 필 = await 가상필지(pool, a.pnu);
       const 점 = 필.parcels[0] || {};
       const 세대 = Number(a.hhld_cnt) || null, 호 = Number(a.ho_cnt) || null;
-      const [주변, 허가, 땅] = await Promise.all([가상주변(pool, 점.centroid_lat, 점.centroid_lng, a.sigungu_cd), 가상허가(pool, a.pnu), 땅묶음(pool, a.pnu)]);
+      const [주변, 허가, 땅, 청] = await Promise.all([가상주변(pool, 점.centroid_lat, 점.centroid_lng, a.sigungu_cd), 가상허가(pool, a.pnu), 땅묶음(pool, a.pnu), 가상청약(pool, a.pnu, 번호)]);
       몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors,
         complex: { complex_id: 번호 ?? null, complex_nm: a.가린이름 || a.plat_plc, rep_plat_plc: a.plat_plc, rep_road_addr: null, has_recap: dongs.length > 1,
                    dong_cnt: dongs.filter(d => d.regstr_kind_nm === '주건축물').length || dongs.length, bld_cnt: dongs.length,
@@ -4477,8 +4489,8 @@ async function 가상몸(pool, kind, pk, 번호) {
         받은자료: (() => { const z = 받은자료(범, a.sigungu_cd); return z ? Object.fromEntries(Object.entries(z).map(([k, v]) => [k, v.n])) : null; })(),
         geo: 필.geo,
         가상: { 종류: 'p', pk, 상태말: '공사 중 · 사용승인 전', 키말: '허가대장', 출처: '건축HUB 건축인허가 원문(기본개요 · 동별개요 · 층별개요 · 주차장)',
-                착공일: a.real_stcns_day, 허가일: a.arch_pms_day, 원문처음월: a.처음월, 호, 땅 } };
-    } else {
+                착공일: a.real_stcns_day, 허가일: a.arch_pms_day, 원문처음월: a.처음월, 호, 땅, 청약: 청 } };
+    } else if (kind === 'h') {
       const r = await pool.request().input('pk', sql.VarChar(40), pk).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT h.*, b.시군구_코드, b.법정동_코드, b.구조_코드_명, b.처음월 AS 원문처음월
           FROM gold.house_plan h JOIN hub.t0201 b ON b.관리_주택대장_PK = h.hp_pk AND b.마지막월 IS NULL WHERE h.hp_pk = @pk;
@@ -4503,16 +4515,7 @@ async function 가상몸(pool, kind, pk, 번호) {
       const 점 = 필.parcels[0] || {};
       const lat = h.lat ?? 점.centroid_lat, lng = h.lng ?? 점.centroid_lng;
       const [주변, 허가, 땅, 청] = await Promise.all([가상주변(pool, lat, lng, h.시군구_코드), 가상허가(pool, h.pnu), 땅묶음(pool, h.pnu),
-        pool.request().input('pnu', sql.Char(19), h.pnu || '').query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-          /* 승인 상세(/api/houseplans/:pk)와 같은 규칙 — 같은 지번(법정동 · 산 · 본번 · 부번)일 때만 */
-          SELECT TOP 10 p.house_manage_no, p.pblanc_no, p.house_nm, p.rcrit_pblanc_de, p.tot_suply, p.mvn_prearnge_ym, p.pblanc_url, p.cnstrct_entrps_nm, p.bsns_mby_nm,
-                 최고분양가 = (SELECT MAX(m.top_amount_man) FROM silver.applyhome_mdl m WHERE m.house_manage_no = p.house_manage_no AND m.pblanc_no = p.pblanc_no)
-            FROM silver.applyhome_pblanc p
-           WHERE LEN(@pnu) = 19 AND p.lawd_cd = LEFT(@pnu, 10)
-             AND TRY_CAST(p.주소_본번 AS INT) = CAST(SUBSTRING(@pnu, 12, 4) AS INT)
-             AND ISNULL(TRY_CAST(p.주소_부번 AS INT), 0) = CAST(SUBSTRING(@pnu, 16, 4) AS INT)
-             AND ISNULL(p.주소_산, '0') = CASE SUBSTRING(@pnu, 11, 1) WHEN '2' THEN '1' ELSE '0' END
-           ORDER BY p.rcrit_pblanc_de DESC`)]);
+        가상청약(pool, h.pnu, 번호)]);   /* 10-30: 같은 지번 + 389 가 묶은 공고(공통) */
       몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors: [],
         complex: { complex_id: 번호 ?? null, complex_nm: h.이름 || 단지명 || h.대지위치, rep_plat_plc: h.대지위치, rep_road_addr: null, has_recap: dongs.length > 1,
                    dong_cnt: 주동.length || h.주건축물수 || dongs.length, bld_cnt: dongs.length, hhld_cnt_sum: h.세대,
@@ -4533,7 +4536,37 @@ async function 가상몸(pool, kind, pk, 번호) {
         geo: 필.geo,
         가상: { 종류: 'h', pk, 상태말: '사업승인 · 사용검사 전', 키말: '주택대장', 출처: '건축HUB 주택인허가 원문(기본개요 · 동별개요 · 주차장)',
                 착공일: h.착공일 || null, 착공예정일: h.착공예정일, 허가일: h.승인일, 사용검사예정일: h.사용검사예정일, 원문처음월: h.원문처음월,
-                단지명, 청약: 청.recordset || [], 땅 } };
+                단지명, 청약: 청, 땅 } };
+    } else if (kind === 'a') {
+      /* 10-30 청약 공고 가단지(389 종류 a) — 단지에 안 이어진 청약홈 공고 묶음. 값은 공고 원문 그대로(공급 세대 ≠ 총 세대 — 조합원 · 보류분이 빠질 수 있다) */
+      const g = (await pool.request().input('id', sql.Int, 번호 ?? 0).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT complex_id, 이름, pnu, lat, lng, 기준일 FROM gold.pre_complex WHERE complex_id = @id`)).recordset[0];
+      if (!g) return null;
+      const 청 = await 가상청약(pool, g.pnu, 번호);
+      if (!청.length) return null;
+      const 주 = [...청].sort((x, y) => (['APT', 'URBTY', 'PBLPVT'].includes(x.공고종류) ? 0 : 1) - (['APT', 'URBTY', 'PBLPVT'].includes(y.공고종류) ? 0 : 1)
+                                     || String(x.rcrit_pblanc_de).localeCompare(String(y.rcrit_pblanc_de)))[0];
+      const 필 = await 가상필지(pool, g.pnu);
+      const 점 = 필.parcels[0] || {};
+      const lat = g.lat ?? 점.centroid_lat ?? null, lng = g.lng ?? 점.centroid_lng ?? null;
+      const lawd = String(주.lawd_cd || (g.pnu ? g.pnu.slice(0, 10) : '') || '');
+      const sgg = /^\d{10}$/.test(lawd) ? lawd.slice(0, 5) : null, bjd = /^\d{10}$/.test(lawd) ? lawd.slice(5) : null;
+      const [주변, 허가, 땅] = await Promise.all([가상주변(pool, lat, lng, sgg), 가상허가(pool, g.pnu), 땅묶음(pool, g.pnu)]);
+      const 입주 = 청.map(x => x.mvn_prearnge_ym).filter(Boolean).sort().pop() || null;
+      몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs: [], floors: [],
+        complex: { complex_id: 번호 ?? null, complex_nm: g.이름 || 주.house_nm, rep_plat_plc: 주.hssply_adres || 점.addr || null, rep_road_addr: null, has_recap: false,
+                   dong_cnt: null, bld_cnt: 0, hhld_cnt_sum: null, max_floor: null, tot_area_sum: null, oldest_use_apr: null,
+                   rep_jibun: 점.jibun || null, rep_pnu: g.pnu || null, centroid_lat: lat, centroid_lng: lng,
+                   sigungu_cd: sgg, bjdong_cd: bjd, 실거래이름: null },
+        spec: { 기준: '청약홈 입주자모집공고 원문', 동별건수: 0, 용도지역: null, 용도지구: null, 용도구역: null,
+                대지면적: null, 건축면적: null, 건폐율: null, 용적률: null, 세대: null, 공급세대: Number(주.tot_suply) || null, 주건축물: null, 부속건축물: null,
+                허가일: null, 착공일: null, 사용승인: null, 주차: null, 주용도: null, 승강기: null, 비상용: null, 높이: null, 지상층: null, 지하층: null, 구조: null, 지붕: null },
+        scope: { 필지: g.pnu ? 1 : 0, 인허가: g.pnu ? 1 : 0, 전유부: 0, 층별: 0, 가상: 1 },
+        받은자료: (() => { const z = 받은자료(범, sgg); return z ? Object.fromEntries(Object.entries(z).map(([k, v]) => [k, v.n])) : null; })(),
+        geo: 필.geo,
+        가상: { 종류: 'a', pk, 상태말: '청약 공고 · 입주 전', 키말: '청약 관리번호', 출처: '청약홈 입주자모집공고 원문(공고 · 주택형)',
+                허가일: null, 착공일: null, 공고일: String(주.rcrit_pblanc_de || '').trim() || null, 입주예정: 입주,
+                시공사: 주.cnstrct_entrps_nm || null, 지번없음: !g.pnu, 청약: 청, 땅 } };
     }
     return 몸;
   }
@@ -4541,7 +4574,7 @@ async function 가상몸(pool, kind, pk, 번호) {
 /* 옛 '최근 본 단지'(공사 중 · 승인 원문 번호)를 가단지 번호로 */
 app.get('/api/precomplex/:kind/:pk', async (req, res) => {
   const kind = String(req.params.kind || ''), pk = String(req.params.pk || '');
-  if (!/^[ph]$/.test(kind) || !/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad key' });
+  if (!/^[pha]$/.test(kind) || !/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad key' });
   try {
     const pool = await getPool();
     const r = await pool.request().input('k', sql.Char(1), kind).input('pk', sql.VarChar(50), pk)
@@ -4549,6 +4582,22 @@ app.get('/api/precomplex/:kind/:pk', async (req, res) => {
     if (!r.recordset.length) return res.status(404).json({ error: 'not found' });
     res.json(r.recordset[0]);
   } catch (e) { fail(res, e, 'precomplex'); }
+});
+
+/* 10-30 청약 공고(관리번호) → 그 공고가 속한 가단지(389 gold.pre_applyhome) — 분양 핀 · 검색의 공고를 누르면 단지 상세로 */
+app.get('/api/precomplex-ah/:house', async (req, res) => {
+  const house = String(req.params.house || '');
+  if (!/^\d{5,20}$/.test(house)) return res.status(400).json({ error: 'bad key' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('h', sql.VarChar(20), house).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('gold.pre_applyhome') IS NOT NULL
+        SELECT TOP 1 x.complex_id FROM gold.pre_applyhome x JOIN gold.pre_complex g ON g.complex_id = x.complex_id AND g.상태 = N'살아있음'
+         WHERE x.house_manage_no = @h ORDER BY x.complex_id
+      ELSE SELECT TOP 0 complex_id = 0`);
+    res.set('Cache-Control', 'no-store');
+    res.json({ complex_id: (r.recordset[0] || {}).complex_id ?? null });
+  } catch (e) { fail(res, e, 'precomplex-ah'); }
 });
 
 app.get('/api/near/at', async (req, res) => {
