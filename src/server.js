@@ -8480,16 +8480,23 @@ app.get('/robots.txt', (req, res) => {
 });
 /* 2026-10-24 사장님 "그냥 '터무니' 라고 쳤을 때 나오게" — 이름 뜻 · 원칙 · 출처를 적은 정적 소개 문서(JS 없이 읽힘) */
 app.get(['/about', '/about/'], (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'about.html')));
+let 사이트맵기억 = null;   /* 10-31: 매번 3초 걸려 만들던 것을 한 시간 기억 */
 app.get('/sitemap.xml', async (req, res, next) => {
   try {
+    if (사이트맵기억 && Date.now() - 사이트맵기억.때 < 3600e3) return res.type('application/xml; charset=utf-8').send(사이트맵기억.글);
     const pool = await getPool();
     const r = await pool.request().input('m', sql.Int, 사이트맵_최소세대).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT TOP 50000 complex_id FROM gold.v_complex_map WHERE hhld_cnt_sum >= @m ORDER BY hhld_cnt_sum DESC, complex_id`);
+    /* 10-31: 동네 쪽(/r · 시도 · 시군구 · 동)도 — 단지 쪽을 서로 잇는 길 */
+    const 색 = await 지역색인().catch(() => null);
+    const 동네 = 색 ? ['/r'].concat([...색.시도.keys()].map(k => '/r/' + k), [...색.구.keys()].map(k => '/r/' + k), [...색.동.keys()].map(k => '/r/' + k)) : [];
     const 줄 = ['<url><loc>https://teomoony.com/</loc></url>', '<url><loc>https://teomoony.com/about</loc></url>']
+      .concat(동네.map(u => `<url><loc>https://teomoony.com${u}</loc></url>`))
       .concat(r.recordset.map(x => `<url><loc>https://teomoony.com/c/${x.complex_id}</loc></url>`));
-    res.type('application/xml; charset=utf-8')
-       .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${줄.join('\n')}\n</urlset>\n`);
+    const 글 = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${줄.join('\n')}\n</urlset>\n`;
+    사이트맵기억 = { 때: Date.now(), 글 };
+    res.type('application/xml; charset=utf-8').send(글);
   } catch (e) { next(e); }
 });
 
@@ -8511,11 +8518,100 @@ function 억표기(원) {
 }
 const 날짜표기 = d => (d && String(d).length >= 8 ? `${String(d).slice(0, 4)}.${String(d).slice(4, 6)}.${String(d).slice(6, 8)}` : null);
 
+/* ===================== 지역 색인 · 동네 링크 · 쪽 기억 (2026-10-31 SEO — 사장님 "12 ㄱㄱ") =====================
+   ★ 왜: 구글이 sitemap 으로 단지 주소 2만 4천을 다 알았는데 4,034곳이 '발견됨 – 색인 안 됨' 이었다(10-31 Search Console).
+     첫 화면 · 단지 쪽 어디에도 **다른 단지로 가는 링크가 0개** — 수집기가 따라 들어갈 길이 sitemap 하나뿐이라 중요하지 않은 쪽으로 본다.
+     → 단지 쪽에 '지역 › 시군구 › 동' 길과 같은 동네 단지 링크, 동네 쪽(/r/…)을 만들어 서로 잇는다.
+   ★ 색인은 메모리에(한 시간마다 새로) — 사이트맵과 같은 범위(세대 100+ · 지금 단지) 2만여 줄. 쪽마다 DB 를 다시 묻지 않는다.
+   ★ 이름은 원문(단지 이름 = 대장 · 실거래 이름, 지역 이름 = 법정동코드). 숫자는 단지 쪽과 같은 값(세대 = 대장 동별 합 · 최고 매매 = 최근 3년). */
+let 지역색인값 = null, 지역색인중 = null;
+function 지역색인() {
+  if (지역색인값 && Date.now() - 지역색인값.때 < 3600e3) return Promise.resolve(지역색인값);
+  if (!지역색인중) {
+    지역색인중 = (async () => {
+      const pool = await getPool();
+      const r = await pool.request().input('m', sql.Int, 사이트맵_최소세대).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+        SELECT c.complex_id, 이름 = CASE WHEN c.complex_nm = c.rep_plat_plc AND al.실거래이름 IS NOT NULL THEN al.실거래이름 ELSE c.complex_nm END,
+               세대 = c.hhld_cnt_sum, lawd = LEFT(c.rep_pnu, 10), 연 = LEFT(c.oldest_use_apr, 4), mx = t.max_amt
+          FROM gold.complex c
+          LEFT JOIN gold.complex_alias al ON al.complex_id = c.complex_id
+          LEFT JOIN gold.complex_trade_max t ON t.complex_id = c.complex_id AND t.종류 = 'ALL'
+         WHERE c.merged_into IS NULL AND c.is_active = 1 AND c.hhld_cnt_sum >= @m AND LEN(c.rep_pnu) = 19;
+        SELECT lawd_cd, sido_nm, sgg_nm, emd_nm, ri_nm, is_abolished FROM meta.lawd_code ORDER BY is_abolished DESC;`);
+      const 이름표 = new Map();   // 없어진 코드 먼저 → 지금 코드가 덮는다
+      for (const x of r.recordsets[1]) 이름표.set(x.lawd_cd, x);
+      const 시도 = new Map(), 구 = new Map(), 동 = new Map(), 단지 = new Map();
+      const 이름 = cd => 이름표.get(cd) || {};
+      for (const x of r.recordsets[0]) {
+        const lawd = String(x.lawd || ''); if (!/^\d{10}$/.test(lawd)) continue;
+        const sgg = lawd.slice(0, 5), sido = lawd.slice(0, 2);
+        const 하나 = { id: x.complex_id, 이름: x.이름 || `단지 ${x.complex_id}`, 세대: Number(x.세대) || 0, 연: x.연 || null, mx: x.mx ? Number(x.mx) : null, lawd };
+        단지.set(하나.id, 하나);
+        if (!동.has(lawd)) { const n = 이름(lawd); 동.set(lawd, { cd: lawd, 이름: [n.emd_nm, n.ri_nm].filter(Boolean).join(' ') || lawd, sgg, 단지: [] }); }
+        동.get(lawd).단지.push(하나);
+        if (!구.has(sgg)) 구.set(sgg, { cd: sgg, 이름: 이름(sgg + '00000').sgg_nm || 이름(lawd).sgg_nm || sgg, sido, 동: [] });
+        if (!시도.has(sido)) 시도.set(sido, { cd: sido, 이름: 이름(sido + '00000000').sido_nm || 이름(lawd).sido_nm || sido, 구: [] });
+      }
+      for (const d of 동.values()) { d.단지.sort((a, b) => b.세대 - a.세대 || a.id - b.id); 구.get(d.sgg).동.push(d.cd); }
+      for (const g of 구.values()) { g.동.sort((a, b) => 동.get(a).이름.localeCompare(동.get(b).이름, 'ko')); 시도.get(g.sido).구.push(g.cd); }
+      for (const t of 시도.values()) t.구.sort((a, b) => 구.get(a).이름.localeCompare(구.get(b).이름, 'ko'));
+      const 수 = new Map();   // 구 · 시도 단지 수
+      for (const d of 동.values()) { 수.set(d.sgg, (수.get(d.sgg) || 0) + d.단지.length); 수.set(d.sgg.slice(0, 2), (수.get(d.sgg.slice(0, 2)) || 0) + d.단지.length); }
+      지역색인값 = { 때: Date.now(), 시도, 구, 동, 단지, 수 };
+      return 지역색인값;
+    })().finally(() => { 지역색인중 = null; });
+  }
+  return 지역색인값 ? Promise.resolve(지역색인값) : 지역색인중;   // 새로 만드는 동안은 옛 색인으로 답한다
+}
+/* 단지 쪽 아래: 지역 길(지역 › 시도 › 시군구 › 동) + 같은 동네 단지(세대 큰 순 12곳, 모자라면 같은 시군구에서) */
+function 동네링크(색, lawd, 나) {
+  if (!색 || !/^\d{10}$/.test(String(lawd || ''))) return '';
+  const 동 = 색.동.get(lawd), 구 = 색.구.get(lawd.slice(0, 5)), 시도 = 색.시도.get(lawd.slice(0, 2));
+  if (!구 || !시도) return '';
+  const 길 = [`<a href="/r">지역별 단지</a>`, `<a href="/r/${시도.cd}">${h(시도.이름)}</a>`, `<a href="/r/${구.cd}">${h(구.이름)}</a>`]
+    .concat(동 ? [`<a href="/r/${동.cd}">${h(동.이름)}</a>`] : []).join(' › ');
+  const 고른 = (동 ? 동.단지 : []).filter(x => x.id !== 나).slice(0, 12);
+  if (고른.length < 6) for (const d of 구.동) for (const x of 색.동.get(d).단지) {
+    if (고른.length >= 12) break;
+    if (x.id !== 나 && !고른.includes(x)) 고른.push(x);
+  }
+  고른.sort((a, b) => b.세대 - a.세대);
+  return `<nav class="ssr-nav" aria-label="지역">${길}</nav>`
+    + (고른.length ? `<h3>${동 ? h(동.이름) : h(구.이름)} 다른 단지</h3><ul class="ssr-links">${고른.map(x =>
+        `<li><a href="/c/${x.id}">${h(x.이름)}</a> <span>${x.세대.toLocaleString('ko-KR')}세대</span></li>`).join('')}</ul>` : '');
+}
+/* 화면 틀(index.html)은 메모리에 — 5초마다 바뀌었나만 본다(배포하면 곧 새 틀) */
+let 틀기억 = null;
+async function 쪽틀읽기() {
+  const 지금 = Date.now();
+  if (틀기억 && 지금 - 틀기억.본때 < 5000) return 틀기억.글;
+  const st = await fs.promises.stat(쪽틀);
+  if (!틀기억 || 틀기억.mtime !== st.mtimeMs) 틀기억 = { 글: await fs.promises.readFile(쪽틀, 'utf8'), mtime: st.mtimeMs, 본때: 지금 };
+  else 틀기억.본때 = 지금;
+  return 틀기억.글;
+}
+/* 서버가 그린 쪽(제목 · 설명 · 요약)은 한 시간 기억 — 구글 · 사람이 같은 쪽을 다시 열 때 DB 를 다시 묻지 않는다(최대 8천 쪽).
+   ★ 새 실거래는 이 검색엔진용 요약에만 최대 1시간 늦다. 앱 화면(상세)은 API 로 바로 받는다. */
+const 쪽기억 = new Map();
+function 쪽기억넣기(k, v) { 쪽기억.set(k, { ...v, 때: Date.now() }); if (쪽기억.size > 8000) 쪽기억.delete(쪽기억.keys().next().value); }
+function 쪽기억꺼내기(k) { const v = 쪽기억.get(k); if (!v) return null; if (Date.now() - v.때 > 3600e3) { 쪽기억.delete(k); return null; } return v; }
+function 쪽만들기(틀, p) {
+  let out = 틀
+    .replace(/<title>[\s\S]*?<\/title>/, `<title>${h(p.제목)}</title>`)
+    .replace(/<meta name="description" content="[^"]*">/, `<meta name="description" content="${h(p.설명)}">`)
+    .replace(/<link rel="canonical" href="[^"]*">/, `<link rel="canonical" href="${h(p.url)}">`)
+    .replace(/<meta property="og:title" content="[^"]*">/, `<meta property="og:title" content="${h(p.제목)}">`)
+    .replace(/<meta property="og:description" content="[^"]*">/, `<meta property="og:description" content="${h(p.설명)}">`)
+    .replace(/<meta property="og:url" content="[^"]*">/, `<meta property="og:url" content="${h(p.url)}">`);
+  if (p.ld) out = out.replace('</head>', `<script type="application/ld+json">${JSON.stringify(p.ld).replace(/</g, '\\u003c')}</script>\n</head>`);
+  return out.replace('<section id="detail" class="detail" hidden></section>', `<section id="detail" class="detail">${p.요약}</section>`);
+}
+
 app.get('/c/:id', async (req, res, next) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1 || id > 2147483647) return 없는쪽(req, res);   /* 10-30 QA: '/c/abc' 가 JSON 404 로 나갔다 — 화면 틀(404 · 색인 안 함) */
   try {
-    const 틀 = await fs.promises.readFile(쪽틀, 'utf8');
+    const 틀 = await 쪽틀읽기();
     const pool = await getPool();
     /* 10-30 가단지(389): 이동했으면 정식 단지로 · 살아있으면 쪽 틀(검색엔진에는 안 올림 — 허가 단계라 바뀐다) */
     if (id >= 900000000) {
@@ -8527,11 +8623,14 @@ app.get('/c/:id', async (req, res, next) => {
       if (!g || g.상태 !== '살아있음') return res.status(404).send(쪽);
       return res.send(쪽.replace(/<title>[^<]*<\/title>/, `<title>${String(g.이름 || '이름 없음').replace(/[<>&"]/g, '')} · 대장 전 — 터무니</title>`));
     }
+    { const 기억 = 쪽기억꺼내기(id);   /* 10-31 한 시간 기억 */
+      if (기억) { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Cache-Control', 'no-store, must-revalidate'); res.setHeader('X-Page', 'mem');
+                  return res.send(쪽만들기(틀, 기억)); } }
     const r = await pool.request().input('id', sql.Int, id).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT merged_into FROM gold.complex WHERE complex_id = @id;
       SELECT v.complex_id, v.complex_nm, v.rep_plat_plc, v.rep_road_addr, v.hhld_cnt_sum, v.dong_cnt, v.max_floor,
-             v.oldest_use_apr, v.centroid_lat, v.centroid_lng,
+             v.oldest_use_apr, v.centroid_lat, v.centroid_lng, v.rep_pnu,
              실거래이름 = (SELECT al.실거래이름 FROM gold.complex_alias al WHERE al.complex_id = v.complex_id)
         FROM gold.v_complex_map v WHERE v.complex_id = @id;
       SELECT max_amt, max_ymd, max_unit FROM gold.complex_trade_max WHERE complex_id = @id AND 종류 = 'ALL';
@@ -8588,18 +8687,72 @@ app.get('/c/:id', async (req, res, next) => {
           ${tr.map(t => `<tr><td>${h(날짜표기(t.deal_ymd))}</td><td>${h(Number(t.exclu_use_ar || 0).toFixed(2))}㎡</td><td>${h(t.floor_no ?? '')}</td><td>${h(억표기(t.deal_amount))}</td></tr>`).join('')}
         </tbody></table>` : ''}
         <p class="srcline">출처: 건축물대장(국토교통부) · 아파트·연립 매매 실거래가(국토교통부). 자세한 내용은 화면을 불러오면 보입니다.</p>
+        ${동네링크(await 지역색인().catch(() => null), String(c.rep_pnu || '').slice(0, 10), id)}
       </article>`;
 
-    let out = 틀
-      .replace(/<title>[\s\S]*?<\/title>/, `<title>${h(제목)}</title>`)
-      .replace(/<meta name="description" content="[^"]*">/, `<meta name="description" content="${h(설명)}">`)
-      .replace(/<link rel="canonical" href="[^"]*">/, `<link rel="canonical" href="${h(url)}">`)
-      .replace(/<meta property="og:title" content="[^"]*">/, `<meta property="og:title" content="${h(제목)}">`)
-      .replace(/<meta property="og:description" content="[^"]*">/, `<meta property="og:description" content="${h(설명)}">`)
-      .replace(/<meta property="og:url" content="[^"]*">/, `<meta property="og:url" content="${h(url)}">`)
-      .replace('</head>', `<script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c')}</script>\n</head>`)
-      .replace('<section id="detail" class="detail" hidden></section>', `<section id="detail" class="detail">${요약}</section>`);
-    res.send(out);
+    const 쪽 = { 제목, 설명, url, ld, 요약 };
+    쪽기억넣기(id, 쪽);
+    res.send(쪽만들기(틀, 쪽));
+  } catch (e) { next(e); }
+});
+
+/* ===================== 동네 쪽 /r · /r/시도 · /r/시군구 · /r/법정동 (2026-10-31 SEO) =====================
+   단지 쪽과 같은 화면 틀에 서버가 목록을 그려 보낸다(보이는 목록 — 숨긴 글 없음). 사람에게는 지도 화면 옆 상세 자리에 이 목록이 뜬다.
+   범위는 사이트맵과 같다(세대 100+ · 지금 단지). 단지가 하나도 없는 지역은 404(색인 안 함). */
+app.get(['/r', '/r/', '/r/:cd'], async (req, res, next) => {
+  const cd = String(req.params.cd || '');
+  if (cd && !/^(\d{2}|\d{5}|\d{10})$/.test(cd)) return 없는쪽(req, res);
+  try {
+    const 틀 = await 쪽틀읽기();
+    const 기억키 = 'r:' + cd;
+    let 쪽 = 쪽기억꺼내기(기억키);
+    if (!쪽) {
+      const 색 = await 지역색인();
+      const 억 = v => (v ? 억표기(v) : '');
+      const 단지줄 = xs => `<table class="mini ssr-list"><thead><tr><th>단지</th><th>세대</th><th>사용승인</th><th>최근 3년 최고 매매</th></tr></thead><tbody>${xs.map(x =>
+        `<tr><td><a href="/c/${x.id}">${h(x.이름)}</a></td><td>${x.세대.toLocaleString('ko-KR')}</td><td>${h(x.연 || '')}</td><td>${h(억(x.mx))}</td></tr>`).join('')}</tbody></table>`;
+      const 링크들 = (xs, 말) => `<ul class="ssr-links">${xs.map(x => `<li><a href="/r/${x.cd}">${h(x.이름)}</a> <span>${(말(x) || 0).toLocaleString('ko-KR')}곳</span></li>`).join('')}</ul>`;
+      const 길 = 조각 => `<nav class="ssr-nav" aria-label="지역">${[`<a href="/r">지역별 단지</a>`].concat(조각).join(' › ')}</nav>`;
+      const 출처 = `<p class="srcline">세대 100 이상 단지 · 세대 = 건축물대장 동별 합 · 최고 매매 = 국토교통부 실거래가(최근 3년) · 지역 이름 = 법정동코드(행정안전부).</p>`;
+      if (!cd) {
+        const 시도들 = [...색.시도.values()].sort((a, b) => a.cd.localeCompare(b.cd));
+        쪽 = { 제목: '지역별 아파트 단지 — 시도 · 시군구 · 동 | 터무니', 설명: `전국 ${색.단지.size.toLocaleString('ko-KR')}개 단지(세대 100 이상)를 시도 · 시군구 · 동별로. 건축물대장 · 실거래가 원문 기준.`,
+               url: 'https://teomoony.com/r',
+               요약: `<article class="ssr ssr-hub"><h2>지역별 단지</h2>${길([])}<p class="sub">시도를 고르면 시군구 · 동 · 단지로 이어집니다.</p>${링크들(시도들, x => 색.수.get(x.cd))}${출처}</article>` };
+      } else if (cd.length === 2) {
+        const t = 색.시도.get(cd); if (!t) return 없는쪽(req, res);
+        const 구들 = t.구.map(g => 색.구.get(g));
+        const 큰 = 구들.flatMap(g => g.동.flatMap(d => 색.동.get(d).단지)).sort((a, b) => b.세대 - a.세대).slice(0, 20);
+        쪽 = { 제목: `${t.이름} 아파트 단지 ${(색.수.get(cd) || 0).toLocaleString('ko-KR')}곳 — 시군구별 | 터무니`,
+               설명: `${t.이름} 시군구별 아파트 단지(세대 100 이상) — 세대수 · 사용승인 · 최근 3년 최고 매매. 건축물대장 · 국토교통부 실거래가 원문.`,
+               url: `https://teomoony.com/r/${cd}`,
+               요약: `<article class="ssr ssr-hub"><h2>${h(t.이름)} 단지</h2>${길([`<a href="/r/${cd}">${h(t.이름)}</a>`])}
+                 <h3>시군구</h3>${링크들(구들, x => 색.수.get(x.cd))}<h3>세대 많은 단지</h3>${단지줄(큰)}${출처}</article>` };
+      } else if (cd.length === 5) {
+        const g = 색.구.get(cd); if (!g) return 없는쪽(req, res);
+        const t = 색.시도.get(g.sido);
+        const 동들 = g.동.map(d => 색.동.get(d));
+        const 큰 = 동들.flatMap(d => d.단지).sort((a, b) => b.세대 - a.세대).slice(0, 30);
+        쪽 = { 제목: `${t.이름} ${g.이름} 아파트 단지 ${(색.수.get(cd) || 0).toLocaleString('ko-KR')}곳 — 동별 | 터무니`,
+               설명: `${g.이름} 동별 아파트 단지(세대 100 이상) — 세대수 · 사용승인 · 최근 3년 최고 매매. 건축물대장 · 국토교통부 실거래가 원문.`,
+               url: `https://teomoony.com/r/${cd}`,
+               요약: `<article class="ssr ssr-hub"><h2>${h(g.이름)} 단지</h2>${길([`<a href="/r/${t.cd}">${h(t.이름)}</a>`, `<a href="/r/${cd}">${h(g.이름)}</a>`])}
+                 <h3>동</h3>${링크들(동들, x => x.단지.length)}<h3>세대 많은 단지</h3>${단지줄(큰)}${출처}</article>` };
+      } else {
+        const d = 색.동.get(cd); if (!d) return 없는쪽(req, res);
+        const g = 색.구.get(d.sgg), t = 색.시도.get(g.sido);
+        const 이웃 = g.동.filter(x => x !== cd).map(x => 색.동.get(x));
+        쪽 = { 제목: `${g.이름} ${d.이름} 아파트 단지 ${d.단지.length}곳 — 세대수 · 최고 실거래가 | 터무니`,
+               설명: `${t.이름} ${g.이름} ${d.이름}의 아파트 단지 ${d.단지.length}곳(세대 100 이상): ${d.단지.slice(0, 5).map(x => x.이름).join(' · ')}. 세대수 · 사용승인 · 최근 3년 최고 매매.`,
+               url: `https://teomoony.com/r/${cd}`,
+               요약: `<article class="ssr ssr-hub"><h2>${h(g.이름)} ${h(d.이름)} 단지</h2>${길([`<a href="/r/${t.cd}">${h(t.이름)}</a>`, `<a href="/r/${g.cd}">${h(g.이름)}</a>`, `<a href="/r/${cd}">${h(d.이름)}</a>`])}
+                 ${단지줄(d.단지)}${이웃.length ? `<h3>${h(g.이름)}의 다른 동</h3>${링크들(이웃, x => x.단지.length)}` : ''}${출처}</article>` };
+      }
+      쪽기억넣기(기억키, 쪽);
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    res.send(쪽만들기(틀, 쪽));
   } catch (e) { next(e); }
 });
 

@@ -5401,6 +5401,27 @@ function 주소맞춤(경로, 쌓기 = false) {
   } catch (e) { /* 주소는 덤 — 못 바꿔도 화면은 그대로 */ }
 }
 function 주소로열기() {
+  /* 10-31 동네 쪽(/r/…): 서버가 상세 자리에 그린 지역 목록을 지도 화면에서 그대로 보인다. 목록의 단지는 누르면 바로 상세(새로 불러오지 않음) */
+  if (/^\/r(\/\d+)?\/?$/.test(location.pathname)) {
+    보기전환('map');
+    const d = $('#detail');
+    if (d) {
+      d.hidden = false;
+      d.addEventListener('click', e => {
+        const a = e.target.closest && e.target.closest('.ssr a[href^="/c/"]');
+        if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        e.preventDefault(); select(Number(a.getAttribute('href').slice(3)));
+      });
+    }
+    if (폰()) 시트('full');
+    /* 지도는 그 시군구 · 동 상자로(지역 목록과 같은 경계 자료 · 못 받으면 그대로) */
+    const cd = (location.pathname.match(/^\/r\/(\d{5}|\d{10})\/?$/) || [])[1];
+    if (cd) fetch(cd.length === 10 ? `/api/areas/dongs?sgg=${cd.slice(0, 5)}` : `/api/areas/sgg?sido=${cd.slice(0, 2)}`).then(x => x.json()).then(r => {
+      const x = cd.length === 10 ? (r.동 || r.dongs || r.items || []).find(v => v.cd === cd) : (r.구 || []).find(v => v.sgg_cd === cd);
+      if (x && x.minx != null && map) map.fitBounds([[x.miny, x.minx], [x.maxy, x.maxx]]);
+    }).catch(() => {});
+    return;
+  }
   const m = location.pathname.match(/^\/c\/(\d+)\/?$/);
   if (!m) return;
   보기전환('map');
