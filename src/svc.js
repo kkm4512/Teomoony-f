@@ -695,6 +695,8 @@ const 캐시길 = [
   { re: /^\/api\/complexes\/(\d{1,9})\/poi-list$/, 허용: ['life'], 단지: m => Number(m[1]) },
   /* 10-30 건축인허가 부가 원문(386) — 단지가 바뀌면 매시 발행이 지운다 · 원문은 달마다(hub_month → pms_extra_load) */
   { re: /^\/api\/complexes\/(\d{1,9})\/permitx$/, 허용: [], 단지: m => Number(m[1]) },
+  /* 10-30 한 점 주변(공사 중 · 승인 상세) — 단지 번호가 없어 0 으로 적는다(24시간이면 저절로 다시) */
+  { re: /^\/api\/near\/at$/, 허용: ['lat', 'lng', 'sgg'], 단지: () => 0 },
 ];
 async function 응답캐시(req, res, next) {
   if (req.method !== 'GET' || !지금설정().read || !지금설정().cache || Date.now() < 쉬는끝) return next();

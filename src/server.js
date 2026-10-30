@@ -4044,6 +4044,317 @@ app.get('/api/_my', (req, res, next) => {
 /* 10-30 사장님 "호반써밋초량 안뜨는디": 검색에도 승인 아파트를. 원문 이름은 '호반 써밋' 이라 검색어가 이름보다 길다 —
      ① 이름(띄어쓰기 뺌)이 검색어에 들어 있음(이름 4글자+ · 일반 말 제외) 또는 검색어가 이름에 들어 있음 ② 주소에 검색어가 들어 있음.
      남은 말(검색어 − 이름, 예: '초량')이 주소에 있으면 맨 위. 찾기일 뿐 — 단지와 잇지 않는다. */
+/* ---------- 한 점 주변 (388 · 2026-10-30 사장님 "상권 학교는 못 붙여?") ----------
+   공사 중 건물 · 승인 아파트처럼 **단지 번호가 없는 곳**의 교통 · 교육 · 상권.
+   ★ 아래 SQL 은 단지 상세(/api/complexes/:id)의 같은 이름 질의를 **그대로 옮겨** 두 가지만 바꿨다(2026-10-30 기계 치환):
+     gold.v_complex_* → gold.fn_pt_*(@lat, @lng)(388 — 뷰 정의에서 만든 같은 식) · gold.complex → @pc(한 점짜리 표, complex_id 0).
+     단지 상세 쪽 질의를 고치면 여기도 같이 고친다(같은 사실은 한 곳에서 — 지금은 두 곳, 이 주석이 그 표시).
+   ★ 응답 모양은 단지 상세의 같은 칸(poi · schools · subways …)과 같다 — 화면이 같은 그리기(주변판들)를 쓴다. */
+const 점시군구SQL = `(SELECT LEFT(sigungu_cd, 5) FROM @pc)`;
+function 점주변SQL() {
+  return {
+    poi: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      SELECT 소분류 = v.inds_scls_nm, 대분류 = v.inds_lcls_nm,
+             r300  = SUM(CASE WHEN v.dist_m <= 300 THEN 1 ELSE 0 END),
+             r500  = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
+             r1000 = COUNT(*),
+             최단m = MIN(CAST(v.dist_m AS INT)),
+             단지내 = SUM(v.on_site)
+      FROM gold.fn_pt_poi(@lat, @lng) v
+      WHERE v.complex_id = @id AND v.inds_scls_nm IS NOT NULL
+      GROUP BY v.inds_scls_nm, v.inds_lcls_nm
+      /* ★ 2026-10-27 500m 수가 같은 업종끼리 순서가 정해져 있지 않았다(열 때마다 바뀔 수 있음) → 1km 수 · 가까운 거리 · 이름으로 고정 */
+      ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, MIN(v.dist_m), v.inds_scls_nm COLLATE Latin1_General_BIN2`,
+    poiSum: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      SELECT 업종수500 = COUNT(DISTINCT CASE WHEN v.dist_m <= 500 THEN v.inds_mcls_cd END),
+             업종수1000 = COUNT(DISTINCT v.inds_mcls_cd),
+             단지내 = SUM(v.on_site)
+      FROM gold.fn_pt_poi(@lat, @lng) v WHERE v.complex_id = @id`,
+    poiBrand: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      SELECT 브랜드 = v.brand,
+             r500 = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
+             r1000 = COUNT(*), 최단m = MIN(CAST(v.dist_m AS INT))
+        FROM gold.fn_pt_poi(@lat, @lng) v
+       WHERE v.complex_id = @id AND v.brand IS NOT NULL
+       GROUP BY v.brand
+       ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, MIN(v.dist_m), v.brand COLLATE Latin1_General_BIN2`,
+    poiLife: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      SELECT 항목 = v.life,
+             r500  = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
+             r1000 = COUNT(*), 최단m = MIN(CAST(v.dist_m AS INT)),
+             /* 고정 순서 — 많은 순이 아니다. 집 주변에서 먼저 찾는 것부터다. */
+             /* 294(2026-10-21): 병원을 과목으로 쪼개고 공부·운동·놀거리를 더했다. 묶음 머리(app.js 생활묶음)는 이 번호 구간으로 나눈다 */
+             ord = CASE v.life WHEN N'편의점' THEN 1 WHEN N'마트·슈퍼' THEN 2
+                               WHEN N'카페' THEN 3 WHEN N'빵집' THEN 4
+                               WHEN N'음식점' THEN 5 WHEN N'주점' THEN 6
+                               WHEN N'약국' THEN 7 WHEN N'내과·소아과' THEN 8
+                               WHEN N'치과' THEN 9 WHEN N'한의원' THEN 10
+                               WHEN N'그 외 의원' THEN 11 WHEN N'병원·종합병원' THEN 12
+                               WHEN N'요양병원' THEN 13 WHEN N'동물병원' THEN 14
+                               WHEN N'입시·보습학원' THEN 15 WHEN N'영어·외국어' THEN 16
+                               WHEN N'예체능학원' THEN 17 WHEN N'그 외 학원' THEN 18
+                               WHEN N'독서실·스터디카페' THEN 19
+                               WHEN N'헬스·요가' THEN 20 WHEN N'수영장' THEN 21
+                               WHEN N'골프연습장' THEN 22 WHEN N'목욕탕·사우나' THEN 23
+                               WHEN N'미용실' THEN 24 WHEN N'세탁소' THEN 25
+                               WHEN N'PC방' THEN 26 WHEN N'노래방' THEN 27
+                               WHEN N'당구장·볼링장' THEN 28 ELSE 99 END
+        FROM gold.fn_pt_poi(@lat, @lng) v
+       WHERE v.complex_id = @id AND v.life IS NOT NULL
+       GROUP BY v.life ORDER BY ord`,
+    subways: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      /* ★ 2026-10-21: TOP 4 로 **조용히 자르고 있었다.** 창덕궁은 1.5km 안에
+         역이 5곳인데 4곳만 보이고, 머리글의 숫자도 4 였다 — 사용자는 그게
+         전부인 줄 안다. 자르는 건 그대로 두되 **몇 곳 중 몇 곳인지 같이 낸다.**
+         (지도에 찍는 점은 안 자른다 — 그래서 목록 4 / 점 5 로 어긋나 있었다)
+         ★ COUNT(*) OVER () 로 센다. 집계 안에 서브쿼리를 넣지 않는다. */
+      WITH v AS (SELECT * FROM gold.fn_pt_subway(@lat, @lng) WHERE complex_id = @id),
+      g AS (
+        SELECT 역 = sttn_nm,
+               노선 = STRING_AGG(line_nm, N' · ') WITHIN GROUP (ORDER BY line_nm),
+               최단m = CAST(MIN(dist_m) AS INT),
+               환승 = MAX(CASE WHEN transfer_se LIKE N'%환승역%' THEN 1 ELSE 0 END)
+          FROM v GROUP BY sttn_nm)
+      SELECT TOP 4 역, 노선, 최단m, 환승, 전체 = COUNT(*) OVER ()
+        FROM g ORDER BY 최단m, 역 COLLATE Latin1_General_BIN2`,
+    busStops: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      /* 같은 승강장이 서울BIS/경기BIS 두 줄로 오는 건 뷰에서 이미 묶었다.
+         ★ 'Cannot perform an aggregate function on an expression containing
+           an aggregate or a subquery' 를 **세 번째** 당했다(2026-10-19).
+           원인은 늘 같다 - 집계 안에 서브쿼리를 넣는 것.
+           가장 가까운 한 줄은 **ROW_NUMBER 로 미리 찍어두고** 집계한다.
+           (MIN(CASE WHEN dist_m = (SELECT MIN...)) 같은 모양을 다시 쓰지 말 것) */
+      WITH v AS (
+        SELECT stop_nm, stop_no, dist_m,
+               rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no)
+          FROM gold.fn_pt_bus(@lat, @lng) WHERE complex_id = @id)
+      SELECT r300 = SUM(CASE WHEN dist_m <= 300 THEN 1 ELSE 0 END),
+             r500 = COUNT(*), 최단m = CAST(MIN(dist_m) AS INT),
+             가까운곳 = MAX(CASE WHEN rn = 1 THEN stop_nm END),
+             /* ★ '없다' 와 '아직 안 받았다' 를 가른다. 이게 비면 화면이
+                "500m 안에 정류장이 없습니다" 라고 **거짓말**을 한다. */
+             적재 = ${받았나SQL('버스정류장', 점시군구SQL)}   /* ★ 2026-10-24: 전국 건수가 아니라 이 시군구 */
+        FROM v`,
+    busList: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      WITH v AS (
+        SELECT stop_nm, ars_no, stop_no, dist_m,
+               rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no),
+               전체 = COUNT(*) OVER ()
+          FROM gold.fn_pt_bus(@lat, @lng) WHERE complex_id = @id)
+      SELECT 정류장 = stop_nm, ars = ars_no, 거리m = CAST(dist_m AS INT), 전체
+        FROM v WHERE rn <= 20 ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no`,
+    busRoutes: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326)
+                                FROM @pc
+                               WHERE complex_id = @id
+                                 AND centroid_lat IS NOT NULL
+                                 AND centroid_lng IS NOT NULL);
+      /* ★★ ARS 를 **숫자로** 비교한다(2026-10-20). 두 표의 자릿수가 다르다:
+           bus_stop.ars_no          = '8832'
+           bus_route_station.ars_no = '08832'   <- 5자리로 0을 채움
+         SQL 에서 '8832' = '08832' 는 거짓이다. 그래서 **네 자리 ARS 정류장은
+         노선이 하나도 안 붙었다** - 래미안장위는 정류장 35곳 중 12곳만 걸려
+         노선이 5개로 보였다(이름으로 찾으면 광운초교앞 6개, 장위래미안 5개가 있다).
+         ★ 양쪽 다 길이가 1~5 로 제각각이라 **한쪽만 채워도 안 맞는다.**
+           TRY_CAST 로 숫자를 만들어 비교한다 - 숫자가 아닌 값은 NULL 이 되어
+           조용히 빠지지, 엉뚱한 것과 붙지 않는다.
+         ★ 인덱스는 못 쓰지만 v 는 500m 안 정류장 수십 개뿐이라 싸다. */
+      /* ★ 비교는 **양쪽 형식을 다 적어** 한다. TRY_CAST 를 rs 쪽에 걸면
+         인덱스를 못 써서 88,737행을 훑는다(상세 응답이 2.4초가 됐다).
+         v 쪽에서 '8832' 와 '08832' 두 모양을 만들어 **같다(=)** 로 비교하면
+         ix_brs_ars 를 그대로 쓴다. 길이가 5 를 넘지 않으므로 두 모양이면 충분하다. */
+      WITH v AS (SELECT ars_no,
+                        ars5 = CASE WHEN TRY_CAST(ars_no AS INT) IS NULL THEN NULL
+                                    ELSE RIGHT('00000' + ars_no, 5) END,
+                        dist_m
+                   FROM gold.fn_pt_bus(@lat, @lng) WHERE complex_id = @id)
+      SELECT 번호 = r.route_abrv, 종류 = r.route_type,
+             최단m = CAST(MIN(v.dist_m) AS INT)
+        FROM v
+        JOIN silver.bus_route_station rs
+          ON (rs.ars_no = v.ars_no OR rs.ars_no = v.ars5)
+         AND rs.lat IS NOT NULL AND rs.lon IS NOT NULL
+         AND @g IS NOT NULL
+         AND geography::Point(rs.lat, rs.lon, 4326).STDistance(@g) <= 700
+        JOIN silver.bus_route r ON r.route_id = rs.route_id
+       GROUP BY r.route_abrv, r.route_type
+       ORDER BY CASE r.route_type WHEN '3' THEN 1 WHEN '4' THEN 2 WHEN '2' THEN 3
+                                  WHEN '6' THEN 4 WHEN '15' THEN 5 ELSE 9 END,
+                MIN(v.dist_m), r.route_abrv COLLATE Latin1_General_BIN2`,
+    schoolZone: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;   /* 2026-10-21: 학구도 적재 중 잠금 대기 막기(szScope 와 같은 이유) */
+      /* ★ 좌표가 없으면 Point 를 만들지 않는다 - 상세 전체가 죽는다(2026-10-19).
+         geography 쪽만 고치고 여기를 놓쳐 같은 에러를 두 번 봤다.
+         **한 군데를 고치면 같은 모양을 전부 찾는다.** */
+      DECLARE @p geometry = (SELECT geometry::Point(centroid_lng, centroid_lat, 4326)
+                               FROM @pc
+                              WHERE complex_id = @id
+                                AND centroid_lat IS NOT NULL
+                                AND centroid_lng IS NOT NULL);
+      SELECT 학구 = z.hakgudo_nm,
+             공동 = CASE WHEN z.hakgudo_gb = '1' THEN 1 ELSE 0 END,
+             교육지원청 = z.edu_nm, 기준일 = z.base_dt
+        FROM silver.school_zone z WHERE z.geom.STContains(@p) = 1;
+      /* ★ 2026-10-24 사장님 "어떤 학군에 속해 어떤 학교로 갈 수 있는지" — 단지 중심점이 든 초등 통학구역 · 중학교 학교군 · 고등학교 학교군과
+           그 구역의 학교(학교학구도연계정보 — 학구ID ↔ 학교ID, **공식 대응표**). 학교ID 는 silver.school 과 같은 코드라 이름을 안 본다.
+           거리는 v_complex_school 과 같은 식(학교 geog ↔ 단지 중심점 직선). 공시는 gold.school_link(335) 로만. */
+      DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM @pc
+                               WHERE complex_id = @id AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL);
+      WITH z AS (
+        SELECT 급 = N'초등학교', 구역종류 = N'통학구역', 구역id = z.hakgudo_id, 구역 = z.hakgudo_nm, 공동 = CASE WHEN z.hakgudo_gb = '1' THEN 1 ELSE 0 END
+          FROM silver.school_zone z WHERE z.geom.STContains(@p) = 1
+        UNION ALL
+        SELECT CASE g.kind WHEN 'M' THEN N'중학교' ELSE N'고등학교' END, CASE g.kind WHEN 'M' THEN N'중학교 학교군' ELSE N'고등학교 학교군' END,
+               g.hakgudo_id, g.hakgudo_nm, CASE WHEN g.hakgudo_gb = '1' THEN 1 ELSE 0 END
+          FROM silver.school_group g WHERE g.geom.STContains(@p) = 1)
+      SELECT z.급, z.구역종류, z.구역id, z.구역, z.공동, 기준일 = k.base_dt,
+             k.school_id, 원문이름 = k.school_nm, 이름 = s.school_nm, 설립 = s.fond_type, 운영 = s.oper_sttus,
+             거리m = CASE WHEN s.geog IS NOT NULL AND @g IS NOT NULL THEN CAST(s.geog.STDistance(@g) AS INT) END,
+             이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
+             st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
+             알리미적재 = CASE WHEN EXISTS (SELECT 1 FROM silver.schoolinfo i2 JOIN @pc c ON c.complex_id = @id
+                                             WHERE LEFT(i2.adrcd_cd, 5) = c.sigungu_cd) THEN 1 ELSE 0 END
+        FROM z
+        LEFT JOIN silver.school_zone_link k ON k.hakgudo_id = z.구역id
+        LEFT JOIN silver.school s ON s.school_id = k.school_id AND s.is_current = 1
+        LEFT JOIN gold.school_link l ON l.school_id = k.school_id
+        OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
+                            교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
+                       FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
+       ORDER BY CASE z.급 WHEN N'초등학교' THEN 1 WHEN N'중학교' THEN 2 ELSE 3 END, z.구역, 거리m, k.school_id`,
+    szScope: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      /* ★★ 2026-10-21 QA: 학구도 적재(b-hakgudo-bg)가 school_zone 에 쓰는 동안 이 EXISTS 가
+         **잠금을 기다려** 상세 전체가 60초 시간초과였다(77291 에서 찾음 · 모든 단지가 같은 일을 당한다).
+         '이 구를 받았나' 는 있음/없음만 보는 범위 표시다 — 커밋 전 행을 봐도 해가 없다. 기다리지 않는다. */
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      DECLARE @sgg CHAR(5) = (SELECT sigungu_cd FROM @pc WHERE complex_id = @id);
+      SELECT 받았나 = CASE WHEN EXISTS (SELECT 1 FROM silver.school_zone z
+                                        WHERE z.sd_cd + z.sgg_cd = @sgg)
+                           THEN 1 ELSE 0 END`,
+    schools: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      WITH v AS (SELECT * FROM gold.fn_pt_school(@lat, @lng) WHERE complex_id = @id),
+      /* ★ 2026-10-27 같은 거리(같은 자리 — 한 캠퍼스 두 학교)면 학교ID 순으로 고정(전엔 열 때마다 다른 학교가 뽑힐 수 있었다) */
+      n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
+                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m, school_id)
+              FROM v),
+      a AS (SELECT school_se,
+                   r500  = SUM(CASE WHEN dist_m <=  500 THEN 1 ELSE 0 END),
+                   r1000 = SUM(CASE WHEN dist_m <= 1000 THEN 1 ELSE 0 END),
+                   r2000 = COUNT(*)
+              FROM v GROUP BY school_se)
+      /* ★ 2026-10-23 사장님 "학교이름, 학생수, 교사학생수" — 학교알리미 공시(학년별·학급별 학생수, apiType 09)를 **공시값 그대로**.
+           위치(학교ID 'B…') ↔ 학교알리미(정보공시 코드 'S…')는 gold.school_link(335: 학교급 · 설립일/개교일 · 법정동 경계 · 양쪽 후보 1)로만 잇는다 — 이름 안 봄.
+           알리미적재: 이 단지 구의 학교알리미를 받았는가(안 받았으면 SCOPE, 받았는데 못 이었으면 UNSURE) */
+      SELECT 학교급 = a.school_se, 가까운곳 = n.school_nm, 설립 = n.fond_type,
+             분교 = n.bnhh_se, 최단m = CAST(n.dist_m AS INT),
+             a.r500, a.r1000, a.r2000,
+             이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
+             st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
+             알리미적재 = CASE WHEN EXISTS (SELECT 1 FROM silver.schoolinfo i JOIN @pc c ON c.complex_id = @id
+                                             WHERE LEFT(i.adrcd_cd, 5) = c.sigungu_cd) THEN 1 ELSE 0 END,
+             ord = CASE a.school_se WHEN N'초등학교' THEN 1
+                                    WHEN N'중학교'   THEN 2
+                                    WHEN N'고등학교' THEN 3 ELSE 9 END
+        FROM a JOIN n ON n.school_se = a.school_se AND n.rn = 1
+        LEFT JOIN gold.school_link l ON l.school_id = n.school_id
+        OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
+                            교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
+                       FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
+       ORDER BY ord;
+      /* ★ 2026-10-24 사장님 "어린이집·유치원·초·중·고는 주변에서 분리" — 교육 탭의 **학교 목록**.
+           학교급마다 1km 안 전부(가까운 순), 1km 안에 없으면 2km 안 가장 가까운 한 곳. 거리는 위 요약 · AI 검색과 **같은 뷰**(v_complex_school). */
+      WITH v AS (SELECT * FROM gold.fn_pt_school(@lat, @lng) WHERE complex_id = @id),
+      n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
+                   rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m, school_id),
+                   /* ★ 2026-10-27 사장님 "둘 다 보여줘" — 1km 안에 없을 때 '가장 가까운 곳' 이 같은 거리로 여럿이면 전부 */
+                   rk = RANK() OVER (PARTITION BY school_se ORDER BY dist_m),
+                   k1 = SUM(CASE WHEN dist_m <= 1000 THEN 1 ELSE 0 END) OVER (PARTITION BY school_se)
+              FROM v)
+      SELECT n.school_id, 학교급 = n.school_se, 이름 = n.school_nm, 설립 = n.fond_type, 분교 = n.bnhh_se, 거리m = CAST(n.dist_m AS INT),
+             이음 = CASE WHEN l.schul_code IS NOT NULL THEN 1 ELSE 0 END,
+             st.학생, st.학급, st.학급당, st.교사, st.교사당, st.공시연도, st.제외, st.제외사유,
+             남녀 = i.coedu, 홈 = i.hmpg,
+             알리미적재 = CASE WHEN EXISTS (SELECT 1 FROM silver.schoolinfo i2 JOIN @pc c ON c.complex_id = @id
+                                             WHERE LEFT(i2.adrcd_cd, 5) = c.sigungu_cd) THEN 1 ELSE 0 END,
+             ord = CASE n.school_se WHEN N'초등학교' THEN 1 WHEN N'중학교' THEN 2 WHEN N'고등학교' THEN 3 ELSE 9 END
+        FROM n
+        LEFT JOIN gold.school_link l ON l.school_id = n.school_id
+        LEFT JOIN silver.schoolinfo i ON i.schul_code = l.schul_code
+        OUTER APPLY (SELECT TOP 1 학생 = t.stdnt_cnt, 학급 = t.class_cnt, 학급당 = t.per_class, 교사 = t.teach_cnt,
+                            교사당 = t.per_teacher, 공시연도 = t.pban_yr, 제외 = t.excp_yn, 제외사유 = t.excp_rsn
+                       FROM silver.schoolinfo_stat t WHERE t.schul_code = l.schul_code ORDER BY t.pban_yr DESC) st
+       WHERE n.dist_m <= 1000 OR (n.k1 = 0 AND n.rk = 1)
+       ORDER BY ord, n.dist_m, n.school_id`,
+    kinders: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      WITH v AS (SELECT * FROM gold.fn_pt_kinder(@lat, @lng) WHERE complex_id = @id),
+      n AS (SELECT kinder_cd, kinder_nm, establish, cap_cnt, pupil_cnt, class_cnt,
+                   pbnt_tmng, oper_time, dist_m,
+                   rn = ROW_NUMBER() OVER (ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd)
+              FROM v)
+      /* ★ 2026-10-21: 여기도 8곳에서 **조용히 잘랐다.** 몇 곳 중 몇 곳인지 같이 낸다. */
+      SELECT kinder_cd, 이름 = kinder_nm, 설립 = establish, 정원 = cap_cnt, 원아 = pupil_cnt,
+             학급 = class_cnt, 공시 = pbnt_tmng, 운영시간 = oper_time,
+             거리m = CAST(dist_m AS INT), 전체 = COUNT(*) OVER ()
+        FROM n WHERE rn <= 8 ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd`,
+    kinderN: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+SELECT n = ${받았나SQL('유치원', 점시군구SQL)}`,
+    aca: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
+
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT 묶음 = ISNULL(grp, N'99 분류 못 함'),
+             r500 = SUM(CASE WHEN dist_m <= 500 THEN 1 ELSE 0 END), r1000 = COUNT(*),
+             최단m = MIN(CAST(dist_m AS INT))
+        FROM gold.fn_pt_academy(@lat, @lng) WHERE complex_id = @id
+       GROUP BY ISNULL(grp, N'99 분류 못 함') ORDER BY 1;
+      SELECT TOP 8 이름 = aca_nm, 분야 = realm_sc_nm, 과정 = le_crse_nm, 거리m = CAST(dist_m AS INT),
+             전체500 = COUNT(*) OVER ()
+        FROM gold.fn_pt_academy(@lat, @lng) WHERE complex_id = @id AND dist_m <= 500 ORDER BY dist_m, aca_nm COLLATE Latin1_General_BIN2, academy_sk;
+      SELECT 전체 = COUNT(*), 좌표있음 = SUM(CASE WHEN geog IS NOT NULL THEN 1 ELSE 0 END)
+        FROM silver.academy WHERE is_current = 1 AND reg_sttus_nm = N'개원';`
+  };
+}
+app.get('/api/near/at', async (req, res) => {
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  const sgg = /^\d{5}$/.test(String(req.query.sgg || '')) ? String(req.query.sgg) : null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 33 || lat > 39.5 || lng < 124 || lng > 132)
+    return res.status(400).json({ error: 'lat · lng 가 필요합니다' });
+  try {
+    const pool = await getPool();
+    const Q = 점주변SQL();
+    const 돌려 = k => pool.request().input('id', sql.Int, 0).input('lat', sql.Float, lat).input('lng', sql.Float, lng)
+      .input('psgg', sql.Char(5), sgg).query(Q[k]);
+    const 이름 = Object.keys(Q);
+    const 답 = Object.fromEntries((await Promise.all(이름.map(돌려))).map((r, i) => [이름[i], r]));
+    const 범 = await 범위표();
+    const 이시군구자료 = sgg ? 받은자료(범, sgg) : null;
+    const { poi, poiSum, poiBrand, poiLife, subways, busStops, busList, busRoutes, schoolZone, szScope, schools, kinders, kinderN, aca } = 답;
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 좌표없음: false, 기준: { lat, lng, sgg },
+      받은자료: 이시군구자료 ? Object.fromEntries(Object.entries(이시군구자료).map(([k, v]) => [k, v.n])) : null,
+      poi: poi.recordset, poiSum: poiSum.recordset[0] || null, poiBrand: poiBrand.recordset, poiLife: poiLife.recordset,
+      schools: schools.recordsets[0] || [], schoolList: schools.recordsets[1] || [], kinders: kinders.recordset,
+      academy: { 묶음: (aca.recordsets && aca.recordsets[0]) || [], 가까운: (aca.recordsets && aca.recordsets[1]) || [],
+                 ...(((aca.recordsets && aca.recordsets[2]) || [])[0] || {}) },
+      kinderLoaded: (kinderN.recordset[0] || {}).n || 0,
+      schoolZone: schoolZone.recordsets[0] || [], schoolGroups: schoolZone.recordsets[1] || [],
+      schoolZoneLoaded: ((szScope.recordset[0] || {}).받았나) ? 1 : 0,
+      busRoutes: busRoutes.recordset, subways: subways.recordset,
+      busStops: (busStops.recordset && busStops.recordset[0]) || null, busList: busList.recordset });
+  } catch (e) { fail(res, e, 'near-at'); }
+});
+
 /* ---------- 공사 중 건물 (387 · 2026-10-30 사장님 "그냥 일반 건대장 나온 단지처럼" · "ㄱㄱ") ----------
    건축허가 신축 · 2022+ 착공 · 사용승인 전 · 대장 아직 없음 · 공동주택/오피스텔 10세대(호)+ → 지도 '공사 중' 핀 + 단지 상세 같은 틀.
    ★ 전부 허가(설계) 원문. 대장 · 실거래 · 공시가격은 사용승인 뒤에 생긴다(화면이 그렇게 적는다).

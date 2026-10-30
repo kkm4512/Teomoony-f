@@ -1217,15 +1217,17 @@ function renderHousePlan(d) {
     ${청.length ? `<ul class="plain">${청.map(a => `<li><b>${esc(a.house_nm || '')}</b> <span class="muted">${esc(String(a.rcrit_pblanc_de || '').trim())} 공고 · ${fmt(a.tot_suply)}세대${a.mvn_prearnge_ym ? ` · 입주 ${esc(String(a.mvn_prearnge_ym).slice(0, 4))}.${esc(String(a.mvn_prearnge_ym).slice(4, 6))} 예정` : ''}</span>
         ${a.pblanc_url ? `<a href="${esc(a.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>` : ''}</li>`).join('')}</ul>`
       : `<p class="note"><span class="gapw" title="${esc(공고전말)}">같은 지번의 청약 공고가 아직 없습니다</span></p>`}`;
-  const TABS = [['info', '단지정보'], ['dong', '동·평형'], ['sale', '분양'], ['land', '땅']];
+  const TABS = [['info', '단지정보'], ['dong', '동·평형'], ['sale', '분양'], ['land', '땅'], ...주변탭들];
   if (!TABS.some(([k]) => k === 승인탭)) 승인탭 = 'info';
+  const 기준 = { lat: b.lat, lng: b.lng };
+  if (주변탭들.some(([k]) => k === 승인탭)) 점주변받기(d, 기준.lat, 기준.lng, b.pnu, () => { if (승인마지막 === d) renderHousePlan(d); });
   $('#detail').innerHTML = `
     <span class="pill nb" title="주택법 사업계획승인 — 사용검사(준공) 기록이 아직 없는 공동주택. 건축물대장은 사용검사 뒤에 생긴다">사업승인 · 사용검사 전</span>
     <h2>${esc(b.이름 || 단지명 || '(이름 없음)')}</h2>
     <p class="sub">${esc(b.대지위치 || '')}${단지명 && 단지명 !== b.이름 ? '<br>행위개요 단지명: ' + esc(단지명) : ''}</p>
     <p class="facts">${[`${fmt(b.세대)}세대`, `${fmt(주동.length || b.주건축물수 || 0)}개 동`, 최고층 ? `최고 ${fmt(최고층)}층` : '', 날8(b.사용검사예정일) ? `사용검사 ${날8(b.사용검사예정일)} 예정` : ''].filter(Boolean).join(' · ')}</p>
     <div class="tabs">${TABS.map(([k, label]) => `<button type="button" class="tab" data-ptab="${k}" aria-selected="${k === 승인탭}">${label}</button>`).join('')}</div>
-    <div class="pane">${({ info: paneI, dong: paneD, sale: paneS, land: 땅탭(d.땅) })[승인탭] || paneI}</div>
+    <div class="pane">${주변탭들.some(([k]) => k === 승인탭) ? 점주변판(d, 승인탭, 기준.lat, 기준.lng) : (({ info: paneI, dong: paneD, sale: paneS, land: 땅탭(d.땅) })[승인탭] || paneI)}</div>
     <p class="note sm muted">출처: 건축HUB 주택인허가 원문(주택대장 ${esc(b.hp_pk)} · ${esc(b.원문처음월 || '')}부터) · 청약홈 공고는 <b>같은 지번</b>일 때만 붙입니다(이름으로 잇지 않음). 위치는 ${esc(b.위치근거 || '모름')}.</p>`;
   $('#detail').querySelectorAll('[data-ptab]').forEach(t => t.addEventListener('click', () => { 승인탭 = t.dataset.ptab; renderHousePlan(승인마지막); }));
 }
@@ -1251,6 +1253,28 @@ function drawPreBuilds(list) {
     mk.on('click', () => selectPreBuild(p.pk));
     mk.addTo(newbuildLayer);
   });
+}
+/* 10-30 사장님 "상권 학교는 못 붙여?" — 공사 중 · 승인 상세의 주변 탭(교통 · 교육 · 상권 · 병원·약국). 단지 상세와 같은 그리기(주변판들) · /api/near/at(한 점, 388).
+   ★ 그 탭을 처음 열 때 받는다(덤 — 못 받으면 그 칸에 그렇게 적는다). 기준점은 필지 중심(단지 중심이 아님 — 칸에 적는다). */
+const 주변탭들 = [['near', '교통'], ['edu', '교육'], ['shop', '상권'], ['med', '병원·약국']];
+async function 점주변받기(d, lat, lng, pnu, 다시) {
+  if (d.주변 || d.주변받는중 || lat == null || lng == null) return;
+  d.주변받는중 = true;
+  try {
+    const sgg = String(pnu || '').slice(0, 5);
+    const r = await fetch(`/api/near/at?lat=${Number(lat).toFixed(7)}&lng=${Number(lng).toFixed(7)}${/^\d{5}$/.test(sgg) ? `&sgg=${sgg}` : ''}`);
+    d.주변 = r.ok ? await r.json() : { 실패: true };
+  } catch (e) { d.주변 = { 실패: true }; }
+  d.주변받는중 = false;
+  다시();
+}
+function 점주변판(d, 탭, lat, lng) {
+  if (lat == null || lng == null) return `<div class="asknote scope"><span class="gap">SCOPE</span> 지번 필지를 지도에서 못 찾아 기준점이 없습니다 — 주변을 거리로 찾을 수 없습니다(없는 게 아님)</div>`;
+  if (!d.주변) return '<p class="note muted">주변을 불러오는 중…</p>';
+  if (d.주변.실패 || d.주변.error) return `<p class="note">${gapCell('', 'SCOPE', '주변을 불러오지 못했습니다')}</p>`;
+  const 판 = 주변판들({ ...d.주변, complex: null, kapt: null });
+  return `<p class="note sm muted">거리 기준점: 필지 중심(지적도) — 단지 중심이 아니라 그 지번 땅의 가운데입니다.</p>`
+       + ({ near: 판.paneN, edu: 판.paneE, shop: 판.paneC, med: 판.paneH })[탭];
 }
 function 대장전칸(무엇) {
   return `${sect('실거래 · 공시가격 · 관리비', 'permit')}
@@ -1361,15 +1385,16 @@ function renderPreBuild(d) {
       <table class="pdtab"><thead><tr><th>층</th><th>용도</th><th class="n">면적</th></tr></thead><tbody>
       ${층.map(f => `<tr><td>${esc(층말(f))}</td><td>${esc(f.용도 || '—')}</td><td class="n">${f.면적 != null ? fmt(Math.round(f.면적)) + '㎡' : '—'}</td></tr>`).join('')}</tbody></table>
       <p class="note sm muted">여러 건물을 합친 층 범위입니다.</p>` : ''}`;
-  const TABS = [['info', '단지정보'], ['dong', '동·층'], ['land', '땅']];
+  const TABS = [['info', '단지정보'], ['dong', '동·층'], ['land', '땅'], ...주변탭들];
   if (!TABS.some(([k]) => k === 공사탭)) 공사탭 = 'info';
+  if (주변탭들.some(([k]) => k === 공사탭)) 점주변받기(d, a.lat, a.lng, a.pnu, () => { if (공사마지막 === d) renderPreBuild(d); });
   $('#detail').innerHTML = `
     <span class="pill nb" title="건축허가 신축 · 착공 · 사용승인 전 — 건축물대장은 사용승인 뒤에 생긴다">공사 중 · 사용승인 전</span>
     <h2>${esc(a.bld_nm || a.plat_plc || '(이름 없음)')}</h2>
     <p class="sub">${esc(a.plat_plc || '')}</p>
     <p class="facts">${[esc(용도말), 세대호말({ 세대: a.hhld_cnt, 호: a.ho_cnt }), 주.length ? `${fmt(주.length)}개 건물` : '', 최고층 ? `최고 ${fmt(최고층)}층` : '', a.real_stcns_day ? `착공 ${날짜(a.real_stcns_day)}` : ''].filter(Boolean).join(' · ')}</p>
     <div class="tabs">${TABS.map(([k, label]) => `<button type="button" class="tab" data-ptab="${k}" aria-selected="${k === 공사탭}">${label}</button>`).join('')}</div>
-    <div class="pane">${({ info: paneI, dong: paneD, land: 땅탭(d.땅) })[공사탭] || paneI}</div>
+    <div class="pane">${주변탭들.some(([k]) => k === 공사탭) ? 점주변판(d, 공사탭, a.lat, a.lng) : (({ info: paneI, dong: paneD, land: 땅탭(d.땅) })[공사탭] || paneI)}</div>
     <p class="note sm muted">출처: 건축HUB 건축인허가 원문(허가대장 ${esc(a.mgm_pmsrgst_pk)}${d.원문처음월 ? ` · ${esc(d.원문처음월)}부터` : ''}) · 필지 · 토지특성 · 토지이동 · 철거멸실(지번). 이름은 원문 건물명 그대로이고 대장 단지와 이름으로 잇지 않습니다.</p>`;
   $('#detail').querySelectorAll('[data-ptab]').forEach(t => t.addEventListener('click', () => { 공사탭 = t.dataset.ptab; renderPreBuild(공사마지막); }));
 }
@@ -4621,6 +4646,203 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
           .join('');
 }
 
+/* ---------------- 주변 탭 그리기 (교통 · 상권 · 병원·약국 · 교육) ----------------
+   ★ 2026-10-30 사장님 "상권 학교는 못 붙여?" — 단지 상세 안에 있던 그리기를 함수로 뺐다. 단지 상세 · 공사 중 건물 · 승인 아파트가 **같은 그리기**를 쓴다.
+     받는 칸은 단지 상세 응답과 같은 이름(poi · schools · subways …). 공사 중 · 승인은 /api/near/at(한 점 주변, 388)이 같은 모양으로 준다.
+   ★ 단지 번호가 있어야 하는 덤 칸(심평원 병원 · 약국 인허가 · 어린이집)은 단지일 때만. */
+function 주변판들(p) {
+  const { complex: c, poi, poiSum, poiBrand, poiLife, schools, subways, busStops, schoolZone, schoolZoneLoaded, busRoutes, busList,
+          좌표없음, kinders, kinderLoaded, academy, schoolList, schoolGroups, 받은자료, kapt } = p;
+  const sch  = (schools || []);
+  const kin  = (kinders || []);
+  const sz   = (schoolZone || []);
+  const br   = (busRoutes || []);
+  const bl   = (busList || []);
+  const 정류장묶음 = [];
+  bl.forEach(x => {
+    if (busStops && x.정류장 === busStops.가까운곳) return;
+    let g = 정류장묶음.find(y => y.정류장 === x.정류장);
+    if (!g) 정류장묶음.push(g = { 정류장: x.정류장, 거리: [], ars: [] });
+    g.거리.push(x.거리m); if (x.ars) g.ars.push(x.ars);
+  });
+  const BTYPE = { '3': ['간선', 'bt3'], '4': ['지선', 'bt4'], '2': ['마을', 'bt2'],
+                  '6': ['광역', 'bt6'], '15': ['심야', 'bt15'], '5': ['순환', 'bt5'],
+                  '1': ['공항', 'bt1'], '7': ['인천', 'bt7'], '8': ['경기', 'bt8'],
+                  '10': ['관광', 'bt10'], '14': ['한강', 'bt14'] };
+  const sub  = (subways || []);
+  const bus  = busStops || null;
+  const pz = (poi || []);
+  const pTot = k => pz.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+  const pOn  = (poiSum && Number(poiSum.단지내)) || 0;
+  const pb   = (poiBrand || []).filter(b => Number(b.r1000) > 0);
+  const pl   = (poiLife || []).filter(x => Number(x.r1000) > 0);
+  const paneN = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 중심좌표가 없어 지하철 · 버스를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
+    ${/* ★ 머리글 숫자는 **전체**다. 보여주는 수(4)를 적으면 그게 전부인 줄 안다 */''}
+    ${sect('지하철', 'subway', sub.length ? ` ${fmt(Number(sub[0].전체) || sub.length)}` : '')}
+    ${kapt && (kapt.지하철 || kapt.지하철도보) ? `<p class="note sm">K-apt 신고: ${esc(kapt.지하철 || '')}${kapt.지하철노선 ? ` <span class="muted">${esc(kapt.지하철노선)}</span>` : ''}${kapt.지하철도보 ? ` · 도보 ${esc(kapt.지하철도보)}` : ''}</p>` : ''}
+    ${sub.length ? `
+      <div class="schrow">${sub.map(x => `
+        <div class="scell" data-pt="subway|${esc(x.역)}">
+          <span class="sg">${Number(x.환승) ? '환승' : '역'}</span>
+          <b>${esc(x.역)}</b>
+          <span class="sd">${fmt(x.최단m)}m</span>
+          <span class="sn">${esc(x.노선 || '')}</span>
+        </div>`).join('')}</div>
+      ${ (Number(sub[0].전체) || 0) > sub.length ? `<p class="note sm">1.5km 안 ${fmt(sub[0].전체)}곳 중 가까운 ${fmt(sub.length)}곳</p>` : ''}`
+      : `<p class="note">${gapCell('', 'NA',
+          '단지 1.5km 안에 도시철도 역이 없습니다')}</p>`}
+
+    ${sect('버스', 'bus', bus && Number(bus.r500) ? ` ${fmt(bus.r500)}` : '')}
+    ${kapt && kapt.버스도보 ? `<p class="note sm">K-apt 신고: 정류장까지 도보 ${esc(kapt.버스도보)}</p>` : ''}
+    ${bus && Number(bus.r500) ? `
+      ${/* ★ 20:05 사장님: 여기 올리면 **가장 가까운 정류장 한 점만**(전엔 500m 안 전부). data-pt-n=1 = 가까운 순 첫 점만 */''}
+      <div class="zrow2" data-pt="bus|${esc(bus.가까운곳 || '')}" data-pt-n="1">
+        <span class="zt">가장 가까운 정류장</span>
+        <b>${fmt(bus.최단m)}m</b>
+        <span class="sn">${esc(bus.가까운곳 || '')}</span>
+      </div>
+      ${/* ★ 2026-10-21: 전에는 **개수만** 있고 이름이 없었다. 번호 칩은 '노선'
+            이라 단위가 다르다 — 정류장은 정류장대로 적는다.
+            한 줄에 올리면 **그 정류장만** 지도에 찍힌다(data-pt 의 키). */''}
+      ${bl.length ? `<div class="stoplist">${정류장묶음.map(x => `
+        <div class="stoprow" data-pt="bus|${esc(x.정류장)}" title="누르면 지도에 고정합니다">
+          <b>${esc(x.정류장 || '—')}</b>
+          <span class="sd">${x.거리.map(m => fmt(m)).join(' · ')}m</span>
+          ${x.ars.length ? `<span class="sn">ARS ${x.ars.map(a => esc(a)).join(' · ')}</span>` : ''}
+        </div>`).join('')}</div>
+        ${(Number(bl[0].전체) || 0) > bl.length ? `<p class="note sm">정류장 ${fmt(bl[0].전체)}곳 중 가까운 ${fmt(bl.length)}곳</p>` : ''}` : ''}
+      ${(() => {
+        /* ★ 거리대로 **갈라서** 보여준다(2026-10-20). 전에는 번호 칩을 한 덩어리로
+           쏟아 놓고 위에 '6 / 300m · 19 / 500m · 184 가장가까움' 세 숫자만 두어서,
+           **어느 번호가 300m 인지 알 수 없었다.** 게다가 6·19 는 정류장 수인데
+           칩은 노선이라 단위가 섞여 있었다 - 둘을 따로 적는다. */
+        const r300 = Number(bus.r300) || 0, r500 = Number(bus.r500) || 0;
+        const 칩 = (x) => {
+          const t = BTYPE[String(x.종류)] || ['', 'bt0'];
+          /* ★ 2026-10-21: 번호 칩에도 점 표시를 붙인다. 전에는 '가장 가까운
+             정류장' 한 줄에만 있어서, 번호에 올리면 아무 일도 안 났다. */
+          return `<span class="bno ${t[1]}" data-pt="busroute|${esc(x.번호)}"`
+               + ` title="${esc(t[0])} · 가장 가까운 정류장 ${fmt(x.최단m)}m">${esc(x.번호)}</span>`;
+        };
+        const 묶음 = (제목, 정류장, 목록) => {
+          if (!목록.length) return '';
+          const 잘림 = 목록.length > 30;
+          return `<div class="busgrp">
+            <div class="bgh">${esc(제목)}
+              <span class="sn">정류장 ${fmt(정류장)}곳 · 노선 ${fmt(목록.length)}개${
+                잘림 ? ' (30개만)' : ''}</span></div>
+            <div class="buses">${목록.slice(0, 30).map(칩).join('')}</div>
+          </div>`;
+        };
+        const 가까이 = br.filter(x => Number(x.최단m) <= 300);
+        const 멀리   = br.filter(x => Number(x.최단m) > 300);
+        if (!br.length) return '';
+        return 묶음('300m 안', r300, 가까이)
+             + 묶음('300~500m', Math.max(0, r500 - r300), 멀리);
+      })()}
+      ${br.length ? `<p class="note sm" title="버스 노선을 아직 전부 받지 못해 여기 없는 번호가 있을 수 있습니다">노선 일부만 받음</p>` : ''}
+      <p class="note sm">가장 가까운 정류장 <b>${esc(bus.가까운곳 || '—')}</b></p>`
+      : `<p class="note">${Number(bus && bus.적재)
+          ? gapCell('', 'NA', '단지 500m 안에 버스정류장이 없습니다')
+          : gapCell('', 'SCOPE', '버스정류장을 아직 적재하지 않았습니다')}</p>`}
+
+
+
+
+`;
+
+  /* ★ 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 상권 탭(상가 점포 · 브랜드 · 생활 편의). 병원·약국 묶음은 의료 탭으로 */
+  const paneC = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 중심좌표가 없어 상권을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
+    ${sect('상권', 'poi', pz.length ? ` ${fmt(pTot('r500'))}` : '')}
+    ${pz.length ? `
+      <div class="poirow">
+        <span><b>${fmt(pTot('r300'))}</b>300m</span>
+        <span><b>${fmt(pTot('r500'))}</b>500m</span>
+        <span><b>${fmt(pTot('r1000'))}</b>1km</span>
+        <span><b>${fmt((poiSum && poiSum.업종수500) || 0)}</b>업종(500m)</span>
+      </div>
+      ${pb.length ? `<div class="brands">${pb.slice(0, 12).map(b => `
+        <span class="bchip${Number(b.r500) ? '' : ' far'}" data-pt="brand|${esc(b.브랜드)}"
+          data-pt-r="${Number(b.r500) ? 500 : 1000}"
+          title="가장 가까운 곳 ${fmt(b.최단m)}m">${esc(b.브랜드)}${
+          Number(b.r500) > 1 ? `<b>${fmt(b.r500)}</b>` : ''}</span>`).join('')}</div>
+        ` : ''}
+      ${pl.length ? `${생활묶음(pl).filter(([g]) => g !== '병원·약국').map(([g, xs]) => `
+        <div class="lgrp"><span class="lgl">${esc(g)}<button type="button" class="sdet lgo" data-poilist="${esc(xs.map(x => x.항목).join(','))}" data-poinm="${esc(g)}" title="이 묶음의 점포 목록">목록 ›</button></span><div class="lifegrid">${xs.map(x => `
+        <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}"
+             data-pt-r="${Number(x.r500) ? 500 : 1000}"
+             title="가장 가까운 곳 ${fmt(x.최단m)}m">
+          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
+          <span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div></div>`).join('')}
+        ` : ''}
+      <div class="lt2">그 밖에 많은 업종 (500m)</div>
+      <div class="zlist">${pz.filter(r => Number(r.r500) > 0).slice(0, 8).map(r => `
+        <div class="zrow"><span class="zn">${esc(r.소분류 || '')}</span>
+          <span class="zbar"><i style="width:${
+            (100 * Number(r.r500) / Math.max(1, Number(pz[0].r500))).toFixed(1)}%"></i></span>
+          <b>${fmt(r.r500)}</b></div>`).join('')}</div>
+      ${pOn ? `<p class="note sm">단지 안 점포 <b>${fmt(pOn)}곳</b></p>` : ''}
+      `
+      : `<p class="note">${(받은자료 && 받은자료['상가'])
+          ? gapCell('', 'NA', '단지 500m 안에 상가업소가 없습니다')
+          : gapCell('', 'SCOPE', '이 시군구의 상가업소를 아직 받아오지 않았습니다')}</p>`}
+
+`;
+
+  /* ★ 2026-10-24 병원·약국 탭 — 심평원 병원(종별 · 큰 병원 · 간판 과목) · 행안부 약국 인허가 · 상가 업종 병원·약국(출처 갈라 적음) */
+  const paneH = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 중심좌표가 없어 병원·약국을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
+    ${c && c.complex_id ? `<div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>` : ''}
+    ${c && c.complex_id ? `<div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>` : ''}
+    ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null; if (!g) return '';
+      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(상가 데이터 — 위와 출처 다름)</span></div>
+        <div class="lifegrid">${g[1].map(x => `
+        <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}" title="가장 가까운 곳 ${fmt(x.최단m)}m">
+          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`; })()}
+`;
+
+
+  /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 → 학원·교습소(교육청 등록, 01:09 사장님 "교육에 학원 넣자"). 상가 업종 '입시·보습학원' 은 상권 탭 생활 편의 그대로(출처가 다름) */
+  const paneE = 좌표없음 ? `
+    <div class="asknote scope"><span class="gap">SCOPE</span>
+      이 단지는 중심좌표가 없어 어린이집 · 유치원 · 학교를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
+    ${c && c.complex_id ? `<div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>` : ''}
+    ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
+    ${kin.length ? `
+      <div class="schrow">${kin.map(x => `
+        <div class="scell" data-pt="kinder|${esc(x.이름 || '')}" data-pt-r="500">
+          <span class="sg">${esc((x.설립 || '').replace(/\s/g, '') || '—')}</span>
+          <b>${esc(x.이름 || '—')}</b>
+          ${x.kinder_cd ? `<button type="button" class="sdet" data-kinder="${esc(x.kinder_cd)}" title="유치원 상세">자세히 ›</button>` : ''}
+          <span class="sd">${fmt(x.거리m)}m${
+            x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${
+            x.원아 != null ? ` · 원아 ${fmt(x.원아)}` : ''}</span>
+          <span class="sn">${x.학급 != null ? `${fmt(x.학급)}학급` : ''}${
+            x.운영시간 ? ' · ' + esc(x.운영시간) : ''}${
+            x.공시 ? ` · <b>${esc(String(x.공시).slice(0, 4))}년 ${
+              esc(String(x.공시).slice(4))}차 공시</b>` : ''}</span>
+        </div>`).join('')}</div>
+      ${(Number(kin[0].전체) || 0) > kin.length ? `<p class="note sm">500m 안 ${fmt(kin[0].전체)}곳 중 가까운 ${fmt(kin.length)}곳</p>` : ''}`
+      : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
+          kinderLoaded
+            ? '이 단지 500m 안에 유치원이 없습니다'
+            : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
+
+    ${['초등학교', '중학교', '고등학교'].map(급 => 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
+        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)).join('')}
+    ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</p>` : ''}
+
+    ${학원칸(academy)}
+`;
+
+  return { paneN, paneC, paneH, paneE };
+}
+
 function renderDetail(payload) {
   lastDetail = payload;
   const { complex: c, dongs, parcels, tradeStats, offsite, spec, permits, permitDongs, kapt, cost,
@@ -4994,169 +5216,7 @@ function renderDetail(payload) {
   /* ★ 주변은 전부 **거리**로 찾는다. 좌표가 없으면 전부 0건이 되는데,
      그대로 두면 "500m 안에 없습니다" 라는 거짓말이 된다(2026-10-19).
      없는 것과 아직 못 본 것은 다르다 - 먼저 그렇게 말하고, 0건 목록은 안 그린다. */
-  const paneN = 좌표없음 ? `
-    <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 중심좌표가 없어 지하철 · 버스를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
-    ${/* ★ 머리글 숫자는 **전체**다. 보여주는 수(4)를 적으면 그게 전부인 줄 안다 */''}
-    ${sect('지하철', 'subway', sub.length ? ` ${fmt(Number(sub[0].전체) || sub.length)}` : '')}
-    ${kapt && (kapt.지하철 || kapt.지하철도보) ? `<p class="note sm">K-apt 신고: ${esc(kapt.지하철 || '')}${kapt.지하철노선 ? ` <span class="muted">${esc(kapt.지하철노선)}</span>` : ''}${kapt.지하철도보 ? ` · 도보 ${esc(kapt.지하철도보)}` : ''}</p>` : ''}
-    ${sub.length ? `
-      <div class="schrow">${sub.map(x => `
-        <div class="scell" data-pt="subway|${esc(x.역)}">
-          <span class="sg">${Number(x.환승) ? '환승' : '역'}</span>
-          <b>${esc(x.역)}</b>
-          <span class="sd">${fmt(x.최단m)}m</span>
-          <span class="sn">${esc(x.노선 || '')}</span>
-        </div>`).join('')}</div>
-      ${ (Number(sub[0].전체) || 0) > sub.length ? `<p class="note sm">1.5km 안 ${fmt(sub[0].전체)}곳 중 가까운 ${fmt(sub.length)}곳</p>` : ''}`
-      : `<p class="note">${gapCell('', 'NA',
-          '단지 1.5km 안에 도시철도 역이 없습니다')}</p>`}
-
-    ${sect('버스', 'bus', bus && Number(bus.r500) ? ` ${fmt(bus.r500)}` : '')}
-    ${kapt && kapt.버스도보 ? `<p class="note sm">K-apt 신고: 정류장까지 도보 ${esc(kapt.버스도보)}</p>` : ''}
-    ${bus && Number(bus.r500) ? `
-      ${/* ★ 20:05 사장님: 여기 올리면 **가장 가까운 정류장 한 점만**(전엔 500m 안 전부). data-pt-n=1 = 가까운 순 첫 점만 */''}
-      <div class="zrow2" data-pt="bus|${esc(bus.가까운곳 || '')}" data-pt-n="1">
-        <span class="zt">가장 가까운 정류장</span>
-        <b>${fmt(bus.최단m)}m</b>
-        <span class="sn">${esc(bus.가까운곳 || '')}</span>
-      </div>
-      ${/* ★ 2026-10-21: 전에는 **개수만** 있고 이름이 없었다. 번호 칩은 '노선'
-            이라 단위가 다르다 — 정류장은 정류장대로 적는다.
-            한 줄에 올리면 **그 정류장만** 지도에 찍힌다(data-pt 의 키). */''}
-      ${bl.length ? `<div class="stoplist">${정류장묶음.map(x => `
-        <div class="stoprow" data-pt="bus|${esc(x.정류장)}" title="누르면 지도에 고정합니다">
-          <b>${esc(x.정류장 || '—')}</b>
-          <span class="sd">${x.거리.map(m => fmt(m)).join(' · ')}m</span>
-          ${x.ars.length ? `<span class="sn">ARS ${x.ars.map(a => esc(a)).join(' · ')}</span>` : ''}
-        </div>`).join('')}</div>
-        ${(Number(bl[0].전체) || 0) > bl.length ? `<p class="note sm">정류장 ${fmt(bl[0].전체)}곳 중 가까운 ${fmt(bl.length)}곳</p>` : ''}` : ''}
-      ${(() => {
-        /* ★ 거리대로 **갈라서** 보여준다(2026-10-20). 전에는 번호 칩을 한 덩어리로
-           쏟아 놓고 위에 '6 / 300m · 19 / 500m · 184 가장가까움' 세 숫자만 두어서,
-           **어느 번호가 300m 인지 알 수 없었다.** 게다가 6·19 는 정류장 수인데
-           칩은 노선이라 단위가 섞여 있었다 - 둘을 따로 적는다. */
-        const r300 = Number(bus.r300) || 0, r500 = Number(bus.r500) || 0;
-        const 칩 = (x) => {
-          const t = BTYPE[String(x.종류)] || ['', 'bt0'];
-          /* ★ 2026-10-21: 번호 칩에도 점 표시를 붙인다. 전에는 '가장 가까운
-             정류장' 한 줄에만 있어서, 번호에 올리면 아무 일도 안 났다. */
-          return `<span class="bno ${t[1]}" data-pt="busroute|${esc(x.번호)}"`
-               + ` title="${esc(t[0])} · 가장 가까운 정류장 ${fmt(x.최단m)}m">${esc(x.번호)}</span>`;
-        };
-        const 묶음 = (제목, 정류장, 목록) => {
-          if (!목록.length) return '';
-          const 잘림 = 목록.length > 30;
-          return `<div class="busgrp">
-            <div class="bgh">${esc(제목)}
-              <span class="sn">정류장 ${fmt(정류장)}곳 · 노선 ${fmt(목록.length)}개${
-                잘림 ? ' (30개만)' : ''}</span></div>
-            <div class="buses">${목록.slice(0, 30).map(칩).join('')}</div>
-          </div>`;
-        };
-        const 가까이 = br.filter(x => Number(x.최단m) <= 300);
-        const 멀리   = br.filter(x => Number(x.최단m) > 300);
-        if (!br.length) return '';
-        return 묶음('300m 안', r300, 가까이)
-             + 묶음('300~500m', Math.max(0, r500 - r300), 멀리);
-      })()}
-      ${br.length ? `<p class="note sm" title="버스 노선을 아직 전부 받지 못해 여기 없는 번호가 있을 수 있습니다">노선 일부만 받음</p>` : ''}
-      <p class="note sm">가장 가까운 정류장 <b>${esc(bus.가까운곳 || '—')}</b></p>`
-      : `<p class="note">${Number(bus && bus.적재)
-          ? gapCell('', 'NA', '단지 500m 안에 버스정류장이 없습니다')
-          : gapCell('', 'SCOPE', '버스정류장을 아직 적재하지 않았습니다')}</p>`}
-
-
-
-
-`;
-
-  /* ★ 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 상권 탭(상가 점포 · 브랜드 · 생활 편의). 병원·약국 묶음은 의료 탭으로 */
-  const paneC = 좌표없음 ? `
-    <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 중심좌표가 없어 상권을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
-    ${sect('상권', 'poi', pz.length ? ` ${fmt(pTot('r500'))}` : '')}
-    ${pz.length ? `
-      <div class="poirow">
-        <span><b>${fmt(pTot('r300'))}</b>300m</span>
-        <span><b>${fmt(pTot('r500'))}</b>500m</span>
-        <span><b>${fmt(pTot('r1000'))}</b>1km</span>
-        <span><b>${fmt((poiSum && poiSum.업종수500) || 0)}</b>업종(500m)</span>
-      </div>
-      ${pb.length ? `<div class="brands">${pb.slice(0, 12).map(b => `
-        <span class="bchip${Number(b.r500) ? '' : ' far'}" data-pt="brand|${esc(b.브랜드)}"
-          data-pt-r="${Number(b.r500) ? 500 : 1000}"
-          title="가장 가까운 곳 ${fmt(b.최단m)}m">${esc(b.브랜드)}${
-          Number(b.r500) > 1 ? `<b>${fmt(b.r500)}</b>` : ''}</span>`).join('')}</div>
-        ` : ''}
-      ${pl.length ? `${생활묶음(pl).filter(([g]) => g !== '병원·약국').map(([g, xs]) => `
-        <div class="lgrp"><span class="lgl">${esc(g)}<button type="button" class="sdet lgo" data-poilist="${esc(xs.map(x => x.항목).join(','))}" data-poinm="${esc(g)}" title="이 묶음의 점포 목록">목록 ›</button></span><div class="lifegrid">${xs.map(x => `
-        <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}"
-             data-pt-r="${Number(x.r500) ? 500 : 1000}"
-             title="가장 가까운 곳 ${fmt(x.최단m)}m">
-          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
-          <span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div></div>`).join('')}
-        ` : ''}
-      <div class="lt2">그 밖에 많은 업종 (500m)</div>
-      <div class="zlist">${pz.filter(r => Number(r.r500) > 0).slice(0, 8).map(r => `
-        <div class="zrow"><span class="zn">${esc(r.소분류 || '')}</span>
-          <span class="zbar"><i style="width:${
-            (100 * Number(r.r500) / Math.max(1, Number(pz[0].r500))).toFixed(1)}%"></i></span>
-          <b>${fmt(r.r500)}</b></div>`).join('')}</div>
-      ${pOn ? `<p class="note sm">단지 안 점포 <b>${fmt(pOn)}곳</b></p>` : ''}
-      `
-      : `<p class="note">${(받은자료 && 받은자료['상가'])
-          ? gapCell('', 'NA', '단지 500m 안에 상가업소가 없습니다')
-          : gapCell('', 'SCOPE', '이 시군구의 상가업소를 아직 받아오지 않았습니다')}</p>`}
-
-`;
-
-  /* ★ 2026-10-24 병원·약국 탭 — 심평원 병원(종별 · 큰 병원 · 간판 과목) · 행안부 약국 인허가 · 상가 업종 병원·약국(출처 갈라 적음) */
-  const paneH = 좌표없음 ? `
-    <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 중심좌표가 없어 병원·약국을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
-    <div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>
-    <div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>
-    ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null; if (!g) return '';
-      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(상가 데이터 — 위와 출처 다름)</span></div>
-        <div class="lifegrid">${g[1].map(x => `
-        <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}" title="가장 가까운 곳 ${fmt(x.최단m)}m">
-          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`; })()}
-`;
-
-
-  /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 → 학원·교습소(교육청 등록, 01:09 사장님 "교육에 학원 넣자"). 상가 업종 '입시·보습학원' 은 상권 탭 생활 편의 그대로(출처가 다름) */
-  const paneE = 좌표없음 ? `
-    <div class="asknote scope"><span class="gap">SCOPE</span>
-      이 단지는 중심좌표가 없어 어린이집 · 유치원 · 학교를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
-    <div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>
-    ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
-    ${kin.length ? `
-      <div class="schrow">${kin.map(x => `
-        <div class="scell" data-pt="kinder|${esc(x.이름 || '')}" data-pt-r="500">
-          <span class="sg">${esc((x.설립 || '').replace(/\s/g, '') || '—')}</span>
-          <b>${esc(x.이름 || '—')}</b>
-          ${x.kinder_cd ? `<button type="button" class="sdet" data-kinder="${esc(x.kinder_cd)}" title="유치원 상세">자세히 ›</button>` : ''}
-          <span class="sd">${fmt(x.거리m)}m${
-            x.정원 != null ? ` · 정원 ${fmt(x.정원)}` : ''}${
-            x.원아 != null ? ` · 원아 ${fmt(x.원아)}` : ''}</span>
-          <span class="sn">${x.학급 != null ? `${fmt(x.학급)}학급` : ''}${
-            x.운영시간 ? ' · ' + esc(x.운영시간) : ''}${
-            x.공시 ? ` · <b>${esc(String(x.공시).slice(0, 4))}년 ${
-              esc(String(x.공시).slice(4))}차 공시</b>` : ''}</span>
-        </div>`).join('')}</div>
-      ${(Number(kin[0].전체) || 0) > kin.length ? `<p class="note sm">500m 안 ${fmt(kin[0].전체)}곳 중 가까운 ${fmt(kin.length)}곳</p>` : ''}`
-      : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
-          kinderLoaded
-            ? '이 단지 500m 안에 유치원이 없습니다'
-            : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
-
-    ${['초등학교', '중학교', '고등학교'].map(급 => 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
-        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)).join('')}
-    ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</p>` : ''}
-
-    ${학원칸(academy)}
-`;
+  const { paneN, paneC, paneH, paneE } = 주변판들(payload);   /* 10-30: 공사 중 · 승인 상세도 같은 그리기를 쓴다 */
 
   /* 사는 정보 — K-apt 축. 대장에도 실거래에도 없는 것들이 여기 있다. */
   const _관리 = `
