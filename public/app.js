@@ -1152,6 +1152,42 @@ function drawPreBuilds(list) {
     mk.addTo(newbuildLayer);
   });
 }
+/* 10-31 사장님 "단지상세에서 동네 단지를 보여주는 화면 — 저런 느낌처럼(주변 분양 카드)" · "ㄱㄱ"
+   단지정보 탭 아래 두 칸: ① 주변 단지(1.5km · 세대 100+ · 가까운 순 5) ② 주변 분양 · 공사 중(2km · 청약 공고 · 사업승인 · 공사 중 단지 5).
+   카드를 누르면 그 단지 상세(새로 불러오지 않음). 맨 아래 '○○동 단지 전체' → 동네 쪽(/r/법정동). 값은 서버가 원문 그대로 준다. */
+const 주변카드기억 = new Map();
+async function 주변카드채우기(c) {
+  const box = document.querySelector('#detail .nearcards');
+  if (!box || !c || c.centroid_lat == null || c.centroid_lng == null) return;
+  const 키 = String(c.complex_id ?? `${c.centroid_lat},${c.centroid_lng}`);
+  let r = 주변카드기억.get(키);
+  if (!r) {
+    const lawd = c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : '';
+    try { r = await fetch(`/api/near/cards?lat=${c.centroid_lat}&lng=${c.centroid_lng}&id=${c.complex_id ?? 0}&lawd=${lawd}`).then(x => x.json()); }
+    catch (e) { return; }
+    if (!r || r.error) return;
+    주변카드기억.set(키, r);
+  }
+  const 지금 = document.querySelector('#detail .nearcards');
+  if (!지금 || 지금.dataset.nc !== String(c.complex_id ?? '')) return;   // 그사이 다른 단지로 옮겼다
+  const 거리 = m => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${fmt(Math.round(m / 10) * 10)}m`);
+  const 월 = v => { const t = String(v || '').replace(/\D/g, ''); return t.length >= 6 ? `${t.slice(0, 4)}.${t.slice(4, 6)}` : ''; };
+  const 카드 = (id, 머리, 이름, 줄) => `<a class="ncard" href="/c/${id}" data-cid="${id}">${머리 || ''}<b>${esc(이름 || '이름 없음')}</b><span>${줄}</span></a>`;
+  const 단지칸 = (r.단지 || []).length ? `${sect('주변 단지', 'bld', ` <span class="muted">1.5㎞ 안 ${fmt(r.단지수)}곳 · 가까운 순</span>`)}
+    <div class="nclist">${r.단지.map(x => 카드(x.id, '', x.이름, [`${fmt(x.세대)}세대`, x.연 ? `${x.연}년` : '', x.mx ? `최고 ${eok(x.mx)}` : '', 거리(x.m)].filter(Boolean).join(' · '))).join('')}</div>
+    ${r.동 ? `<a class="ncmore" href="/r/${esc(r.동.cd)}">${esc(r.동.이름)} 단지 전체 ${fmt(r.동.수)}곳 보기 ›</a>` : ''}` : '';
+  const 말 = { a: '청약 공고', h: '사업승인', p: '공사 중' };
+  const 가칸 = (r.가단지 || []).length ? `${sect('주변 분양 · 공사 중', '', ` <span class="muted">2㎞ 안 · 청약 공고 먼저</span>`)}
+    <div class="nclist">${r.가단지.map(x => 카드(x.id, `<i class="ncchip k-${esc(x.종류)}">${말[x.종류] || ''}</i>`, x.이름,
+      (x.종류 === 'a' ? [x.최고만원 ? `최고 ${eok(Number(x.최고만원) * 10000)}` : '', x.공급 ? `공급 ${fmt(x.공급)}세대` : '', x.입주 ? `입주 ${월(x.입주)}` : '', 거리(x.m)]
+       : x.종류 === 'h' ? [x.세대 ? `${fmt(x.세대)}세대` : '', x.착공 ? `착공 ${월(x.착공)}` : (x.승인 ? `승인 ${월(x.승인)}` : ''), 거리(x.m)]
+       : [(x.세대 || x.호) ? [x.세대 ? `${fmt(x.세대)}세대` : '', x.호 ? `${fmt(x.호)}호` : ''].filter(Boolean).join(' · ') : '', x.착공 ? `착공 ${월(x.착공)}` : '', 거리(x.m)]).filter(Boolean).join(' · '))).join('')}</div>` : '';
+  지금.innerHTML = 단지칸 + 가칸;
+  지금.onclick = e => {
+    const a = e.target.closest('a.ncard'); if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault(); select(Number(a.dataset.cid));
+  };
+}
 function 대장전말(V, 무엇) {
   return `<p class="note"><span class="gapw">${esc(무엇)} 없음 · ${V.종류 === 'p' ? '사용승인' : '사용검사'} 전</span> 건축물대장이 아직 없어 ${esc(무엇)}이(가) 이어지지 않습니다 — 대장이 생기면 일반 단지로 넘어가 채워집니다.</p>`;
 }
@@ -4884,7 +4920,7 @@ function renderDetail(payload) {
   const facts = [
     spec && spec.주용도 ? esc(spec.주용도) : '',
     c.hhld_cnt_sum ? fmt(c.hhld_cnt_sum) + '세대' : '',
-    `${fmt(c.dong_cnt)}개동`,
+    c.dong_cnt ? `${fmt(c.dong_cnt)}개동` : '',   /* 10-31: 동 수를 모르는 단지(청약 공고)에 '—개동' 이 찍혔다 */
     yr ? `${날짜(c.oldest_use_apr)}${age ? ` <span class="muted">(${age}년차)</span>` : ''}` : '',
     V && V.호 ? `${fmt(V.호)}호` : '',
     V && V.착공일 ? `착공 ${날짜(V.착공일)}` : '',
@@ -5053,7 +5089,7 @@ function renderDetail(payload) {
     ${permitBlock(permits, scope, permitDongs, c.complex_id)}
     ${sect('단지 요약', 'bld')}
     <dl>
-      ${V ? row(V.키말, esc(V.pk)) : row('단지코드', c.complex_id)}
+      ${row('단지코드', c.complex_id)}${V ? row(V.키말, esc(V.pk)) : ''}
       ${spec ? '' : `${row('대장 동 / 건물', `${fmt(c.dong_cnt)} / ${c.bld_cnt == null ? '—' : fmt(c.bld_cnt)}`)}
       ${c.max_floor ? row('최고 층수', '지상 ' + fmt(c.max_floor) + '층') : ''}
       ${row('세대수', fmt(c.hhld_cnt_sum))}
@@ -5062,7 +5098,7 @@ function renderDetail(payload) {
       ${row('대표지번', esc(c.rep_jibun || '—'))}
       ${c.centroid_lat ? row('좌표', `${Number(c.centroid_lat).toFixed(5)}, ${Number(c.centroid_lng).toFixed(5)}`) : ''}
     </dl>
-
+    <div class="nearcards" data-nc="${esc(String(c.complex_id ?? ''))}"></div>
 `;
 
   /* 주변 — 대중교통 / 학교 / 상권 (2026-10-19)
@@ -5168,7 +5204,7 @@ function renderDetail(payload) {
   $('#detail').innerHTML = `
     ${shotsMarkup(c)}
     <!-- 13:21 '단독/총괄표제부'(대장 구조) 대신 **대장 원문 용도** — 용도채우기 가 채운다 -->
-    ${V ? `<a class="pill nb" href="#policy" data-pol="precomplex" title="${esc(V.출처)} — 건축물대장은 사용승인(사용검사) 뒤에 생깁니다. 값은 ${V.종류 === 'a' ? '청약 공고 원문' : '허가 · 승인(설계)'} 기준입니다. 누르면 가단지 기준">${esc(V.상태말)}${c.complex_id != null ? ` · 가단지 ${esc(String(c.complex_id))}` : ''}</a>
+    ${V ? `<a class="pill nb" href="#policy" data-pol="precomplex" title="${esc(V.출처)} — 건축물대장은 사용승인(사용검사) 뒤에 생깁니다. 값은 ${V.종류 === 'a' ? '청약 공고 원문' : '허가 · 승인(설계)'} 기준입니다. 누르면 이 단지를 보여 주는 기준">${esc(V.상태말)}</a>
       <span class="pill">${c.has_recap ? '여러 동' : '한 동'}</span>${c.complex_id != null ? `
       <button type="button" class="favbtn" data-fav="${c.complex_id}" aria-pressed="${관심.has(c.complex_id)}"
             title="관심 단지 — 내 정보에 모아 봅니다(로그인)">${관심.has(c.complex_id) ? '★ 관심' : '☆ 관심'}</button>` : ''}` : `<span class="usebox" data-use="${esc(String(c.complex_id))}"><span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '여러 동' : '한 동'}</span></span>
@@ -5208,6 +5244,7 @@ function renderDetail(payload) {
   } catch (e) {}
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
   if (c.complex_id != null) {
+  주변카드채우기(c);       // 10-31 단지정보 탭 아래 '주변 단지' · '주변 분양 · 공사 중'
   어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
@@ -5784,12 +5821,12 @@ const 정책 = [
     '<b>철거 · 멸실 신고</b>는 원문에 허가 번호가 비어 있어 <b>이 단지 필지(지번)</b>로만 잇습니다. 날짜 · 석면 함유 표시는 원문 그대로입니다(오타처럼 보이는 날짜도 고치지 않습니다). 모델하우스(견본주택)는 원문 용도 코드에 없어 골라내지 않습니다.',
     '<b>공사 중 건물</b>(지도 \'공사 중\' 핀 · 2026-10-30): 건축허가 신축 중 <b>2022년 이후 착공 · 사용승인 전 · 그 필지에 새 대장이 아직 없는</b> 공동주택 · 오피스텔(10세대 · 호 이상)입니다. 대장 단지와 같은 탭으로 보이지만 값은 전부 허가(설계) 원문이고, 평형 · 실거래 · 공시가격은 사용승인 · 대장 뒤에 생겨 비어 있습니다. 2019~2021년에 착공했는데 승인 기록이 없는 건은 공사 중인지 멈췄는지 알 수 없어 넣지 않습니다.',
   ] },
-  { 키: 'precomplex', 제목: '가단지 — 대장 전 건물의 단지 번호 (공사 중 · 사업승인 · 청약 공고)', 글: [
+  { 키: 'precomplex', 제목: '건축물대장 전 단지 — 공사 중 · 사업승인 · 청약 공고', 글: [
     '건축물대장은 사용승인(아파트는 사용검사) 뒤에 생깁니다. 그 전 건물도 단지처럼 볼 수 있게 <b>9억번대 번호</b>(900000001~)를 따로 붙였습니다. 일반 단지 수 · 지역별 개수 · 가격 마커 · 통계 · AI 검색에는 <b>섞지 않습니다</b> — 지도에는 \'공사 중\' · \'승인\' 핀으로만 보입니다.',
     '<b>사업승인 아파트</b>(건축HUB 주택인허가): 총세대 20 이상 · 사용검사일이 비어 있음 · 사업계획승인 2016년 이후 · 같은 필지에 승인일 뒤 사용승인된 건축물대장이 없음.',
     '<b>공사 중 건물</b>(건축HUB 건축인허가): 신축 · 2022년 이후 실제 착공 · 사용승인일이 비어 있음 · 같은 필지에 허가일 뒤 사용승인된 대장이 없음 · 공동주택이거나 오피스텔(층별 용도) · 세대 + 호 10 이상 · 한 필지에 여럿이면 가장 최근 허가 한 건.',
-    '<b>청약 공고</b>(청약홈 입주자모집공고): 단지에 아직 안 이어진 공고 · 같은 지번에 위 두 가단지가 없음 · 같은 지번에 첫 공고일 뒤 사용승인된 대장이 없음 · 첫 공고의 입주 예정이 공고보다 뒤이고 이번 달 이후. 공고 때 이미 입주한 분양전환 · 잔여세대 · 공가 재공급은 다 지은 단지라 붙이지 않습니다. 세대 칸은 <b>공급 세대</b>(조합원 · 보류분이 빠질 수 있음)입니다. 매일 새 공고를 봅니다.',
-    '지도의 분양 핀이나 검색의 청약 공고를 누르면, 그 공고가 속한 가단지가 있으면 단지 상세로 열립니다. 사업승인 · 공사 중 가단지에도 같은 지번의 청약 공고가 \'분양 · 청약\' 칸에 붙습니다.',
+    '<b>청약 공고</b>(청약홈 입주자모집공고): 단지에 아직 안 이어진 공고 · 같은 지번에 위 두 종류의 단지가 없음 · 같은 지번에 첫 공고일 뒤 사용승인된 대장이 없음 · 첫 공고의 입주 예정이 공고보다 뒤이고 이번 달 이후. 공고 때 이미 입주한 분양전환 · 잔여세대 · 공가 재공급은 다 지은 단지라 붙이지 않습니다. 세대 칸은 <b>공급 세대</b>(조합원 · 보류분이 빠질 수 있음)입니다. 매일 새 공고를 봅니다.',
+    '지도의 분양 핀이나 검색의 청약 공고를 누르면, 그 공고가 속한 단지가 있으면 단지 상세로 열립니다. 사업승인 · 공사 중 단지에도 같은 지번의 청약 공고가 \'분양 · 청약\' 칸에 붙습니다.',
     '<b>붙이지 않는 것</b>: 단독주택 · 상가 · 창고 · 공장 등, 10세대(호) 미만, 2019~2021년에 착공했는데 승인 기록이 없는 건(공사 중인지 멈췄는지 알 수 없음), 건축허가만 받고 착공 전인 건(허가만 받고 안 짓거나 취소 · 설계변경이 흔해 \'짓는 중\' 으로 오해될 수 있음 — 착공하면 자동으로 붙습니다).',
     '번호는 한 번 주면 바뀌지 않습니다(공유 주소 유지). 매달 다시 보고, <b>같은 필지에 대장 단지가 생기면 그 단지로 넘어갑니다</b> — 옛 번호로 들어와도 정식 단지가 열립니다. 원문에서 빠지고 넘어갈 단지가 없으면 \'없어짐\' 으로 남깁니다. 이름으로 잇지 않습니다.',
     '화면의 값은 허가 · 승인(설계) 원문입니다. 호 · 실거래 · 공시가격 · 관리비는 대장 뒤에 생겨 비어 있습니다. 주변 · 토지의 기준점은 그 지번 필지의 가운데입니다.',

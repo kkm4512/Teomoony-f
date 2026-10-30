@@ -456,6 +456,20 @@ td .muted { font: 400 10px var(--mono); line-height: 1.3; }
 .tabnav[hidden] { display: none; }
 .tab[aria-selected="true"] { background: var(--surface-2); }
 .pane { padding-top: 2px; }
+/* 10-31 단지정보 탭 아래 '주변 단지' · '주변 분양 · 공사 중' 카드 */
+.nearcards { margin-top: 6px; }
+.nclist { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; }
+.ncard { display: block; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+  color: var(--ink); text-decoration: none; }
+.ncard:hover { border-color: var(--mark); }
+.ncard b { font-weight: 600; font-size: 13px; }
+.ncard span { display: block; margin-top: 2px; font: 400 11.5px var(--mono); color: var(--ink-3); }
+.ncchip { font-style: normal; display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 600;
+  vertical-align: 1px; background: var(--mark-soft); color: var(--mark); }
+.ncchip.k-h, .ncchip.k-p { background: var(--s1); color: var(--s6); }
+.ncmore { display: block; text-align: center; padding: 8px; border-radius: 8px; border: 1px solid var(--line); color: var(--ink-2);
+  font-size: 12.5px; text-decoration: none; margin-bottom: 4px; }
+.ncmore:hover { color: var(--mark); border-color: var(--mark); }
 /* 탭 첫 섹션은 위 테두리가 겹쳐 보이므로 없앤다 */
 .pane > .sect:first-child { border-top: 0; padding-top: 4px; }
 

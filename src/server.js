@@ -4600,6 +4600,59 @@ app.get('/api/precomplex-ah/:house', async (req, res) => {
   } catch (e) { fail(res, e, 'precomplex-ah'); }
 });
 
+/* ===================== 상세의 '주변 단지' · '주변 분양 · 공사 중' 카드 (2026-10-31 사장님 "단지상세에서 동네 단지를 보여주는 화면 — 저런 느낌처럼" · "ㄱㄱ") =====================
+   ★ 주변 단지: 지역 색인(메모리 · 세대 100+ 지금 단지)에서 1.5km 안 가까운 순 5곳. 숫자는 단지 쪽과 같은 값(세대 = 대장 동별 합 · 최고 매매 = 최근 3년).
+   ★ 주변 분양 · 공사 중: 가단지(389 · 살아있음) 2km 안 가까운 순 5곳 — 청약 공고(a) · 사업승인(h) · 공사 중(p). 값은 각 원문 그대로.
+   ★ 거리는 단지 중심점(필지 중심) 사이 직선 거리. 동 경계로 자르지 않는다(길 하나 건너면 동이 바뀐다). */
+function 직선m(a1, o1, a2, o2) {
+  const r = Math.PI / 180, x = (o2 - o1) * r * Math.cos((a1 + a2) / 2 * r), y = (a2 - a1) * r;
+  return Math.round(Math.sqrt(x * x + y * y) * 6371000);
+}
+app.get('/api/near/cards', async (req, res) => {
+  const lat = Number(req.query.lat), lng = Number(req.query.lng), id = Number(req.query.id) || 0;
+  const lawd = /^\d{10}$/.test(String(req.query.lawd || '')) ? String(req.query.lawd) : null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return res.status(400).json({ error: 'lat · lng' });
+  try {
+    const 색 = await 지역색인();
+    const 단지 = [];
+    for (const x of 색.단지.values()) {
+      if (x.id === id || x.lat == null || Math.abs(x.lat - lat) > 0.014 || Math.abs(x.lng - lng) > 0.018) continue;
+      const m = 직선m(lat, lng, x.lat, x.lng); if (m <= 1500) 단지.push({ ...x, m });
+    }
+    단지.sort((a, b) => a.m - b.m || b.세대 - a.세대);
+    const 동 = lawd && 색.동.get(lawd);
+    const pool = await getPool();
+    const r = await pool.request().input('lat', sql.Float, lat).input('lng', sql.Float, lng).input('id', sql.Int, id).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT g.complex_id, g.종류, g.이름, g.lat, g.lng,
+             a최고 = ah.최고, a입주 = ah.입주, a공급 = ah.공급, a공고 = ah.공고, a시공 = ah.시공,
+             h세대 = hp.세대, h승인 = hp.승인일, h착공 = hp.착공일, h검사예정 = hp.사용검사예정일,
+             p세대 = pb.세대, p호 = pb.호, p착공 = pb.착공일, p용도 = pb.용도
+        FROM gold.pre_complex g
+        OUTER APPLY (SELECT 최고 = MAX(m.top_amount_man), 입주 = MAX(p.mvn_prearnge_ym), 공급 = MAX(p.tot_suply), 공고 = MAX(p.rcrit_pblanc_de), 시공 = MAX(p.cnstrct_entrps_nm)
+                       FROM gold.pre_applyhome x JOIN silver.applyhome_pblanc p ON p.house_manage_no = x.house_manage_no AND p.pblanc_no = x.pblanc_no
+                       LEFT JOIN silver.applyhome_mdl m ON m.house_manage_no = p.house_manage_no AND m.pblanc_no = p.pblanc_no
+                      WHERE x.complex_id = g.complex_id) ah
+        LEFT JOIN gold.house_plan hp ON g.종류 = 'h' AND hp.hp_pk = g.원문pk
+        LEFT JOIN gold.pre_build pb ON g.종류 = 'p' AND pb.pk = g.원문pk
+       WHERE g.상태 = N'살아있음' AND g.complex_id <> @id
+         AND g.lat BETWEEN @lat - 0.019 AND @lat + 0.019 AND g.lng BETWEEN @lng - 0.024 AND @lng + 0.024`);
+    /* 청약 공고를 먼저(분양이 실제로 난 곳), 그다음 사업승인 · 공사 중 — 30세대(호) 이상만(소형 다세대가 카드를 채우지 않게). 각각 가까운 순 */
+    const 가 = r.recordset.map(x => ({ ...x, m: 직선m(lat, lng, x.lat, x.lng) }))
+      .filter(x => x.m <= 2000 && (x.종류 === 'a' || (Number(x.h세대) || 0) + (Number(x.p세대) || 0) + (Number(x.p호) || 0) >= 30))
+      .sort((a, b) => (a.종류 === 'a' ? 0 : 1) - (b.종류 === 'a' ? 0 : 1) || a.m - b.m).slice(0, 5);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      기준: '단지 중심점 사이 직선 거리 · 주변 단지 = 세대 100 이상 지금 단지(1.5km) · 분양 · 공사 중 = 청약 공고 먼저, 사업승인 · 공사 중은 30세대(호) 이상(2km)',
+      단지: 단지.slice(0, 5).map(({ id, 이름, 세대, 연, mx, m }) => ({ id, 이름, 세대, 연, mx, m })), 단지수: 단지.length,
+      동: 동 ? { cd: 동.cd, 이름: 동.이름, 수: 동.단지.length } : null,
+      가단지: 가.map(x => ({ id: x.complex_id, 종류: x.종류, 이름: x.이름, m: x.m,
+        ...(x.종류 === 'a' ? { 최고만원: x.a최고, 입주: x.a입주, 공급: x.a공급, 공고: x.a공고 ? String(x.a공고).trim() : null, 시공: x.a시공 }
+          : x.종류 === 'h' ? { 세대: x.h세대, 승인: x.h승인, 착공: x.h착공, 검사예정: x.h검사예정 }
+          : { 세대: x.p세대, 호: x.p호, 착공: x.p착공, 용도: x.p용도 }) })),
+    });
+  } catch (e) { fail(res, e, 'near-cards'); }
+});
+
 app.get('/api/near/at', async (req, res) => {
   const lat = Number(req.query.lat), lng = Number(req.query.lng);
   const sgg = /^\d{5}$/.test(String(req.query.sgg || '')) ? String(req.query.sgg) : null;
@@ -8532,7 +8585,8 @@ function 지역색인() {
       const pool = await getPool();
       const r = await pool.request().input('m', sql.Int, 사이트맵_최소세대).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT c.complex_id, 이름 = CASE WHEN c.complex_nm = c.rep_plat_plc AND al.실거래이름 IS NOT NULL THEN al.실거래이름 ELSE c.complex_nm END,
-               세대 = c.hhld_cnt_sum, lawd = LEFT(c.rep_pnu, 10), 연 = LEFT(c.oldest_use_apr, 4), mx = t.max_amt
+               세대 = c.hhld_cnt_sum, lawd = LEFT(c.rep_pnu, 10), 연 = LEFT(c.oldest_use_apr, 4), mx = t.max_amt,
+               lat = CAST(c.centroid_lat AS FLOAT), lng = CAST(c.centroid_lng AS FLOAT)
           FROM gold.complex c
           LEFT JOIN gold.complex_alias al ON al.complex_id = c.complex_id
           LEFT JOIN gold.complex_trade_max t ON t.complex_id = c.complex_id AND t.종류 = 'ALL'
@@ -8545,7 +8599,8 @@ function 지역색인() {
       for (const x of r.recordsets[0]) {
         const lawd = String(x.lawd || ''); if (!/^\d{10}$/.test(lawd)) continue;
         const sgg = lawd.slice(0, 5), sido = lawd.slice(0, 2);
-        const 하나 = { id: x.complex_id, 이름: x.이름 || `단지 ${x.complex_id}`, 세대: Number(x.세대) || 0, 연: x.연 || null, mx: x.mx ? Number(x.mx) : null, lawd };
+        const 하나 = { id: x.complex_id, 이름: x.이름 || `단지 ${x.complex_id}`, 세대: Number(x.세대) || 0, 연: x.연 || null, mx: x.mx ? Number(x.mx) : null, lawd,
+                      lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng) };
         단지.set(하나.id, 하나);
         if (!동.has(lawd)) { const n = 이름(lawd); 동.set(lawd, { cd: lawd, 이름: [n.emd_nm, n.ri_nm].filter(Boolean).join(' ') || lawd, sgg, 단지: [] }); }
         동.get(lawd).단지.push(하나);
