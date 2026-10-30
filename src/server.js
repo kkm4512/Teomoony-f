@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
-const { sql, getPool } = require('./db');
+const { sql, getPool, 가단지자리 } = require('./db');
 
 /* ---------- 서버가 죽거나 다시 뜬 기록 (2026-10-25 문의 4: 08:25:27 에 서버가 다시 떴고 그 순간 사장님 화면이 502) ----------
    node --watch 창의 글은 남지 않는다 → ../Teomoony/logs/web_life.log 에 적는다(Teomoony-f 밖 — 여기 쓰면 --watch 가 그걸 보고 또 재시작한다).
@@ -488,6 +488,33 @@ if (!개발) { setInterval(기록_정리, 6 * 3600 * 1000).unref(); setTimeout(�
 
 /* 이용현황 조회 — 누구나 본다 */
 /* 2026-10-24 서비스DB(PostgreSQL) 읽기 — 발행된 단지 응답이 있으면 그걸 보내고, 없으면 아래 기존 경로(적재DB). 끄기: svc_mode.json read:false (src/svc.js) */
+/* ---------- 가단지(389 · 9억번대) — 대장 전 건물의 단지 번호 (2026-10-30 사장님 "가단지코드" · "ㄱㄱ") ----------
+   · 상세(/api/complexes/:id): /api/virtual 과 같은 몸(가상몸) — 단지 상세와 같은 칸 이름 + 가상 표시.
+   · 그 아래 칸(/history · /landuse · /hira …): 원래 처리기를 그대로 돌리되 그 요청 동안 질의를 바꿔 끼운다(db.js 가단지자리).
+   · 이동(대장 단지가 생김) → 정식 단지 번호로 넘긴다 · 없어짐 → 404. 서비스DB(svc) · 응답 캐시는 거치지 않는다(가단지는 달마다 바뀐다). */
+app.use(async (req, res, next) => {
+  const m = /^\/api\/complexes\/(9\d{8})(?:\/([a-z-]+))?\/?$/.exec(req.path);
+  if (!m || req.method !== 'GET') return next();
+  const id = Number(m[1]);
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).query(`SELECT * FROM gold.pre_complex WHERE complex_id = @id`);
+    const g = r.recordset[0];
+    if (!g) return res.status(404).json({ error: 'not found' });
+    if (g.상태 === '이동' && g.이동_complex_id) {
+      if (!m[2]) return res.json({ 이동: g.이동_complex_id, 이유: '사용승인 — 이 자리에 건축물대장 단지가 생겨 그 단지로 옮겼습니다' });
+      return res.status(404).json({ error: 'not found', 이동: g.이동_complex_id });
+    }
+    if (g.상태 !== '살아있음') return res.status(404).json({ error: 'not found', 이유: '원문(건축인허가 · 주택인허가)에서 빠졌습니다' });
+    if (!m[2]) {
+      const 몸 = await 가상몸(pool, g.종류, g.원문pk, id);
+      if (!몸) return res.status(404).json({ error: 'not found' });
+      res.set('Cache-Control', 'no-store');
+      return res.json(몸);
+    }
+    가단지자리.run({ id, 이름: g.이름, 주소: null, pnu: g.pnu, lat: g.lat, lng: g.lng }, () => next());
+  } catch (e) { fail(res, e, 'pre-complex'); }
+});
 app.use(require('./svc').단지응답);
 app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지도 마커도 서비스DB 에서(없거나 실패면 아래 기존 경로) */
 /* 2026-10-25 2단계: 지도 층도 서비스DB 에서(svc_mode.json "map" 이 켜졌을 때만 · 실패면 아래 기존 경로) */
@@ -4061,7 +4088,7 @@ function 점주변SQL() {
              r1000 = COUNT(*),
              최단m = MIN(CAST(v.dist_m AS INT)),
              단지내 = SUM(v.on_site)
-      FROM gold.fn_pt_poi(@lat, @lng) v
+      FROM gold.fn_pt_poi(@lat, @lng, 0) v
       WHERE v.complex_id = @id AND v.inds_scls_nm IS NOT NULL
       GROUP BY v.inds_scls_nm, v.inds_lcls_nm
       /* ★ 2026-10-27 500m 수가 같은 업종끼리 순서가 정해져 있지 않았다(열 때마다 바뀔 수 있음) → 1km 수 · 가까운 거리 · 이름으로 고정 */
@@ -4071,13 +4098,13 @@ function 점주변SQL() {
       SELECT 업종수500 = COUNT(DISTINCT CASE WHEN v.dist_m <= 500 THEN v.inds_mcls_cd END),
              업종수1000 = COUNT(DISTINCT v.inds_mcls_cd),
              단지내 = SUM(v.on_site)
-      FROM gold.fn_pt_poi(@lat, @lng) v WHERE v.complex_id = @id`,
+      FROM gold.fn_pt_poi(@lat, @lng, 0) v WHERE v.complex_id = @id`,
     poiBrand: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
 
       SELECT 브랜드 = v.brand,
              r500 = SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END),
              r1000 = COUNT(*), 최단m = MIN(CAST(v.dist_m AS INT))
-        FROM gold.fn_pt_poi(@lat, @lng) v
+        FROM gold.fn_pt_poi(@lat, @lng, 0) v
        WHERE v.complex_id = @id AND v.brand IS NOT NULL
        GROUP BY v.brand
        ORDER BY SUM(CASE WHEN v.dist_m <= 500 THEN 1 ELSE 0 END) DESC, MIN(v.dist_m), v.brand COLLATE Latin1_General_BIN2`,
@@ -4103,7 +4130,7 @@ function 점주변SQL() {
                                WHEN N'미용실' THEN 24 WHEN N'세탁소' THEN 25
                                WHEN N'PC방' THEN 26 WHEN N'노래방' THEN 27
                                WHEN N'당구장·볼링장' THEN 28 ELSE 99 END
-        FROM gold.fn_pt_poi(@lat, @lng) v
+        FROM gold.fn_pt_poi(@lat, @lng, 0) v
        WHERE v.complex_id = @id AND v.life IS NOT NULL
        GROUP BY v.life ORDER BY ord`,
     subways: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
@@ -4113,7 +4140,7 @@ function 점주변SQL() {
          전부인 줄 안다. 자르는 건 그대로 두되 **몇 곳 중 몇 곳인지 같이 낸다.**
          (지도에 찍는 점은 안 자른다 — 그래서 목록 4 / 점 5 로 어긋나 있었다)
          ★ COUNT(*) OVER () 로 센다. 집계 안에 서브쿼리를 넣지 않는다. */
-      WITH v AS (SELECT * FROM gold.fn_pt_subway(@lat, @lng) WHERE complex_id = @id),
+      WITH v AS (SELECT * FROM gold.fn_pt_subway(@lat, @lng, 0) WHERE complex_id = @id),
       g AS (
         SELECT 역 = sttn_nm,
                노선 = STRING_AGG(line_nm, N' · ') WITHIN GROUP (ORDER BY line_nm),
@@ -4133,7 +4160,7 @@ function 점주변SQL() {
       WITH v AS (
         SELECT stop_nm, stop_no, dist_m,
                rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no)
-          FROM gold.fn_pt_bus(@lat, @lng) WHERE complex_id = @id)
+          FROM gold.fn_pt_bus(@lat, @lng, 0) WHERE complex_id = @id)
       SELECT r300 = SUM(CASE WHEN dist_m <= 300 THEN 1 ELSE 0 END),
              r500 = COUNT(*), 최단m = CAST(MIN(dist_m) AS INT),
              가까운곳 = MAX(CASE WHEN rn = 1 THEN stop_nm END),
@@ -4147,7 +4174,7 @@ function 점주변SQL() {
         SELECT stop_nm, ars_no, stop_no, dist_m,
                rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no),
                전체 = COUNT(*) OVER ()
-          FROM gold.fn_pt_bus(@lat, @lng) WHERE complex_id = @id)
+          FROM gold.fn_pt_bus(@lat, @lng, 0) WHERE complex_id = @id)
       SELECT 정류장 = stop_nm, ars = ars_no, 거리m = CAST(dist_m AS INT), 전체
         FROM v WHERE rn <= 20 ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no`,
     busRoutes: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
@@ -4175,7 +4202,7 @@ function 점주변SQL() {
                         ars5 = CASE WHEN TRY_CAST(ars_no AS INT) IS NULL THEN NULL
                                     ELSE RIGHT('00000' + ars_no, 5) END,
                         dist_m
-                   FROM gold.fn_pt_bus(@lat, @lng) WHERE complex_id = @id)
+                   FROM gold.fn_pt_bus(@lat, @lng, 0) WHERE complex_id = @id)
       SELECT 번호 = r.route_abrv, 종류 = r.route_type,
              최단m = CAST(MIN(v.dist_m) AS INT)
         FROM v
@@ -4243,7 +4270,7 @@ function 점주변SQL() {
                            THEN 1 ELSE 0 END`,
     schools: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
 
-      WITH v AS (SELECT * FROM gold.fn_pt_school(@lat, @lng) WHERE complex_id = @id),
+      WITH v AS (SELECT * FROM gold.fn_pt_school(@lat, @lng, 0) WHERE complex_id = @id),
       /* ★ 2026-10-27 같은 거리(같은 자리 — 한 캠퍼스 두 학교)면 학교ID 순으로 고정(전엔 열 때마다 다른 학교가 뽑힐 수 있었다) */
       n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
                    rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m, school_id)
@@ -4274,7 +4301,7 @@ function 점주변SQL() {
        ORDER BY ord;
       /* ★ 2026-10-24 사장님 "어린이집·유치원·초·중·고는 주변에서 분리" — 교육 탭의 **학교 목록**.
            학교급마다 1km 안 전부(가까운 순), 1km 안에 없으면 2km 안 가장 가까운 한 곳. 거리는 위 요약 · AI 검색과 **같은 뷰**(v_complex_school). */
-      WITH v AS (SELECT * FROM gold.fn_pt_school(@lat, @lng) WHERE complex_id = @id),
+      WITH v AS (SELECT * FROM gold.fn_pt_school(@lat, @lng, 0) WHERE complex_id = @id),
       n AS (SELECT school_id, school_se, school_nm, fond_type, bnhh_se, dist_m,
                    rn = ROW_NUMBER() OVER (PARTITION BY school_se ORDER BY dist_m, school_id),
                    /* ★ 2026-10-27 사장님 "둘 다 보여줘" — 1km 안에 없을 때 '가장 가까운 곳' 이 같은 거리로 여럿이면 전부 */
@@ -4298,7 +4325,7 @@ function 점주변SQL() {
        ORDER BY ord, n.dist_m, n.school_id`,
     kinders: `DECLARE @pc TABLE (complex_id INT, centroid_lat FLOAT, centroid_lng FLOAT, sigungu_cd CHAR(5)); INSERT @pc VALUES (0, @lat, @lng, @psgg);
 
-      WITH v AS (SELECT * FROM gold.fn_pt_kinder(@lat, @lng) WHERE complex_id = @id),
+      WITH v AS (SELECT * FROM gold.fn_pt_kinder(@lat, @lng, 0) WHERE complex_id = @id),
       n AS (SELECT kinder_cd, kinder_nm, establish, cap_cnt, pupil_cnt, class_cnt,
                    pbnt_tmng, oper_time, dist_m,
                    rn = ROW_NUMBER() OVER (ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd)
@@ -4316,17 +4343,17 @@ SELECT n = ${받았나SQL('유치원', 점시군구SQL)}`,
       SELECT 묶음 = ISNULL(grp, N'99 분류 못 함'),
              r500 = SUM(CASE WHEN dist_m <= 500 THEN 1 ELSE 0 END), r1000 = COUNT(*),
              최단m = MIN(CAST(dist_m AS INT))
-        FROM gold.fn_pt_academy(@lat, @lng) WHERE complex_id = @id
+        FROM gold.fn_pt_academy(@lat, @lng, 0) WHERE complex_id = @id
        GROUP BY ISNULL(grp, N'99 분류 못 함') ORDER BY 1;
       SELECT TOP 8 이름 = aca_nm, 분야 = realm_sc_nm, 과정 = le_crse_nm, 거리m = CAST(dist_m AS INT),
              전체500 = COUNT(*) OVER ()
-        FROM gold.fn_pt_academy(@lat, @lng) WHERE complex_id = @id AND dist_m <= 500 ORDER BY dist_m, aca_nm COLLATE Latin1_General_BIN2, academy_sk;
+        FROM gold.fn_pt_academy(@lat, @lng, 0) WHERE complex_id = @id AND dist_m <= 500 ORDER BY dist_m, aca_nm COLLATE Latin1_General_BIN2, academy_sk;
       SELECT 전체 = COUNT(*), 좌표있음 = SUM(CASE WHEN geog IS NOT NULL THEN 1 ELSE 0 END)
         FROM silver.academy WHERE is_current = 1 AND reg_sttus_nm = N'개원';`
   };
 }
 /* ---------- 대장 전 건물을 **단지 상세와 같은 모양**으로 (2026-10-30 사장님 "새 UI 말고 일반 건대장 있는 단지상세처럼만") ----------
-   /api/virtual/p/:pk = 공사 중 건물(건축허가 · 387) · /api/virtual/h/:pk = 사업승인 아파트(주택인허가 · 384).
+   가상몸(pool, 'p' | 'h', 원문pk, 가단지번호) — 공사 중 건물(건축허가 · 387) · 사업승인 아파트(주택인허가 · 384). /api/complexes/9억번대(389) 가 부른다.
    응답 칸 이름은 /api/complexes/:id 와 같다(complex · dongs · spec · floors · parcels · zones · redev · permits · poi · schools …) — 화면이 renderDetail 로 그대로 그린다.
    ★ 값은 전부 허가(설계) · 승인 원문이다. 대장에서 오는 칸(호 · 실거래 · 공시가격 · 관리비)은 비워 두고 `가상` 이 그 까닭을 들고 간다.
    ★ 동 키(mgm_bldrgst_pk 자리)는 허가 동별개요 PK — 대장 PK 와 섞이지 않게 앞에 'P:' · 'H:' 를 붙인다. */
@@ -4337,13 +4364,13 @@ async function 가상필지(pool, pnu) {
       FROM silver.cadastral_parcel WHERE pnu = @pnu AND is_current = 1;
     IF OBJECT_ID('gold.fn_pnu_zone') IS NOT NULL
       SELECT 용도지역 = v.uname, 비중 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(SUM(v.xarea)) OVER (), 0) AS DECIMAL(5,1))
-        FROM gold.fn_pnu_zone(@pnu) v GROUP BY v.uname ORDER BY SUM(v.xarea) DESC;
+        FROM gold.fn_pnu_zone(@pnu, 0) v GROUP BY v.uname ORDER BY SUM(v.xarea) DESC;
     ELSE SELECT TOP 0 용도지역 = '';
     IF OBJECT_ID('gold.fn_pnu_redev') IS NOT NULL
       SELECT 구역 = v.zone_nm, 대분류 = v.biz_lclas_nm, 사업 = v.biz_nm, 단계 = v.propel_nm, 단계코드 = v.propel_cd, 구역면적 = v.area_m2, sn = v.present_sn,
              포함률 = CAST(100.0 * SUM(v.xarea) / NULLIF(SUM(v.parea), 0) AS DECIMAL(5,1)),
              계획용적률 = MAX(pl.용적률), 계획건폐율 = MAX(pl.건폐율), 계획세대 = MAX(pl.공급세대), 계획층수 = MAX(pl.층수)
-        FROM gold.fn_pnu_redev(@pnu) v
+        FROM gold.fn_pnu_redev(@pnu, 0) v
         LEFT JOIN gold.redev_plan_link lk ON lk.present_sn = v.present_sn
         LEFT JOIN silver.seoul_redev_plan pl ON pl.basic_info_seq = lk.basic_info_seq
        GROUP BY v.zone_nm, v.biz_lclas_nm, v.biz_nm, v.propel_nm, v.propel_cd, v.area_m2, v.present_sn ORDER BY v.area_m2;
@@ -4392,11 +4419,8 @@ async function 가상허가(pool, pnu) {
   return { permits: r.recordsets[0] || [], permitDongs: r.recordsets[1] || [] };
 }
 const 가상빈칸 = { tradeStats: [], 거래목록: [], jeonse: [], offsite: [], hos: [], 호총수: 0, 호공시: [], 공시적재: null, kapt: null, cost: null, vlrat: [], 전용률: null };
-app.get('/api/virtual/:kind/:pk', async (req, res) => {
-  const kind = String(req.params.kind || ''), pk = String(req.params.pk || '');
-  if (!/^[ph]$/.test(kind) || !/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad key' });
-  try {
-    const pool = await getPool();
+async function 가상몸(pool, kind, pk, 번호) {
+  {
     const 범 = await 범위표();
     let 몸;
     if (kind === 'p') {
@@ -4416,7 +4440,7 @@ app.get('/api/virtual/:kind/:pk', async (req, res) => {
                옥내기계 = SUM(TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥내_기계식_대수))), 옥외기계 = SUM(TRY_CONVERT(INT, TRY_CONVERT(FLOAT, 옥외_기계식_대수)))
           FROM hub.t0110 WHERE 관리_허가대장_PK = @pk AND 마지막월 IS NULL;`);
       const a = r.recordsets[0][0];
-      if (!a) return res.status(404).json({ error: 'not found' });
+      if (!a) return null;
       const 동들 = r.recordsets[1] || [], 층들 = r.recordsets[2] || [], 주 = (r.recordsets[3] || [])[0] || {};
       const 동층 = new Map();
       for (const f of 층들) { const x = 동층.get(f.동PK) || { 지상: 0, 지하: 0 }; if (f.층 > 0) x.지상 = Math.max(x.지상, f.층); else if (f.층 < 0) x.지하 = Math.max(x.지하, -f.층); 동층.set(f.동PK, x); }
@@ -4435,7 +4459,7 @@ app.get('/api/virtual/:kind/:pk', async (req, res) => {
       const 세대 = Number(a.hhld_cnt) || null, 호 = Number(a.ho_cnt) || null;
       const [주변, 허가, 땅] = await Promise.all([가상주변(pool, 점.centroid_lat, 점.centroid_lng, a.sigungu_cd), 가상허가(pool, a.pnu), 땅묶음(pool, a.pnu)]);
       몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors,
-        complex: { complex_id: null, complex_nm: a.bld_nm || a.plat_plc, rep_plat_plc: a.plat_plc, rep_road_addr: null, has_recap: dongs.length > 1,
+        complex: { complex_id: 번호 ?? null, complex_nm: a.bld_nm || a.plat_plc, rep_plat_plc: a.plat_plc, rep_road_addr: null, has_recap: dongs.length > 1,
                    dong_cnt: dongs.filter(d => d.regstr_kind_nm === '주건축물').length || dongs.length, bld_cnt: dongs.length,
                    hhld_cnt_sum: 세대, max_floor: Math.max(0, ...층들.map(f => f.층)) || null, tot_area_sum: a.tot_area, oldest_use_apr: null,
                    rep_jibun: 점.jibun || null, rep_pnu: a.pnu, centroid_lat: 점.centroid_lat ?? null, centroid_lng: 점.centroid_lng ?? null,
@@ -4470,7 +4494,7 @@ app.get('/api/virtual/:kind/:pk', async (req, res) => {
           FROM hub.t0207 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL ELSE SELECT TOP 0 자주 = 0;
         IF OBJECT_ID('hub.t0211') IS NOT NULL SELECT TOP 1 단지명 = NULLIF(단지_명, '') FROM hub.t0211 WHERE 관리_주택대장_PK = @pk AND 마지막월 IS NULL AND NULLIF(단지_명, '') IS NOT NULL ELSE SELECT TOP 0 단지명 = '';`);
       const h = r.recordsets[0][0];
-      if (!h) return res.status(404).json({ error: 'not found' });
+      if (!h) return null;
       const 동들 = r.recordsets[1] || [], 주 = (r.recordsets[2] || [])[0] || {}, 단지명 = ((r.recordsets[3] || [])[0] || {}).단지명;
       const dongs = 동들.map(d => ({ mgm_bldrgst_pk: 'H:' + d.동PK, is_recap: false, regstr_kind_nm: d.주부속, dong_nm: d.동명, bld_nm: d.동명,
         main_purps_nm: d.용도, strct_nm: d.구조, hhld_cnt: d.세대 || null, tot_area: d.연면적, grnd_flr_cnt: d.지상층, ugrnd_flr_cnt: d.지하층, use_apr_day: null }));
@@ -4490,7 +4514,7 @@ app.get('/api/virtual/:kind/:pk', async (req, res) => {
              AND ISNULL(p.주소_산, '0') = CASE SUBSTRING(@pnu, 11, 1) WHEN '2' THEN '1' ELSE '0' END
            ORDER BY p.rcrit_pblanc_de DESC`)]);
       몸 = { ...가상빈칸, ...주변, ...허가, parcels: 필.parcels, zones: 필.zones, redev: 필.redev, dongs, floors: [],
-        complex: { complex_id: null, complex_nm: h.이름 || 단지명 || h.대지위치, rep_plat_plc: h.대지위치, rep_road_addr: null, has_recap: dongs.length > 1,
+        complex: { complex_id: 번호 ?? null, complex_nm: h.이름 || 단지명 || h.대지위치, rep_plat_plc: h.대지위치, rep_road_addr: null, has_recap: dongs.length > 1,
                    dong_cnt: 주동.length || h.주건축물수 || dongs.length, bld_cnt: dongs.length, hhld_cnt_sum: h.세대,
                    max_floor: Math.max(0, ...동들.map(d => Number(d.지상층) || 0)) || null, tot_area_sum: h.연면적, oldest_use_apr: null,
                    rep_jibun: 점.jibun || null, rep_pnu: h.pnu, centroid_lat: lat ?? null, centroid_lng: lng ?? null,
@@ -4511,9 +4535,20 @@ app.get('/api/virtual/:kind/:pk', async (req, res) => {
                 착공일: h.착공일 || null, 착공예정일: h.착공예정일, 허가일: h.승인일, 사용검사예정일: h.사용검사예정일, 원문처음월: h.원문처음월,
                 단지명, 청약: 청.recordset || [], 땅 } };
     }
-    res.set('Cache-Control', 'public, max-age=300');
-    res.json(몸);
-  } catch (e) { fail(res, e, 'virtual'); }
+    return 몸;
+  }
+}
+/* 옛 '최근 본 단지'(공사 중 · 승인 원문 번호)를 가단지 번호로 */
+app.get('/api/precomplex/:kind/:pk', async (req, res) => {
+  const kind = String(req.params.kind || ''), pk = String(req.params.pk || '');
+  if (!/^[ph]$/.test(kind) || !/^\d{5,30}$/.test(pk)) return res.status(400).json({ error: 'bad key' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('k', sql.Char(1), kind).input('pk', sql.VarChar(50), pk)
+      .query(`SELECT complex_id, 상태, 이동_complex_id FROM gold.pre_complex WHERE 종류 = @k AND 원문pk = @pk`);
+    if (!r.recordset.length) return res.status(404).json({ error: 'not found' });
+    res.json(r.recordset[0]);
+  } catch (e) { fail(res, e, 'precomplex'); }
 });
 
 app.get('/api/near/at', async (req, res) => {
@@ -4577,8 +4612,9 @@ app.get('/api/prebuilds', async (req, res) => {
       .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3])
       .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         IF OBJECT_ID('gold.pre_build') IS NOT NULL
-          SELECT TOP 300 pk, 이름, 대지위치, 용도, 세대, 호, 착공일, lat, lng FROM gold.pre_build
-           WHERE lat BETWEEN @y0 AND @y1 AND lng BETWEEN @x0 AND @x1 ORDER BY ISNULL(세대, 0) + ISNULL(호, 0) DESC, pk;
+          SELECT TOP 300 b.pk, b.이름, b.대지위치, b.용도, b.세대, b.호, b.착공일, b.lat, b.lng, g.complex_id
+            FROM gold.pre_build b LEFT JOIN gold.pre_complex g ON g.종류 = 'p' AND g.원문pk = b.pk
+           WHERE b.lat BETWEEN @y0 AND @y1 AND b.lng BETWEEN @x0 AND @x1 ORDER BY ISNULL(b.세대, 0) + ISNULL(b.호, 0) DESC, b.pk;
         ELSE SELECT TOP 0 pk = 1;`);
     res.set('Cache-Control', 'public, max-age=300');
     res.json({ 출처: '건축HUB 건축인허가 기본개요 원문 — 착공 · 사용승인 전', markers: r.recordset });
@@ -4595,8 +4631,9 @@ app.get('/api/prebuilds/search', async (req, res) => {
       m AS (SELECT *, 점수 = CASE WHEN nm <> N'' AND nm LIKE N'%' + @q + N'%' THEN 3
                                  WHEN LEN(nm) >= 4 AND nm NOT LIKE N'%신축%' AND nm NOT LIKE N'%공동주택%' AND @q LIKE N'%' + nm + N'%' THEN 2
                                  WHEN ad LIKE N'%' + @q + N'%' THEN 1 END FROM h)
-      SELECT TOP 8 pk, 이름, 대지위치, 용도, 세대, 호, 착공일, lat, lng, 전체 = COUNT(*) OVER ()
-        FROM m WHERE 점수 IS NOT NULL ORDER BY 점수 DESC, ISNULL(세대, 0) + ISNULL(호, 0) DESC, pk`);
+      SELECT TOP 8 m.pk, m.이름, m.대지위치, m.용도, m.세대, m.호, m.착공일, m.lat, m.lng, 전체 = COUNT(*) OVER (),
+             complex_id = (SELECT g.complex_id FROM gold.pre_complex g WHERE g.종류 = 'p' AND g.원문pk = m.pk)
+        FROM m WHERE 점수 IS NOT NULL ORDER BY 점수 DESC, ISNULL(m.세대, 0) + ISNULL(m.호, 0) DESC, m.pk`);
     res.json({ 전체: r.recordset.length ? r.recordset[0].전체 : 0, items: r.recordset });
   } catch (e) { fail(res, e, 'prebuilds-search'); }
 });
@@ -4655,6 +4692,7 @@ app.get('/api/houseplans/search', async (req, res) => {
               FROM h),
       k AS (SELECT *, 남은 = CASE WHEN 점수 = 2 THEN REPLACE(@q, nm, N'') END FROM m WHERE 점수 IS NOT NULL)
       SELECT TOP 8 hp_pk, 이름, 대지위치, 세대, 승인일, 사용검사예정일, 상태, lat, lng, 전체 = COUNT(*) OVER (),
+             complex_id = (SELECT g.complex_id FROM gold.pre_complex g WHERE g.종류 = 'h' AND g.원문pk = k.hp_pk),
              남은맞음 = CASE WHEN 남은 <> N'' AND LEN(남은) >= 2 AND ad LIKE N'%' + 남은 + N'%' THEN 1 ELSE 0 END
         FROM k ORDER BY 남은맞음 DESC, 점수 DESC, 세대 DESC, hp_pk`);
     const 전체 = r.recordset.length ? r.recordset[0].전체 : 0;
@@ -4724,10 +4762,11 @@ app.get('/api/houseplans', async (req, res) => {
     const r = await pool.request()
       .input('x0', sql.Float, b[0]).input('y0', sql.Float, b[1]).input('x1', sql.Float, b[2]).input('y1', sql.Float, b[3])
       .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-        SELECT TOP 300 hp_pk, 이름, 대지위치, 세대, 주건축물수, 용도, 승인일, 착공예정일, 착공일, 사용검사예정일, 상태, lat, lng, 위치근거
-          FROM gold.house_plan
-         WHERE lat BETWEEN @y0 AND @y1 AND lng BETWEEN @x0 AND @x1 AND 상태 <> N'완공 대장 있음'
-         ORDER BY 세대 DESC, hp_pk`);
+        SELECT TOP 300 h.hp_pk, h.이름, h.대지위치, h.세대, h.주건축물수, h.용도, h.승인일, h.착공예정일, h.착공일, h.사용검사예정일, h.상태, h.lat, h.lng, h.위치근거,
+               complex_id = (SELECT g.complex_id FROM gold.pre_complex g WHERE g.종류 = 'h' AND g.원문pk = h.hp_pk)
+          FROM gold.house_plan h
+         WHERE h.lat BETWEEN @y0 AND @y1 AND h.lng BETWEEN @x0 AND @x1 AND h.상태 <> N'완공 대장 있음'
+         ORDER BY h.세대 DESC, h.hp_pk`);
     res.set('Cache-Control', 'public, max-age=300');
     res.json({ 출처: '건축HUB 주택인허가(주택법 사업계획승인) — 원문', markers: r.recordset });
   } catch (e) { fail(res, e, 'houseplans'); }
@@ -8429,6 +8468,16 @@ app.get('/c/:id', async (req, res, next) => {
   try {
     const 틀 = await fs.promises.readFile(쪽틀, 'utf8');
     const pool = await getPool();
+    /* 10-30 가단지(389): 이동했으면 정식 단지로 · 살아있으면 쪽 틀(검색엔진에는 안 올림 — 허가 단계라 바뀐다) */
+    if (id >= 900000000) {
+      const g = (await pool.request().input('id', sql.Int, id).query(`SELECT 이름, 상태, 이동_complex_id FROM gold.pre_complex WHERE complex_id = @id`)).recordset[0];
+      if (g && g.상태 === '이동' && g.이동_complex_id) return res.redirect(301, `/c/${g.이동_complex_id}`);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
+      const 쪽 = 틀.replace('</head>', '<meta name="robots" content="noindex">\n</head>');
+      if (!g || g.상태 !== '살아있음') return res.status(404).send(쪽);
+      return res.send(쪽.replace(/<title>[^<]*<\/title>/, `<title>${String(g.이름 || '이름 없음').replace(/[<>&"]/g, '')} · 대장 전 — 터무니</title>`));
+    }
     const r = await pool.request().input('id', sql.Int, id).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT merged_into FROM gold.complex WHERE complex_id = @id;

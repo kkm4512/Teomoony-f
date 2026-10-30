@@ -1037,7 +1037,7 @@ let hpItems = [];   /* 2026-10-30: Enter 목록의 사업승인 아파트(주택
 let pbItems = [];   /* 2026-10-30: Enter 목록의 공사 중 건물(건축허가 · 착공 · 사용승인 전) */
 /* 승인 아파트로 가기: 좌표가 있으면 그 자리로 옮기고 핀 말풍선을 연다(핀은 줌 15 이상에서 그려진다) */
 async function 승인으로(h) {
-  return selectHousePlan(h.hp_pk);
+  return h.complex_id ? select(h.complex_id, false) : selectHousePlan(h.hp_pk);
 }
 async function 승인으로_옛(h) {
   if (h.lat == null || h.lng == null) return toast(`${esc(h.이름 || '이름 없음')} — 지번이 블록이라 지도 자리를 못 찾았습니다(${esc(h.대지위치 || '')})`, 5000);
@@ -1100,7 +1100,7 @@ function drawHousePlans(list) {
       title: `${h.이름 || '이름 없음'} · ${fmt(h.세대)}세대 · 사업계획승인 ${날8(h.승인일) || '—'}`,
     });
     mk._hp = true; mk._hpid = h.hp_pk;
-    mk.on('click', () => selectHousePlan(h.hp_pk));   // 10-30 "123 ㄱㄱ": 말풍선 대신 단지 상세 형식
+    mk.on('click', () => (h.complex_id ? select(h.complex_id, false) : selectHousePlan(h.hp_pk)));   // 10-30 가단지 번호(389)로 — 일반 단지 상세
     mk.on('popupopen', e => {                         // 위쪽 지역 고르기 줄(약 90px)에 안 가리게 — 돌아가는 지도에선 autoPan 여백이 안 먹어 직접 민다
       const 위 = e.popup.getElement().getBoundingClientRect().top - map.getContainer().getBoundingClientRect().top;
       if (위 < 100) map.panBy([0, 위 - 100]);
@@ -1148,7 +1148,7 @@ function drawPreBuilds(list) {
       title: `${p.이름 || '이름 없음'} · ${p.용도 || ''} · ${세대호말(p)} · 착공 ${날8(p.착공일) || '—'} · 사용승인 전(건축허가 원문)`,
     });
     mk._pbid = p.pk;
-    mk.on('click', () => selectPreBuild(p.pk));
+    mk.on('click', () => (p.complex_id ? select(p.complex_id, false) : selectPreBuild(p.pk)));   /* 10-30 가단지 번호(389)로 — 일반 단지와 같은 길 */
     mk.addTo(newbuildLayer);
   });
 }
@@ -1182,34 +1182,17 @@ function 가상땅칸(땅) {
       ${row('이용상황', esc(t.이용상황 || ''))}
       ${row('지형 · 도로', [t.지형고저, t.지형형상, t.도로접면].filter(Boolean).map(esc).join(' · '))}
     </dl>` : ''}
-    ${(땅.이동 || []).length ? `${sect('토지 이동 이력', 'parcel', '', '토지이동이력')}<ul class="lu">${땅.이동.map(z => `<li><b>${esc(날짜(z.이동일))}</b> <span>${esc(z.이동사유 || '')}</span></li>`).join('')}</ul>` : ''}
-    ${(땅.철거 || []).length ? `<div class="pxdemo">${철거블록(땅.철거)}</div>` : ''}`;
+    ${(땅.이동 || []).length ? `${sect('토지 이동 이력', 'parcel', '', '토지이동이력')}<ul class="lu">${땅.이동.map(z => `<li><b>${esc(날짜(z.이동일))}</b> <span>${esc(z.이동사유 || '')}</span></li>`).join('')}</ul>` : ''}`;   /* 철거 신고는 건축인허가 칸 · 이 땅의 역사가 맡는다(가단지 번호로) */
 }
 let 고른가상 = null;
+/* 옛 '최근 본 단지'(공사 중 · 승인 원문 번호) → 가단지 번호(389)로 일반 단지 길(select) */
 async function selectVirtual(kind, pk) {
-  const 키 = `${kind}:${pk}`;
-  if (고른가상 !== 키) { detailTab = 'info'; hoDong = null; hoArea = null; hoAreaX = null; }
-  고른가상 = 키; 고른공사 = kind === 'p' ? pk : null; 고른승인 = kind === 'h' ? pk : null; selected = null; selectedKapt = null;
-  주소맞춤('/', 상세쌓기());
-  시트('full'); 목록자동(true);
-  주변점지우기(); 구역지우기(); selectedRedev = null;
-  탭수동 = false; prcShown = 10; 거래Shown = 10;
-  paintMarkers();
-  const box = $('#detail'); box.hidden = false; box.innerHTML = '<p class="muted">불러오는 중…</p>';
   try {
-    const d = await fetch(`/api/virtual/${kind}/${encodeURIComponent(pk)}`).then(r => r.json());
-    if (고른가상 !== 키) return;
-    if (d.error) { box.innerHTML = `<p class="muted">${esc(d.error === 'not found' ? '이 건은 지금 원문에 없습니다(사용승인 · 사용검사가 났거나 원문에서 빠졌습니다).' : '불러오지 못했습니다.')}</p>`; return; }
-    lastGeo = d.geo || { features: [] }; lastBgeo = { features: [] };
-    renderDetail(d);
-    const c = d.complex;
-    recentPush(kind, pk, c.complex_nm || '이름 없음', `${c.rep_plat_plc || ''} · ${d.가상.상태말}`);
-    focusLayer.clearLayers(); focusBldLayer.clearLayers();
-    if (lastGeo.features && lastGeo.features.length) {
-      focusLayer.addData(lastGeo);
-      map.fitBounds(focusLayer.getBounds(), { padding: [60, 60], maxZoom: 18 });
-    } else if (c.centroid_lat != null) map.setView([c.centroid_lat, c.centroid_lng], Math.max(map.getZoom(), 17));
-  } catch (e) { box.innerHTML = `<p class="muted">불러오지 못했습니다.<br>${esc(e.message)}</p>`; }
+    const g = await fetch(`/api/precomplex/${kind}/${encodeURIComponent(pk)}`).then(r => r.json());
+    if (g && g.상태 === '이동' && g.이동_complex_id) return select(g.이동_complex_id, false);
+    if (g && g.complex_id) return select(g.complex_id, false);
+    toast('이 건은 지금 원문에 없습니다(사용승인 · 사용검사가 났거나 원문에서 빠졌습니다).', 4000);
+  } catch (e) { toast('불러오지 못했습니다', 3000); }
 }
 function selectPreBuild(pk) { return selectVirtual('p', pk); }
 
@@ -1443,7 +1426,7 @@ async function 제안부르기() {
       if (pb && pb.items && pb.items.length) {
         const 묶 = { 종류: '공사 중 건물', 전체: pb.전체, 항목: pb.items.slice(0, 5).map(h => ({
           이름: h.이름 || '이름 없음', 보조: [h.대지위치, 세대호말(h), h.착공일 ? '착공 ' + 날8(h.착공일) : null].filter(Boolean).join(' · '),
-          표: '공사 중 · 사용승인 전', 동작: { 종류: '공사', pk: h.pk } })) };
+          표: '공사 중 · 사용승인 전', 동작: { 종류: '공사', pk: h.pk, id: h.complex_id } })) };
         j = { ...j, q: j.q || q, 묶음: [...(j.묶음 || []), 묶] };
         delete j.안내;
       }
@@ -1464,7 +1447,7 @@ async function 제안고르기(it) {
   if (찾은점Layer.층) 찾은점Layer.층.clearLayers();
   if (d.종류 === '단지') return select(d.id, false);
   if (d.종류 === '승인') return 승인으로(d.hp);
-  if (d.종류 === '공사') return selectPreBuild(d.pk);
+  if (d.종류 === '공사') return d.id ? select(d.id, false) : selectPreBuild(d.pk);
   if (d.종류 === '신축') return selectNewbuild(d.code, false);
   if (d.종류 === '법정동') {
     if (d.경계있음) return selectLawd(d.lawd_cd);
@@ -5075,7 +5058,7 @@ function renderDetail(payload) {
   const rv = (redev || []);
 
   const paneL = `
-    ${V ? 가상땅칸(V.땅) : `<div class="hsbox" data-hs="${esc(String(c.complex_id))}"></div>`}
+    ${c.complex_id != null ? `<div class="hsbox" data-hs="${esc(String(c.complex_id))}"></div>` : ''}${V ? 가상땅칸(V.땅) : ''}
     ${sect('필지', 'parcel', ` ${fmt(parcels.length)}`, `폴리곤 ${fmt(parcels.filter(p => p.centroid_lat).length)}`)}
     <table><thead><tr><th>지번</th><th>구분</th><th class="n">공시지가</th></tr></thead><tbody>
       ${parcels.map(p => `<tr>
@@ -5112,7 +5095,7 @@ function renderDetail(payload) {
     </div>` : `<p class="note">${gapCell('', 'SCOPE',
         '이 법정동의 용도지역을 아직 받지 않았습니다')}</p>`}
 
-    ${V ? '' : `<div class="lubox" data-lu="${esc(String(c.complex_id))}"></div>
+    ${c.complex_id == null ? '' : `<div class="lubox" data-lu="${esc(String(c.complex_id))}"></div>
     <div class="clbox" data-cl="${esc(String(c.complex_id))}"></div>`}
 
     ${sect('정비사업 구역', 'redev', rv.length ? ` ${fmt(rv.length)}` : '')}
@@ -5137,7 +5120,9 @@ function renderDetail(payload) {
     ${shotsMarkup(c)}
     <!-- 13:21 '단독/총괄표제부'(대장 구조) 대신 **대장 원문 용도** — 용도채우기 가 채운다 -->
     ${V ? `<span class="pill nb" title="${esc(V.출처)} — 건축물대장은 사용승인(사용검사) 뒤에 생깁니다. 값은 허가 · 승인(설계) 기준입니다">${esc(V.상태말)}</span>
-      <span class="pill">${c.has_recap ? '여러 동' : '한 동'}</span>` : `<span class="usebox" data-use="${esc(String(c.complex_id))}"><span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '여러 동' : '한 동'}</span></span>
+      <span class="pill">${c.has_recap ? '여러 동' : '한 동'}</span>${c.complex_id != null ? `
+      <button type="button" class="favbtn" data-fav="${c.complex_id}" aria-pressed="${관심.has(c.complex_id)}"
+            title="관심 단지 — 내 정보에 모아 봅니다(로그인)">${관심.has(c.complex_id) ? '★ 관심' : '☆ 관심'}</button>` : ''}` : `<span class="usebox" data-use="${esc(String(c.complex_id))}"><span class="pill${c.has_recap ? ' r' : ''}">${c.has_recap ? '여러 동' : '한 동'}</span></span>
     <span class="pill cl" data-clpill="${esc(String(c.complex_id))}" role="button" tabindex="0" hidden></span>
     <button type="button" class="favbtn" data-fav="${c.complex_id}" aria-pressed="${관심.has(c.complex_id)}"
             title="관심 단지 — 내 정보에 모아 봅니다(로그인)">${관심.has(c.complex_id) ? '★ 관심' : '☆ 관심'}</button>`}
@@ -5158,15 +5143,13 @@ function renderDetail(payload) {
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
   고정표시();              // 20:00 눌러 고정한 줄 표시를 다시 입힌다
   document.querySelectorAll('#detail [data-redev]').forEach(el => el.classList.toggle('on', el.dataset.redev === 구역지금));
-  if (!V) {                 /* 대장 전 건물(가상)은 단지 번호가 없다 — 단지 번호로 받는 덤 칸은 건너뛴다 */
-  분양채우기();            // 분양(청약홈) 칸 — 분양·청약 탭에 있을 때만 그릇이 있다
-  분양탭확인(c.complex_id); // 이어진 공고가 있으면 분양·청약 탭을 연다
+  if (c.complex_id != null) {   /* 단지 번호(가단지 389 포함)로 받는 덤 칸 — 번호가 없으면 건너뛴다 */
+  if (!V) { 분양채우기(); 분양탭확인(c.complex_id); }   // 가단지 분양 칸은 같은 지번 청약(가상분양칸)이 맡는다
   토지이용채우기();        // 토지이용계획 칸 — 토지 탭에 있을 때만 그릇이 있다
   폐쇄채우기();            // 폐쇄·말소 대장 칸 — 토지 탭에 있을 때만 그릇이 있다
   역사채우기();            // 이 땅의 역사 — 토지 탭 맨 위
   허가덧채우기();          // 건축인허가 부가 원문(평형 · 층 · 주차 · 대수선 · 가설 · 철거멸실) — 단지정보 탭
-  폐쇄머리표();            // 머리 '폐쇄·말소 대장 N' 표 — 어느 탭이든
-  용도채우기(c.complex_id); // 머리 용도 표 — 대장 원문 주용도 · 기타용도 · 전유부 호별 용도
+  if (!V) { 폐쇄머리표(); 용도채우기(c.complex_id); }   // 머리 표(옛 대장 · 대장 용도) — 대장 전 건물에는 없다
   }
   /* 14:05 QA: 다른 단지로 옮겨도 탭 제목이 첫 단지 그대로였다 — 서버 /c/:id 제목과 같은 규칙으로 맞춘다 */
   try {
@@ -5175,7 +5158,7 @@ function renderDetail(payload) {
     document.title = [표시이름(c) || `단지 ${c.complex_id}`, 동네, 세대 ? `${세대.toLocaleString('ko-KR')}세대` : null].filter(Boolean).join(' · ') + ' — 터무니';
   } catch (e) {}
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
-  if (!V) {
+  if (c.complex_id != null) {
   어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
@@ -5386,7 +5369,7 @@ async function boot() {
     else if (b.dataset.hpi != null && hpItems[Number(b.dataset.hpi)]) 승인으로(hpItems[Number(b.dataset.hpi)]);
     else if (b.dataset.hpk) selectHousePlan(b.dataset.hpk);
     else if (b.dataset.pbk) selectPreBuild(b.dataset.pbk);
-    else if (b.dataset.pbi != null && pbItems[Number(b.dataset.pbi)]) selectPreBuild(pbItems[Number(b.dataset.pbi)].pk);
+    else if (b.dataset.pbi != null && pbItems[Number(b.dataset.pbi)]) { const x = pbItems[Number(b.dataset.pbi)]; x.complex_id ? select(x.complex_id, true) : selectPreBuild(x.pk); }
     else if (b.dataset.ah) 공고상세(b.dataset.ah, b.dataset.lat ? Number(b.dataset.lat) : null, b.dataset.lng ? Number(b.dataset.lng) : null);
     else if (b.dataset.id && Number.isInteger(Number(b.dataset.id))) select(Number(b.dataset.id), true);
   });

@@ -39,8 +39,69 @@ const config = {
   requestTimeout: 60000,
 };
 
+/* ---------- 가단지(389) — 대장 전 건물의 단지 번호로 들어온 요청 (2026-10-30 사장님 "가단지코드를 붙이는 건 어때?" · "ㄱㄱ") ----------
+   단지 번호로 받는 칸(/api/complexes/:id/history · landuse · closed · hira · pharmacy · childcare · points · poi-list · geo · buildings · permitx · usage)은
+   gold.complex · complex_pnu · v_complex_* 를 complex_id 로 본다. 가단지는 일반 단지 표에 **안 넣었으므로**(단지 수 · 마커 · 통계에 안 섞이게)
+   그 요청 동안만 질의 글자를 바꿔 끼운다:
+     gold.complex → #gc(그 한 줄) · complex_pnu → #gcp(그 필지) · complex_bld → #gcb(빈 표 — 대장 전) · v_complex_poi/school/… → gold.fn_pt_*(388, 같은 식)
+     v_complex_zone/redev · complex_redev_hit → gold.fn_pnu_*(388) · v_complex_permit → 그 필지 허가 · 분양권 · 청약 링크 · 호 → 빈 것.
+   ★ server.js 의 손질 없이 같은 질의가 돈다(같은 사실은 한 곳에서). 바꿔 끼울 이름이 늘면 여기(가단지바꿈)만 고친다. */
+const { AsyncLocalStorage } = require('async_hooks');
+const 가단지자리 = new AsyncLocalStorage();
+const 가단지바꿈 = [
+  [/gold\.complex_pnu\b/g, '#gcp'],
+  [/gold\.complex_bld\b/g, '#gcb'],
+  [/gold\.complex_redev_hit\b/g, 'gold.fn_pnu_redev_hit(@ppnu, @gid)'],
+  [/gold\.v_complex_(poi|school|subway|bus|kinder|academy|childcare)\b/g, 'gold.fn_pt_$1(@plat, @plng, @gid)'],
+  [/gold\.v_complex_zone\b/g, 'gold.fn_pnu_zone(@ppnu, @gid)'],
+  [/gold\.v_complex_redev\b/g, 'gold.fn_pnu_redev(@ppnu, @gid)'],
+  /* 이름 자리에 그대로 들어가는 함수 · 뷰로(389) — 별칭이 있든 없든 문법이 맞게 */
+  [/gold\.v_complex_permit\b/g, 'gold.fn_pnu_permit(@ppnu, @gid)'],
+  [/gold\.v_complex_ho\b/g, 'gold.v_empty_complex_ho'],
+  [/gold\.applyhome_link\b/g, 'gold.v_empty_applyhome_link'],
+  [/gold\.fn_complex_silv\(\s*@id\s*\)/g, 'gold.fn_complex_silv(0)'],
+  [/gold\.complex(?![A-Za-z0-9_])/g, '#gc'],
+];
+const 가단지머리 = `
+IF OBJECT_ID('tempdb..#gc') IS NOT NULL DROP TABLE #gc;
+IF OBJECT_ID('tempdb..#gcp') IS NOT NULL DROP TABLE #gcp;
+IF OBJECT_ID('tempdb..#gcb') IS NOT NULL DROP TABLE #gcb;
+SELECT * INTO #gc FROM gold.complex WHERE 1 = 0 UNION ALL SELECT * FROM gold.complex WHERE 1 = 0;
+INSERT #gc (complex_id, complex_nm, complex_nm_ns, rep_pnu, rep_plat_plc, sigungu_cd, bjdong_cd, has_recap, dong_cnt, pnu_cnt, is_active, created_at, updated_at, centroid_lat, centroid_lng)
+VALUES (@gid, @gnm, REPLACE(ISNULL(@gnm, N''), N' ', N''), @ppnu, @gaddr, LEFT(@ppnu, 5), SUBSTRING(@ppnu, 6, 5), 0, 1, 1, 1, SYSDATETIME(), SYSDATETIME(), @plat, @plng);
+SELECT * INTO #gcp FROM gold.complex_pnu WHERE 1 = 0 UNION ALL SELECT * FROM gold.complex_pnu WHERE 1 = 0;
+IF @ppnu IS NOT NULL INSERT #gcp (complex_id, pnu, pnu_role, is_representative, linked_at) VALUES (@gid, @ppnu, 'MAIN', 1, SYSDATETIME());
+SELECT * INTO #gcb FROM gold.complex_bld WHERE 1 = 0 UNION ALL SELECT * FROM gold.complex_bld WHERE 1 = 0;
+`;
+function 가단지글(text) { let t = String(text); for (const [re, to] of 가단지바꿈) t = t.replace(re, to); return 가단지머리 + t; }
+function 가단지요청(rq, g) {
+  let 넣음 = false;
+  const 겉 = new Proxy(rq, { get(t, k) {
+    if (k === 'input') return (...a) => { t.input(...a); return 겉; };
+    if (k === 'query') return (text, ...rest) => {
+      if (!넣음) { 넣음 = true;
+        t.input('gid', sql.Int, g.id).input('gnm', sql.NVarChar(200), g.이름 || null).input('gaddr', sql.NVarChar(300), g.주소 || null)
+         .input('ppnu', sql.Char(19), g.pnu || null).input('plat', sql.Float, g.lat ?? null).input('plng', sql.Float, g.lng ?? null); }
+      return t.query(가단지글(text), ...rest);
+    };
+    const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
+  } });
+  return 겉;
+}
+function 가단지풀(pool, g) {
+  return new Proxy(pool, { get(t, k) {
+    if (k === 'request') return () => 가단지요청(t.request(), g);
+    const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
+  } });
+}
+
 let poolPromise = null;
 function getPool() {
+  const g = 가단지자리.getStore();
+  if (g) return 진짜풀().then(p => 가단지풀(p, g));
+  return 진짜풀();
+}
+function 진짜풀() {
   if (!poolPromise) {
     poolPromise = new sql.ConnectionPool(config).connect().catch(err => {
       poolPromise = null;              // 실패하면 다음 요청에서 다시 시도
@@ -63,4 +124,4 @@ function getLongPool() {
   return longPromise;
 }
 
-module.exports = { sql, getPool, getLongPool, config };
+module.exports = { sql, getPool, 진짜풀, getLongPool, config, 가단지자리 };

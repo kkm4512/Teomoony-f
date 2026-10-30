@@ -111,7 +111,7 @@ async function 단지응답(req, res, next) {
   const m = 길.exec(req.path);
   if (!m || Object.keys(req.query).length) return next();     // 물음표 붙은 요청(진단 · 고르기)은 기존 경로
   const id = Number(m[1]), kind = m[2] || 'detail';
-  if (!종류.has(kind)) return next();
+  if (!종류.has(kind) || id >= 900000000) return next();   // 10-30: 가단지(389 · 9억번대)는 서비스DB 를 거치지 않는다
   if (Date.now() < 쉬는끝) { 세기(kind, 'fallback'); return next(); }
   const a = Date.now();
   const 보냄 = (status, gz, 어디) => {
@@ -703,6 +703,7 @@ async function 응답캐시(req, res, next) {
   const 길 = 캐시길.find(g => g.re.test(req.path));
   if (!길 || Object.keys(req.query).some(k => !길.허용.includes(k))) return next();
   const m = 길.re.exec(req.path), 키 = req.originalUrl;
+  if (/^\/api\/complexes\/9\d{8}\//.test(req.path)) return next();   // 10-30: 가단지는 담지 않는다
   try {
     const r = await pg().query(`SELECT body_gz FROM svc.resp_cache WHERE url = $1 AND at > now() - interval '24 hours'`, [키]);
     실패 = 0;
