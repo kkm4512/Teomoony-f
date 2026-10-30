@@ -3671,9 +3671,12 @@ function tradeList(rows, 거래탭, 평형) {
   /* 316: 섞인 분양권·입주권 — 몇 건인지 · 집계에는 안 넣었다는 사실만(설명은 정책 화면) */
   const 분 = 거래탭 === '매매' ? Number(종R[0].분양권수) || 0 : 0;
   const 분줄 = 분 ? `<p class="srcline" title="평형 요약 · 최고가에는 안 넣음">분양권·입주권 ${fmt(분)}건 포함</p>` : '';
+  /* 10-31 사장님 "필드명이 없으니까 각 숫자가 뭘 의미하는지 이해하기 힘들어 — 전세 매매 월세 전부": 칸 이름 줄(목록과 같은 열에 선다 · style.css subgrid) */
+  const 금액칸 = 거래탭 === '월세' ? '보증금 / 월세' : 거래탭 === '전세' ? '보증금' : '거래가';
+  const 머리 = `<div class="trow thd"><div class="td">계약일</div><div class="tm">${금액칸}</div><div class="tx">전용면적 · 층${거래탭 !== '매매' ? ' · 갱신 여부' : ''}</div></div>`;
   return sect('거래 내역', 'rtms', ` ${fmt(받은)}`)
     + ``
-    + 잘림 + 분줄 + `<div class="tlist">${줄}</div>${더}`;
+    + 잘림 + 분줄 + `<div class="tlist">${머리}${줄}</div>${더}`;
 }
 
 function dongLabel(d, total) {

@@ -1321,6 +1321,13 @@ code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 4px;borde
 .trow.canc .tm s { text-decoration-thickness: 1px; }
 .trow.canc .td { opacity: .78; }
 .trow.canc .tcx { color: var(--warn, #b4690e); }
+/* 10-31 칸 이름 줄 — 모든 줄이 **같은 열**에 서게 목록을 한 격자로(subgrid). 지원 안 하는 브라우저는 줄마다 제 격자(전처럼) */
+@supports (grid-template-columns: subgrid) {
+  .tlist { display: grid; grid-template-columns: auto auto 1fr; }
+  .tlist > .trow { grid-column: 1 / -1; grid-template-columns: subgrid; }
+}
+.trow.thd { padding: 2px 2px 4px; border-bottom: 1px solid var(--line); }
+.trow.thd .td, .trow.thd .tm, .trow.thd .tx { font-family: inherit; font-size: 10.5px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
 
 /* 푸터의 접속 기록 고지 — 다른 푸터 줄보다 한 단 더 약하게.
    ⚠⚠ 2026-10-21: 이 규칙을 **두 번** 날렸다. 둘 다 위쪽 블록을 "시작 지점부터
