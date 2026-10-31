@@ -5990,7 +5990,11 @@ document.addEventListener('click', e => {
   /* 2026-10-24 사장님 "정책을 눌러도 이동 안 해" — 정책 안 목차용이라 화면을 안 바꿨다. 단지 상세 · 모달에서 눌러도 정책으로 간다 */
   if (g) { e.preventDefault(); if (!g.closest('#polbody')) { try { $('#homodal').classList.remove('on'); } catch (x) {} 보기전환('policy'); } 정책그리기(g.dataset.polGo); return; }
   if (e.target.closest('#polback')) { 보기전환('map'); }
+  if (e.target.closest('#poltop')) { $('#view-policy').scrollTo({ top: 0, behavior: 'smooth' }); }
 });
+/* 10-31 정책 머리 줄이 붙었는지(내렸는지) — 붙으면 아래 선 · '↑ 목차' 단추를 보인다 */
+{ const v = document.getElementById('view-policy');
+  if (v) v.addEventListener('scroll', () => { const h = v.querySelector('.polhead'); if (h) h.classList.toggle('stuck', v.scrollTop > 40); }, { passive: true }); }
 
 /* ---- 문의 탭 (2026-10-22) ----
    질문·답변은 누구나 본다(/api/inquiries). 남기기는 로그인한 사용자만(서버도 막는다). 답변은 root 만(서버도 막는다).

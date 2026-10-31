@@ -1859,11 +1859,17 @@ a.src{text-decoration:none;cursor:pointer}
 a.src:hover{filter:brightness(1.08);text-decoration:underline}
 a.src .polq{display:inline-block;margin-left:4px;width:13px;height:13px;line-height:13px;border-radius:50%;text-align:center;
   font:600 9px var(--font);background:var(--line-2);color:var(--ink-2);vertical-align:1px}
-#view-policy .polhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#view-policy .polhead{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  /* 10-31 사장님 "지도로 버튼이 맨 위에만 있는 게 아니라 각 칸 옆에 따라오게" — 머리 줄을 붙여 둔다(내려도 따라온다) */
+  position:sticky;top:0;z-index:5;background:var(--paper);padding:8px 0;margin:-8px 0 0;border-bottom:1px solid transparent}
+#view-policy .polhead.stuck{border-bottom-color:var(--line);box-shadow:0 6px 10px -8px rgba(0,0,0,.25)}
+#view-policy .polhead .vtitle{margin:0}
+#view-policy .polbtns{display:flex;gap:6px;flex:none}
+#view-policy .polhead:not(.stuck) #poltop{display:none}
 #view-policy .poltoc{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
 #view-policy .poltoc a{font-size:12px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2);text-decoration:none;background:var(--surface)}
 #view-policy .poltoc a:hover{color:var(--ink);border-color:var(--line-2)}
-#view-policy .polsec{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;background:var(--surface);scroll-margin-top:12px}
+#view-policy .polsec{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;background:var(--surface);scroll-margin-top:64px}
 #view-policy .polsec.on{border-color:var(--mark);box-shadow:0 0 0 2px var(--mark-soft)}
 #view-policy .polsec h3{margin:2px 0 6px;font-size:15px}
 #view-policy .polsec ul{margin:0;padding-left:18px}
