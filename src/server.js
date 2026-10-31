@@ -5919,6 +5919,29 @@ app.get('/api/complexes/:id/poi-list', async (req, res) => {
   } catch (e) { fail(res, e, 'poi-list'); }
 });
 
+/* 2026-11-01 평단가 (399) — 사장님 "평단가 같은 것도 중요해 · 지역 안에 이런 평형의 실거래가가 이 정도".
+   단지 × 평형(전용 정수 ㎡)의 3.3㎡당 매매가 중앙값(실거래 원문만 · 전용 기준) + 같은 종류의 이 동네(법정동) · 시군구 평형대 중앙값.
+   동네 = 단지의 지금 동(gold.complex_lawd_now → 396 확정 대응 → 대표 PNU 코드). 추정은 없다. */
+app.get('/api/complexes/:id/pyeong', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT 종류, 평형, 기간개월, 건수, 중앙값, 하위25, 상위25, 최근계약일, 최근평단가, 기준일 = CONVERT(CHAR(10), 기준일, 23)
+        FROM gold.complex_pyeong_price WHERE complex_id = @id ORDER BY 종류, 평형;
+      DECLARE @동 VARCHAR(10) = (SELECT TOP 1 CAST(COALESCE(nw.지금코드, s.새코드, LEFT(c.rep_pnu, 10)) AS VARCHAR(10))
+                                  FROM gold.complex c LEFT JOIN gold.complex_lawd_now nw ON nw.complex_id = c.complex_id
+                                  LEFT JOIN gold.bdong_succ_code s ON s.옛코드 = LEFT(c.rep_pnu, 10) WHERE c.complex_id = @id);
+      SELECT g.지역코드, g.수준, g.종류, g.평형대, g.단지수, g.건수, g.중앙값, g.하위25, g.상위25, 이름 = n.표시
+        FROM gold.region_pyeong_price g LEFT JOIN gold.v_lawd_name n ON n.lawd_cd = CASE WHEN g.수준 = N'동' THEN g.지역코드 ELSE g.지역코드 + '00000' END
+       WHERE g.지역코드 IN (@동, LEFT(@동, 5))
+         AND g.종류 IN (SELECT 종류 FROM gold.complex_pyeong_price WHERE complex_id = @id);`);
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 평형: r.recordsets[0] || [], 지역: r.recordsets[1] || [] });
+  } catch (e) { fail(res, e, 'complex-pyeong'); }
+});
 app.get('/api/complexes/:id/childcare', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad id' });
@@ -8841,6 +8864,7 @@ app.get(['/r', '/r/', '/r/:cd'], async (req, res, next) => {
                  <h3>시군구</h3>${링크들(구들, x => 색.수.get(x.cd))}<h3>세대 많은 단지</h3>${단지줄(큰)}${출처}</article>` };
       } else if (cd.length === 5) {
         const g = 색.구.get(cd); if (!g) return 없는쪽(req, res);
+        const 평표 = await 지역평단가표(cd, g.이름);
         const t = 색.시도.get(g.sido);
         const 동들 = g.동.map(d => 색.동.get(d));
         const 큰 = 동들.flatMap(d => d.단지).sort((a, b) => b.세대 - a.세대).slice(0, 30);
@@ -8848,16 +8872,17 @@ app.get(['/r', '/r/', '/r/:cd'], async (req, res, next) => {
                설명: `${g.이름} 동별 아파트 단지(세대 100 이상) — 세대수 · 사용승인 · 최근 3년 최고 매매. 건축물대장 · 국토교통부 실거래가 원문.`,
                url: `https://teomoony.com/r/${cd}`,
                요약: `<article class="ssr ssr-hub"><h2>${h(g.이름)} 단지</h2>${길([`<a href="/r/${t.cd}">${h(t.이름)}</a>`, `<a href="/r/${cd}">${h(g.이름)}</a>`])}
-                 <h3>동</h3>${링크들(동들, x => x.단지.length)}<h3>세대 많은 단지</h3>${단지줄(큰)}${출처}</article>` };
+                 ${평표}<h3>동</h3>${링크들(동들, x => x.단지.length)}<h3>세대 많은 단지</h3>${단지줄(큰)}${출처}</article>` };
       } else {
         const d = 색.동.get(cd); if (!d) return 없는쪽(req, res);
         const g = 색.구.get(d.sgg), t = 색.시도.get(g.sido);
+        const 평표 = await 지역평단가표(cd, d.이름);
         const 이웃 = g.동.filter(x => x !== cd).map(x => 색.동.get(x));
         쪽 = { 제목: `${g.이름} ${d.이름} 아파트 단지 ${d.단지.length}곳 — 세대수 · 최고 실거래가 | 터무니`,
                설명: `${t.이름} ${g.이름} ${d.이름}의 아파트 단지 ${d.단지.length}곳(세대 100 이상): ${d.단지.slice(0, 5).map(x => x.이름).join(' · ')}. 세대수 · 사용승인 · 최근 3년 최고 매매.`,
                url: `https://teomoony.com/r/${cd}`,
                요약: `<article class="ssr ssr-hub"><h2>${h(g.이름)} ${h(d.이름)} 단지</h2>${길([`<a href="/r/${t.cd}">${h(t.이름)}</a>`, `<a href="/r/${g.cd}">${h(g.이름)}</a>`, `<a href="/r/${cd}">${h(d.이름)}</a>`])}
-                 ${단지줄(d.단지)}${이웃.length ? `<h3>${h(g.이름)}의 다른 동</h3>${링크들(이웃, x => x.단지.length)}` : ''}${출처}</article>` };
+                 ${평표}${단지줄(d.단지)}${이웃.length ? `<h3>${h(g.이름)}의 다른 동</h3>${링크들(이웃, x => x.단지.length)}` : ''}${출처}</article>` };
       }
       쪽기억넣기(기억키, 쪽);
     }
@@ -8867,6 +8892,22 @@ app.get(['/r', '/r/', '/r/:cd'], async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+/* 11-01 동네 쪽의 평단가 표(399 gold.region_pyeong_price) — 종류 × 평형대 · 최근 1년 매매 중앙값(전용 기준 3.3㎡당). 표가 없으면(적재 전) 빈 글 */
+async function 지역평단가표(cd, 이름) {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('cd', sql.VarChar(10), cd).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('gold.region_pyeong_price') IS NOT NULL
+      SELECT 종류, 평형대, 단지수, 건수, 중앙값, 하위25, 상위25, 기준일 = CONVERT(CHAR(10), 기준일, 23) FROM gold.region_pyeong_price WHERE 지역코드 = @cd
+       ORDER BY CASE 종류 WHEN N'아파트' THEN 1 WHEN N'오피스텔' THEN 2 ELSE 3 END, CASE 평형대 WHEN N'~60' THEN 1 WHEN N'60~85' THEN 2 WHEN N'85~135' THEN 3 ELSE 4 END;`);
+    const xs = (r.recordset || []); if (!xs.length) return '';
+    const 만억 = v => { const n = Math.round(Number(v) / 1e4); const 억 = Math.floor(n / 1e4), 만 = n % 1e4; return 억 ? `${억}억${만 ? ' ' + 만.toLocaleString('ko-KR') : ''}만` : `${만.toLocaleString('ko-KR')}만`; };
+    return `<h3>평단가 <small>3.3㎡당 · 전용면적 기준 · 최근 1년 매매 중앙값</small></h3>
+      <table class="mini ssr-list"><thead><tr><th>종류</th><th>전용</th><th>중앙값</th><th>가운데 50%</th><th>거래</th></tr></thead><tbody>${xs.map(x =>
+        `<tr><td>${h(x.종류)}</td><td>${h(x.평형대)}㎡</td><td><b>${만억(x.중앙값)}</b></td><td>${만억(x.하위25)} ~ ${만억(x.상위25)}</td><td>${Number(x.건수).toLocaleString('ko-KR')}건 · ${Number(x.단지수).toLocaleString('ko-KR')}곳</td></tr>`).join('')}</tbody></table>
+      <p class="srcline">${h(이름)} · 국토교통부 실거래가(해제 · 직거래 · 지분 · 분양권 거래 뺌) · ${h(xs[0].기준일)} 기준. 분양 광고의 평단가(공급면적 기준)보다 높게 나옵니다.</p>`;
+  } catch (e) { return ''; }
+}
 /* 10-30 QA: 화면 주소(/api 밖 · 브라우저가 HTML 을 원함)의 404 는 JSON 대신 화면 틀로 — 첫 화면이 뜨고 앱이 '없는 단지' 를 보인다. 검색엔진에는 noindex. */
 async function 없는쪽(req, res) {
   try {
