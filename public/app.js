@@ -4842,14 +4842,19 @@ function 주변판들(p) {
   const paneH = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 병원·약국을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
-    ${c && c.complex_id ? `<div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>` : ''}
-    ${c && c.complex_id ? `<div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>` : ''}
-    ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null; if (!g) return '';
-      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(상가 데이터 — 위와 출처 다름)</span></div>
+    ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null;
+      const 칸들 = [['hosp', '병원'], ['pharm', '약국'], ...(g ? [['shop', '상가 업종']] : []), ['all', '전체']];
+      return 고르기단추('med', 칸들)
+        + 고르기칸('med', 'hosp', c && c.complex_id ? `<div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>` : '', 칸들)
+        + 고르기칸('med', 'pharm', c && c.complex_id ? `<div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>` : '', 칸들)
+        + (g ? 고르기칸('med', 'shop', 상가병원칸(g), 칸들) : ''); })()}
+`;
+  function 상가병원칸(g) {
+      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(상가 데이터 — 병원 · 약국 칸(심평원 · 행안부)과 출처 다름)</span></div>
         <div class="lifegrid">${g[1].map(x => `
         <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}" title="가장 가까운 곳 ${fmt(x.최단m)}m">
-          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`; })()}
-`;
+          <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`;
+  }
 
 
   /* ★ 2026-10-24 교육 탭 — 어린이집 → 유치원 → 배정 초등 → 초 → 중 → 고 → 학원·교습소(교육청 등록, 01:09 사장님 "교육에 학원 넣자"). 상가 업종 '입시·보습학원' 은 상권 탭 생활 편의 그대로(출처가 다름) */
@@ -4897,7 +4902,7 @@ function 주변판들(p) {
 /* 탭 안 고르기 (2026-10-31 사장님 "교육 탭이 열자마자 다 펴져 있어 보기 힘들어 — 선택해서 나오게" → "상권이나 교통도")
    고르기단추(ns, 칸들) = 단추 줄 · 고르기칸(ns, 키, html) = 그 키를 골랐을 때만 보이는 칸(키는 여럿을 띄어 쓸 수 있다 · 'all' 은 전부).
    고른 것은 이 브라우저에만 기억(편의). 고른 키가 이 단지에 없으면 첫 칸. 누르면 다시 그리지 않고 hidden 만 바꾼다. */
-const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: '' };
+const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: '', med: 'hosp' };
 const 고르기값 = {};
 function 고른(ns, 칸들) {
   let v = 고르기값[ns];
