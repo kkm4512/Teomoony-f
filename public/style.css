@@ -464,6 +464,19 @@ td .muted { font: 400 10px var(--mono); line-height: 1.3; }
 .chist .pt:hover { r: 4; }
 .chist .ax { stroke: var(--line-2); stroke-width: 1; }
 .chist .tk { font: 400 9px var(--mono); fill: var(--ink-3); }
+.chwrap { position: relative; }
+.chist .gr { stroke: var(--line); stroke-width: .6; stroke-dasharray: 2 3; }
+.chist .hit { fill: transparent; cursor: crosshair; touch-action: pan-y; }
+.chist .hvl { stroke: var(--ink-3); stroke-width: .8; }
+.chist .hvp { fill: var(--surface); stroke: var(--mark); stroke-width: 2; }
+.chtip { position: absolute; pointer-events: none; white-space: nowrap; padding: 3px 7px; border-radius: 5px;
+  background: var(--ink); color: var(--surface); font: 500 11.5px var(--mono); box-shadow: var(--shadow); }
+.chtip .muted { color: var(--ink-4); }
+.chtbl { margin: 4px 0 6px; font-size: 12px; }
+.chtbl summary { cursor: pointer; color: var(--ink-2); }
+.chtblw { overflow-x: auto; }
+.chtblw table { min-width: 560px; }
+.chtblw td, .chtblw th { font: 400 11px var(--mono); padding: 2px 4px; }
 /* 10-31 단지정보 탭 아래 '주변 단지' · '주변 분양 · 공사 중' 카드 */
 .nearcards { margin-top: 6px; }
 .nclist { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; }

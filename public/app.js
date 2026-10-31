@@ -3904,27 +3904,61 @@ async function 관리비추이채우기() {
       끝.장충월세대당 ? `<dt>장기수선충당금</dt><dd>월 부과 세대당 ${won(끝.장충월세대당)}${끝.장충총 ? ` <span class="muted">· 적립 ${won(끝.장충총)}</span>` : ''}</dd>` : ''}${
       r.분양임대 ? `<dt>분양 / 임대</dt><dd>${esc(r.분양임대)}</dd>` : ''}</dl>`;
   }
-  /* 그림: 세대당 공용관리비 달별 선 하나 — 축 끝 두 값과 처음 · 끝 달만 적는다 */
-  const W = 320, H = 92, L = 4, R = 4, T = 10, B = 16;
+  /* 그림: 세대당 공용관리비 달별 선 하나.
+     10-31 사장님 "각 점마다의 금액도 나오게" — 점이 75개쯤이라 글자를 다 붙이면 겹친다 →
+     ① 마우스를 올리거나(폰은 누르거나 밀면) 가장 가까운 달의 금액이 그 자리에 뜬다 ② 세로축 금액 눈금 세 개 ③ '달별 금액 보기' 표(해 × 달) */
+  const W = 320, H = 110, L = 44, R = 6, T = 12, B = 16;
   const vs = 점.map(x => x.세대당), lo = Math.min(...vs), hi = Math.max(...vs), 폭 = Math.max(1, hi - lo);
   const X = i => L + (점.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (점.length - 1));
   const Y = v => T + (H - T - B) * (1 - (v - lo) / 폭);
   const 선 = 점.map((x, i) => `${X(i).toFixed(1)},${Y(x.세대당).toFixed(1)}`).join(' ');
+  const 눈 = [hi, (hi + lo) / 2, lo];
+  const 짧게 = n => (n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}만` : fmt(Math.round(n)));
   const 열두 = 점.slice(-12), 평균 = 열두.reduce((t, x) => t + x.세대당, 0) / 열두.length;
   const 작년 = 점.find(x => Number(x.ym) === Number(끝.ym) - 100);
   const 변화 = 작년 ? Math.round((끝.세대당 - 작년.세대당) / 작년.세대당 * 1000) / 10 : null;
+  /* 달별 표: 해마다 한 줄, 1~12월 */
+  const 해들 = [...new Set(점.map(x => String(x.ym).slice(0, 4)))];
+  const 값 = new Map(점.map(x => [String(x.ym), x.세대당]));
+  const 표 = `<details class="chtbl"><summary>달별 금액 보기 <span class="muted">(세대당 공용관리비 · 원)</span></summary>
+    <div class="chtblw"><table class="mini"><thead><tr><th>해</th>${Array.from({ length: 12 }, (_, m) => `<th class="n">${m + 1}월</th>`).join('')}</tr></thead><tbody>
+    ${해들.reverse().map(y => `<tr><td>${y}</td>${Array.from({ length: 12 }, (_, m) => { const v = 값.get(`${y}${String(m + 1).padStart(2, '0')}`);
+      return `<td class="n">${v ? fmt(v) : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div></details>`;
   const 제목있음 = !!document.querySelector('#detail .costnone');   // '관리비' 제목은 위(costBlock0)가 이미 그렸다
   지금.innerHTML = (지금.dataset.api !== '1' ? (제목있음 ? '' : sect('관리비', 'cost', ` <span class="muted">${esc(ym(끝.ym))}</span>`)) + 머리 : '') + `
-    <div class="sub">관리비 추이 — 세대당 공용관리비 <span class="muted">${esc(ym(점[0].ym))} ~ ${esc(ym(끝.ym))} · ${fmt(점.length)}달</span></div>
-    <svg class="chist" viewBox="0 0 ${W} ${H}" role="img" aria-label="세대당 공용관리비 ${esc(ym(점[0].ym))}부터 ${esc(ym(끝.ym))}까지, 최저 ${won(lo)} 최고 ${won(hi)}">
-      <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" class="ax"/>
+    <div class="sub">관리비 추이 — 세대당 공용관리비 <span class="muted">${esc(ym(점[0].ym))} ~ ${esc(ym(끝.ym))} · ${fmt(점.length)}달 · 점에 마우스를 올리거나 누르면 그 달 금액</span></div>
+    <div class="chwrap">
+    <svg class="chist" viewBox="0 0 ${W} ${H}" role="img" aria-label="세대당 공용관리비 ${esc(ym(점[0].ym))}부터 ${esc(ym(끝.ym))}까지, 최저 ${won(lo)} 최고 ${won(hi)}. 달별 금액은 아래 표">
+      ${눈.map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="gr"/><text x="${L - 4}" y="${(Y(v) + 3).toFixed(1)}" class="tk" text-anchor="end">${짧게(v)}</text>`).join('')}
       <polyline points="${선}" class="ln"/>
-      ${점.map((x, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(x.세대당).toFixed(1)}" r="${점.length > 60 ? 1.6 : 2.4}" class="pt"><title>${esc(ym(x.ym))} ${won(x.세대당)}</title></circle>`).join('')}
+      ${점.map((x, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(x.세대당).toFixed(1)}" r="${점.length > 60 ? 1.5 : 2.2}" class="pt"/>`).join('')}
       <text x="${L}" y="${H - 3}" class="tk">${esc(ym(점[0].ym))}</text><text x="${W - R}" y="${H - 3}" class="tk" text-anchor="end">${esc(ym(끝.ym))}</text>
-      <text x="${W - R}" y="${T - 2}" class="tk" text-anchor="end">최고 ${won(hi)}</text>
+      <g class="hv" visibility="hidden"><line class="hvl" y1="${T}" y2="${H - B}"/><circle class="hvp" r="3.4"/></g>
+      <rect class="hit" x="${L}" y="0" width="${W - L - R}" height="${H}"/>
     </svg>
-    <p class="srcline">최근 12달 평균 <b>${won(평균)}</b>${변화 == null ? '' : ` · 1년 전 같은 달보다 <b>${변화 > 0 ? '+' : ''}${변화}%</b>`} · 최저 ${won(lo)}
-      · 출처: K-apt 자료실 관리비정보(연도별 엑셀 · 주 1회) '공용관리비(합계)' ÷ 지금 세대수${r.세대 ? `(${fmt(r.세대)})` : ''} · 엑셀은 K-apt 가 '참고자료' 로 내는 것이라 위 항목별 값(OpenAPI)과 조금 다를 수 있습니다</p>`;
+    <div class="chtip" hidden></div>
+    </div>
+    <p class="srcline">최근 12달 평균 <b>${won(평균)}</b>${변화 == null ? '' : ` · 1년 전 같은 달보다 <b>${변화 > 0 ? '+' : ''}${변화}%</b>`} · 최저 ${won(lo)} · 최고 ${won(hi)}
+      · 출처: K-apt 자료실 관리비정보(연도별 엑셀 · 주 1회) '공용관리비(합계)' ÷ 지금 세대수${r.세대 ? `(${fmt(r.세대)})` : ''} · 엑셀은 K-apt 가 '참고자료' 로 내는 것이라 위 항목별 값(OpenAPI)과 조금 다를 수 있습니다</p>
+    ${표}`;
+  /* 가장 가까운 달을 따라가는 표시 */
+  const svg = 지금.querySelector('svg.chist'), tip = 지금.querySelector('.chtip'), hv = svg.querySelector('.hv');
+  const 보이기 = ev => {
+    const b = svg.getBoundingClientRect(); const x = (ev.clientX - b.left) / b.width * W;
+    const i = Math.max(0, Math.min(점.length - 1, Math.round((x - L) / ((W - L - R) / Math.max(1, 점.length - 1)))));
+    const p = 점[i], cx = X(i), cy = Y(p.세대당);
+    hv.setAttribute('visibility', 'visible');
+    hv.querySelector('.hvl').setAttribute('x1', cx); hv.querySelector('.hvl').setAttribute('x2', cx);
+    hv.querySelector('.hvp').setAttribute('cx', cx); hv.querySelector('.hvp').setAttribute('cy', cy);
+    tip.hidden = false;
+    tip.innerHTML = `<b>${esc(ym(p.ym))}</b> ${won(p.세대당)}${p.개별세대당 ? `<span class="muted"> · 개별 ${won(p.개별세대당)}</span>` : ''}`;
+    const px = cx / W * b.width, half = tip.offsetWidth / 2;
+    tip.style.left = `${Math.max(0, Math.min(b.width - tip.offsetWidth, px - half))}px`;
+    tip.style.top = `${Math.max(0, cy / H * b.height - 34)}px`;
+  };
+  const 숨기기 = () => { hv.setAttribute('visibility', 'hidden'); tip.hidden = true; };
+  const hit = svg.querySelector('.hit');
+  hit.addEventListener('pointermove', 보이기); hit.addEventListener('pointerdown', 보이기); hit.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') 숨기기(); });
 }
 function kaptBlock(k) {
   if (!k) return '';
