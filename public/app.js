@@ -3315,14 +3315,19 @@ function structureBlock(dongs, floors, hos, scope, hoTotal) {
   const real = (dongs || []).filter(d => !d.is_recap);
   if (!real.length && !(floors || []).length && !(hos || []).length) return '';
 
-  /* 선택된 동. 키는 표제부 PK — 세 축이 공유하는 코드다(이름이 아니다). */
-  let sel = hoDong;
+  /* 선택된 동. 키는 표제부 PK — 세 축이 공유하는 코드다(이름이 아니다).
+     2026-10-31 사장님 "동은 항상 맨 처음 동이 기본으로" — 전에는 호가 가장 많은 동이었다.
+     동 목록을 **세대 있는 동 먼저 · 이름 속 숫자 순**(101동 · 102동 · …), 그다음 세대 없는 동(상가 · 관리동 · 경비실 …)으로 세우고,
+     그 **첫 동**(호가 있는 동이 있으면 그중 첫 동)을 고른다. 같은 순서를 '동 선택' 목록에도 쓴다 — 기본으로 고른 동이 목록 맨 위에 있게.
+     (숫자만 보면 '경로당1' · '근린생활시설1A동' 이 101동보다 앞선다 — 헬리오시티에서 확인) */
+  const 동이름 = d => (d.dong_nm || d.bld_nm || '').trim();
+  const 동숫자 = d => { const m = 동이름(d).match(/\d+/); return m ? Number(m[0]) : Infinity; };
+  const 세대동 = d => (Number(d.hhld_cnt) || 0) > 0 ? 0 : 1;
+  real.sort((a, b) => 세대동(a) - 세대동(b) || 동숫자(a) - 동숫자(b) || 동이름(a).localeCompare(동이름(b), 'ko', { numeric: true }) || String(a.mgm_bldrgst_pk).localeCompare(String(b.mgm_bldrgst_pk)));
+  let sel = hoDong && real.some(d => d.mgm_bldrgst_pk === hoDong) ? hoDong : null;
   if (!sel) {
-    const cnt = new Map();
-    for (const h of hos || []) cnt.set(h.동PK, (cnt.get(h.동PK) || 0) + 1);
-    sel = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
-       || real.slice().sort((a, b) => (b.hhld_cnt || 0) - (a.hhld_cnt || 0))[0]?.mgm_bldrgst_pk
-       || null;
+    const 호있음 = new Set((hos || []).map(h => h.동PK));
+    sel = (real.find(d => 호있음.has(d.mgm_bldrgst_pk)) || real[0] || {}).mgm_bldrgst_pk || null;
   }
 
   const nHo = (hos || []).length;
@@ -4904,11 +4909,14 @@ function 주변판들(p) {
    고른 것은 이 브라우저에만 기억(편의). 고른 키가 이 단지에 없으면 첫 칸. 누르면 다시 그리지 않고 hidden 만 바꾼다. */
 const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: '', med: 'hosp' };
 const 고르기값 = {};
+/* 기억하지 않고 늘 '전체' 로 시작하는 고르기(단지마다 값이 다른 것 — 평형 등) */
+const 고르기전체로 = new Set(['sv-gb', 'sv-py']);
 function 고른(ns, 칸들) {
   let v = 고르기값[ns];
+  if (고르기전체로.has(ns)) v = v || 'all';
   if (v == null) { try { v = localStorage.getItem('teomoony.pick.' + ns); } catch { v = null; } }
   if (v == null || v === '') v = 고르기기본[ns] || '';
-  if (칸들 && !칸들.some(([k]) => k === v)) { const 첫 = 칸들.find(([k]) => k !== 'all'); v = 첫 ? 첫[0] : 'all'; }
+  if (칸들 && !칸들.some(([k]) => k === v)) { const 첫 = 고르기전체로.has(ns) ? null : 칸들.find(([k]) => k !== 'all'); v = 첫 ? 첫[0] : 'all'; }
   return v;
 }
 function 고르기단추(ns, 칸들) {
@@ -4926,11 +4934,28 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-pickns] > [data-pick]'); if (!b) return;
   const ns = b.parentElement.dataset.pickns, v = b.dataset.pick;
   고르기값[ns] = v;
-  try { localStorage.setItem('teomoony.pick.' + ns, v); } catch { /* 편의 기능 */ }
+  if (!고르기전체로.has(ns)) try { localStorage.setItem('teomoony.pick.' + ns, v); } catch { /* 편의 기능 */ }
   b.parentElement.querySelectorAll('[data-pick]').forEach(x => { x.setAttribute('aria-selected', x === b ? 'true' : 'false'); });
   const 판 = b.closest('.pane') || document;
   판.querySelectorAll(`.picksec[data-pickns="${ns}"]`).forEach(x => { x.hidden = !(v === 'all' || x.dataset.picksec.split(/\s+/).includes(v)); });
+  고르기줄거르기(판);
 });
+/* 표 줄 거르기 — [data-pickrows="ns1 ns2 · 보일 수"] 표의 tr 은 data-p-<ns> 값이 고른 값과 같을 때만(여러 줄을 함께 · 'all' 은 다 통과).
+   보일 수를 넘는 줄은 숨기고, [data-pickcount] 칸에 'N건 중 M건' 을 적는다. */
+function 고르기줄거르기(판) {
+  판.querySelectorAll('[data-pickrows]').forEach(표 => {
+    const [nss, 한도s] = 표.dataset.pickrows.split('|'); const 한도 = Number(한도s) || Infinity;
+    const 값 = nss.split(/\s+/).map(ns => [ns, 고른(ns)]);
+    let 맞음 = 0, 보임 = 0;
+    표.querySelectorAll('tbody tr').forEach(tr => {
+      const ok = 값.every(([ns, v]) => v === 'all' || tr.getAttribute('data-p-' + ns) === v);
+      if (ok) 맞음++;
+      tr.hidden = !(ok && 보임 < 한도); if (!tr.hidden) 보임++;
+    });
+    const 셈 = 표.parentElement && 표.parentElement.querySelector('[data-pickcount]');
+    if (셈) 셈.textContent = 맞음 > 보임 ? `${fmt(맞음)}건 중 최근 ${fmt(보임)}건` : 맞음 ? `${fmt(맞음)}건` : '고른 조건에 맞는 거래가 없습니다';
+  });
+}
 const 교통칸들 = [['all', '전체'], ['subway', '지하철'], ['bus', '버스']];
 /* 상권 칸은 단지마다 다르다 — 있는 생활 묶음(병원·약국은 따로 탭) + 브랜드 + 그 밖 업종 + 전체 */
 function 상권칸들(pl, pb) {
@@ -6597,6 +6622,7 @@ async function 분양채우기() {
     const 지금 = document.querySelector('#detail .ahbox');
     if (!지금 || 지금.dataset.ah !== 키) return;  // 그사이 다른 단지로 옮겼다
     지금.innerHTML = 분양칸(r.공고 || []) + 분양권칸(r);
+    지금.querySelectorAll('.subtabs').forEach(b => 탭줄손잡이(b, true));   // 10-31 구분 · 평형 작은 탭 줄
   } catch { /* 덤 */ }
 }
 /* ★ 2026-10-24 교육 탭 학교급 한 칸 — 단지가 든 구역(초 통학구역 · 중 학교군 · 고 학군)과 그 구역 학교(학교학구도연계정보) + 1km 안 학교를
@@ -6861,17 +6887,24 @@ function 분양권칸(r) {
     ${Number(n.공고전) ? `<p class="note sm">${fmt(n.공고전)}건은 첫 공고 전 입주권(조합원 권리)</p>` : ''}
     ${r.분양권말 ? `<p class="note sm">${r.분양권말}</p>` : ''}
     ${Number(n.필지로) ? `<p class="note sm" title="공고 자료 없이 이 단지 필지에서 맺은 계약으로 이음">공고 없이 이은 계약 ${fmt(n.필지로)}건</p>` : ''}
-    <table class="mini"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
-    ${t.slice(0, 15).map(x => {
+    ${(() => { /* 2026-10-31 사장님 "구분이나 평형별로 고를 수 있는 탭" — 구분(원문) · 평형(전용면적 정수 ㎡) 작은 탭 줄. 단지마다 다르니 늘 '전체' 로 시작 */
+      const 구분들 = [...new Set(t.map(x => x.구분 || ''))];
+      const 이름 = g => g === '입' ? '입주권' : g === '분' ? '분양권' : '빈칸';
+      const gb = [['all', '전체'], ...['분', '입', ''].filter(g => 구분들.includes(g)).map(g => [g || 'none', 이름(g)])];
+      const 평들 = [...new Set(t.map(x => Math.floor(Number(x.전용))).filter(Number.isFinite))].sort((a, b) => a - b);
+      const py = [['all', '전체'], ...평들.map(v => [String(v), `${v}㎡`])];
+      return (gb.length > 2 ? 고르기단추('sv-gb', gb) : '') + (py.length > 2 ? 고르기단추('sv-py', py) : ''); })()}
+    <table class="mini" data-pickrows="sv-gb sv-py|15"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
+    ${t.map((x, i) => {
       const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);
       const 차 = 기준 != null && x.거래원 ? Number(x.거래원) - 기준 : null;
       /* 2026-10-22 사장님 "실거래 취소처럼 동일하게" — 실거래 탭(.trow.canc)과 같은 세 가지: 취소선 금액 · 연한 색 · '해제' 꼬리표(용어 풀이) */
       const 취 = Number(x.취소);
-      return `<tr${취 ? ' class="canc"' : ''}><td>${날(x.계약일)}${취 ? ` <span class="tcx"${x.해제일 ? ` title="해제일 ${esc(x.해제일)} (원문)"` : ''}>${용어('해제')}</span>` : ''}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
+      return `<tr${취 ? ' class="canc"' : ''} data-p-sv-gb="${esc(x.구분 || 'none')}" data-p-sv-py="${Math.floor(Number(x.전용))}"${i >= 15 ? ' hidden' : ''}><td>${날(x.계약일)}${취 ? ` <span class="tcx"${x.해제일 ? ` title="해제일 ${esc(x.해제일)} (원문)"` : ''}>${용어('해제')}</span>` : ''}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
         <td class="n">${x.거래원 ? (취 ? `<s>${억(Number(x.거래원))}</s>` : 억(Number(x.거래원))) : '—'}</td><td>${x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '<span class="muted">빈칸</span>'}</td>
         <td class="n">${차 == null ? '—' : (차 >= 0 ? '+' : '−') + 억(Math.abs(차))}</td></tr>`; }).join('')}
     </tbody></table>
-    ${t.length > 15 ? `<p class="note sm">최근 15건만 보입니다.</p>` : ''}`;
+    <p class="note sm" data-pickcount>${t.length > 15 ? `${fmt(t.length)}건 중 최근 15건` : `${fmt(t.length)}건`}</p>`;
 }
 
 /* ================= 폰 바텀시트 (2026-10-22, 사장님 "너 생각대로 ㄱㄱ") =================
