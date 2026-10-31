@@ -6109,7 +6109,13 @@ app.get('/api/closed/site/:key', async (req, res) => {
        GROUP BY p.기준연도, p.기준월 ORDER BY p.기준연도, p.기준월;
       SELECT 동 = p.동명, 호 = COUNT(DISTINCT p.호명) FROM gold.closed_site s JOIN silver.ned_aphus_price p ON p.pnu = s.pnu WHERE s.site_key = @k AND LEN(s.shter_day) = 8 AND p.기준연도 <= LEFT(s.shter_day, 4)
        GROUP BY p.동명 ORDER BY TRY_CAST(REPLACE(REPLACE(p.동명, N'동', N''), N' ', N'') AS INT), p.동명;
-      SELECT d.건수, d.받은시각 FROM gold.closed_site s JOIN silver.ned_aphus_done d ON d.pnu = s.pnu WHERE s.site_key = @k;`);
+      SELECT d.건수, d.받은시각 FROM gold.closed_site s JOIN silver.ned_aphus_done d ON d.pnu = s.pnu WHERE s.site_key = @k;
+      /* 2026-10-31 사장님 "폐쇄된 단지인데 알기 너무 어려워" — 같은 필지(PNU)의 **지금** 단지 전부. now_complex_id 는 하나일 때만 적혀서
+         둘 이상이면(본채 + 부속채 대장이 따로 등) 아무것도 안 보였다 → 그 필지가 '지금 대장 없는 자리' 로 칠해졌다(화순 다산리 446-1). */
+      SELECT TOP 10 x.complex_id, x.complex_nm, 세대 = x.hhld_cnt_sum, 동 = x.dong_cnt, 연면적 = x.tot_area_sum, 사용승인 = x.oldest_use_apr
+        FROM gold.closed_site s JOIN gold.complex_pnu cp ON cp.pnu = s.pnu
+        JOIN gold.complex x ON x.complex_id = cp.complex_id AND x.merged_into IS NULL
+       WHERE s.site_key = @k ORDER BY x.tot_area_sum DESC, x.complex_id;`);
     const site = r.recordsets[0][0];
     if (!site) return res.status(404).json({ error: 'not found' });
     const g = (r.recordsets[2] || [])[0];
@@ -6121,7 +6127,8 @@ app.get('/api/closed/site/:key', async (req, res) => {
                대장: { 동: r.recordsets[8] || [], 층: r.recordsets[9] || [], 호: r.recordsets[10] || [],
                        받음: Object.fromEntries((r.recordsets[12] || []).map(x => [x.op, { 건수: x.건수, 받은때: x.받은때 }])) },
                거래: r.recordsets[11] || [],
-               공시: { 연도: r.recordsets[13] || [], 동: r.recordsets[14] || [], 받음: (r.recordsets[15] || [])[0] || null } });
+               공시: { 연도: r.recordsets[13] || [], 동: r.recordsets[14] || [], 받음: (r.recordsets[15] || [])[0] || null },
+               지금단지: r.recordsets[16] || [] });
   } catch (e) { fail(res, e, 'closed-site'); }
 });
 /* 2026-10-23: 폐쇄 자리의 공동주택가격 — 한 동(NED 원문 동명)의 호마다 연도별 원문 값. 동명은 NED 원문 그대로(대장 동과 잇지 않는다) */

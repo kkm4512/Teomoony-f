@@ -762,7 +762,8 @@ async function 빈자리(req, res) {
              max(c.shter_day) AS 최근,
              (SELECT p.geojson FROM svc.lyr_parcel p WHERE p.pnu = c.pnu LIMIT 1) AS geojson
         FROM svc.lyr_closed c
-       WHERE c.now_complex_id IS NULL AND c.lng BETWEEN $1 AND $3 AND c.lat BETWEEN $2 AND $4
+       WHERE c.now_complex_id IS NULL AND COALESCE(c."지금단지수", 0) = 0 AND c.lng BETWEEN $1 AND $3 AND c.lat BETWEEN $2 AND $4
+         /* 10-31: now_complex_id 는 지금 단지가 하나일 때만 — 둘 이상인 필지(본채 · 부속채 대장이 따로)는 지금단지수로 뺀다 */
          /* 대장 전의 새 아파트(K-apt 신축)가 선 필지는 뺀다 — 장위자이레디언트 62-1 이 '지금 대장 없는 자리' 로 칠해졌다(10-25 시험) */
          AND NOT EXISTS (SELECT 1 FROM svc.lyr_sg_newbuild n WHERE n.pnu = c.pnu)
        GROUP BY c.pnu

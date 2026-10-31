@@ -7384,6 +7384,21 @@ async function 폐쇄핀불러오기() {
   if ((r.핀 || []).length >= 800) 지도알림('폐쇄', '폐쇄·말소 점은 한 화면에 800개까지만 보입니다 — 더 확대하세요');
   else 지도알림('폐쇄', '');
 }
+/* 2026-10-31 사장님 "폐쇄된 단지인데 단지상세에서 열어봐도 알기 너무 어려워" — 닫힌 대장을 열면 **맨 위에** 이 자리가 지금 어떤지부터.
+   같은 필지(PNU)의 지금 단지 전부(서버 지금단지 · 본채 · 부속채 대장이 따로면 둘 이상). 이어 지은 것이라고 말하지 않는다 —
+   옛 대장이 닫힌 날과 지금 건물 사용승인일이 같으면 그 사실만 적는다. */
+function 지금자리줄(s, r) {
+  const 지금 = (r && r.지금단지) || [];
+  const 닫힌날 = 날8(s.shter_day);
+  if (!지금.length && !s.now_complex_id)
+    return `<p class="note clnow"><b>이 필지에는 지금 대장이 있는 건물이 없습니다.</b> 아래는 예전 건물의 닫힌(${esc(s.폐쇄구분 || '폐쇄')}) 대장입니다.</p>`;
+  const 줄 = 지금.length ? 지금 : [{ complex_id: s.now_complex_id, complex_nm: s.now_nm }];
+  const 같은날 = 지금.some(x => x.사용승인 && String(x.사용승인) === String(s.shter_day));
+  return `<p class="note clnow"><b>이 필지에는 지금 건물이 있습니다</b> — 아래는 그 <b>전</b> 건물의 닫힌(${esc(s.폐쇄구분 || '폐쇄')}) 대장${닫힌날 ? `(${닫힌날})` : ''}입니다.
+    ${같은날 ? `<br><span class="sm">옛 대장이 닫힌 날 = 지금 건물 사용승인일</span>` : ''}</p>
+    <ul class="clnowlist">${줄.map(x => `<li><a href="/c/${x.complex_id}" data-goc="${x.complex_id}">${esc(x.complex_nm || '단지')}</a>
+      <span class="muted sm">${[x.연면적 ? fmt(Math.round(x.연면적)) + '㎡' : '', x.사용승인 ? '사용승인 ' + 날8(x.사용승인) : '', x.세대 ? fmt(x.세대) + '세대' : ''].filter(Boolean).join(' · ')}</span></li>`).join('')}</ul>`;
+}
 async function 폐쇄핀열기(key, ll) {
   const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
     .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
@@ -7391,9 +7406,7 @@ async function 폐쇄핀열기(key, ll) {
     const r = await fetch(`/api/closed/site/${encodeURIComponent(key)}`).then(x => x.json());
     if (r.error) throw new Error(r.error);
     const s = r.묶음;
-    pop.setContent(`<div class="ahpopin">${sect('폐쇄·말소 대장', 'closed')}${폐쇄묶음줄(s, r.동, true)}
-      ${s.now_complex_id ? `<p class="sm">같은 필지의 지금 단지: <a href="/c/${s.now_complex_id}" data-goc="${s.now_complex_id}">${esc(s.now_nm || '단지')}</a>
-        <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}</div>`);
+    pop.setContent(`<div class="ahpopin">${sect('폐쇄·말소 대장', 'closed')}${지금자리줄(s, r)}${폐쇄묶음줄(s, r.동, true)}</div>`);
   } catch (e) { pop.setContent(`<p class="note">불러오지 못했습니다 — ${esc(e.message || String(e))}</p>`); }
 }
 document.addEventListener('click', e => {
@@ -7731,9 +7744,8 @@ function 폐쇄그리기() {
   const 날 = d => d ? String(d).replace(/^(\d{4})(\d\d)(\d\d)$/, '$1.$2.$3') : '';
 
   const paneI = `${sect('폐쇄·말소 대장', 'closed')}
-    ${폐쇄묶음줄(s, r.동, true)}
-    ${s.now_complex_id ? `<p class="sm">같은 필지의 지금 단지: <a href="/c/${s.now_complex_id}" data-goc="${s.now_complex_id}">${esc(s.now_nm || '단지')}</a>
-      <span class="muted">(같은 필지일 뿐, 이어 지은 것이라는 뜻은 아님)</span></p>` : ''}`;
+    ${지금자리줄(s, r)}
+    ${폐쇄묶음줄(s, r.동, true)}`;
 
   /* 2026-10-23 사장님 "1번 ㄴㄴ 그럼 잇지말고, 왜 동호가 없는지 간략히 설명해" — 호를 동에 **잇지 않는다**. 동은 동대로(층은 표제부 번호로) · 호는 호대로(전용면적은 호 번호로) */
   /* 2026-10-23: 평형은 **주거 호**(전유 용도에 주택·아파트가 든 것)만 — 상가 칸(4㎡ · 5㎡ …)이 섞이지 않게. 나머지는 용도별 수만 */
