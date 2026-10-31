@@ -2096,15 +2096,8 @@ table.cned td.sm { line-height: 1.6; }
 .hm-tax{margin:10px 0 4px;padding-top:8px;border-top:1px dashed var(--line)}
 .hm-taxd summary{cursor:pointer;color:var(--muted,#888)}
 .hm-taxd .hm-a td:first-child{padding-right:10px}
-/* 10-31 교육 탭 고르기 — 고른 칸 하나만 */
+/* 10-31 탭 안 고르기(교육 · 교통 · 상권) — 고른 칸 하나만 */
 .edupick{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
 .edupick button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer;color:inherit}
 .edupick button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-.edupane .edusec{display:none}
-.edupane[data-pick="all"] .edusec,
-.edupane[data-pick="cc"] .edusec[data-edu~="cc"],
-.edupane[data-pick="kinder"] .edusec[data-edu~="kinder"],
-.edupane[data-pick="elem"] .edusec[data-edu~="elem"],
-.edupane[data-pick="mid"] .edusec[data-edu~="mid"],
-.edupane[data-pick="high"] .edusec[data-edu~="high"],
-.edupane[data-pick="acad"] .edusec[data-edu~="acad"]{display:block}
+.picksec[hidden]{display:none}

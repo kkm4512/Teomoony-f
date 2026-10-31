@@ -4724,6 +4724,8 @@ function 주변판들(p) {
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 지하철 · 버스를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${/* ★ 머리글 숫자는 **전체**다. 보여주는 수(4)를 적으면 그게 전부인 줄 안다 */''}
+    ${고르기단추('traffic', 교통칸들)}
+    ${고르기칸('traffic', 'subway', `
     ${sect('지하철', 'subway', sub.length ? ` ${fmt(Number(sub[0].전체) || sub.length)}` : '')}
     ${kapt && (kapt.지하철 || kapt.지하철도보) ? `<p class="note sm">K-apt 신고: ${esc(kapt.지하철 || '')}${kapt.지하철노선 ? ` <span class="muted">${esc(kapt.지하철노선)}</span>` : ''}${kapt.지하철도보 ? ` · 도보 ${esc(kapt.지하철도보)}` : ''}</p>` : ''}
     ${sub.length ? `
@@ -4738,6 +4740,8 @@ function 주변판들(p) {
       : `<p class="note">${gapCell('', 'NA',
           '단지 1.5km 안에 도시철도 역이 없습니다')}</p>`}
 
+    `, 교통칸들)}
+    ${고르기칸('traffic', 'bus', `
     ${sect('버스', 'bus', bus && Number(bus.r500) ? ` ${fmt(bus.r500)}` : '')}
     ${kapt && kapt.버스도보 ? `<p class="note sm">K-apt 신고: 정류장까지 도보 ${esc(kapt.버스도보)}</p>` : ''}
     ${bus && Number(bus.r500) ? `
@@ -4791,10 +4795,7 @@ function 주변판들(p) {
       : `<p class="note">${Number(bus && bus.적재)
           ? gapCell('', 'NA', '단지 500m 안에 버스정류장이 없습니다')
           : gapCell('', 'SCOPE', '버스정류장을 아직 적재하지 않았습니다')}</p>`}
-
-
-
-
+    `, 교통칸들)}
 `;
 
   /* ★ 2026-10-24 10:29 사장님 "교통 · 상권 · 의료로 나누고 싶어" — 상권 탭(상가 점포 · 브랜드 · 생활 편의). 병원·약국 묶음은 의료 탭으로 */
@@ -4809,26 +4810,26 @@ function 주변판들(p) {
         <span><b>${fmt(pTot('r1000'))}</b>1km</span>
         <span><b>${fmt((poiSum && poiSum.업종수500) || 0)}</b>업종(500m)</span>
       </div>
-      ${pb.length ? `<div class="brands">${pb.slice(0, 12).map(b => `
+      ${(() => { const 칸들 = 상권칸들(pl, pb); return 고르기단추('shop', 칸들) + 고르기칸('shop', 'brand', pb.length ? `<div class="lt2">브랜드</div><div class="brands">${pb.slice(0, 12).map(b => `
         <span class="bchip${Number(b.r500) ? '' : ' far'}" data-pt="brand|${esc(b.브랜드)}"
           data-pt-r="${Number(b.r500) ? 500 : 1000}"
           title="가장 가까운 곳 ${fmt(b.최단m)}m">${esc(b.브랜드)}${
           Number(b.r500) > 1 ? `<b>${fmt(b.r500)}</b>` : ''}</span>`).join('')}</div>
-        ` : ''}
-      ${pl.length ? `${생활묶음(pl).filter(([g]) => g !== '병원·약국').map(([g, xs]) => `
+        ` : '', 칸들)
+      + (pl.length ? `${생활묶음(pl).filter(([g]) => g !== '병원·약국').map(([g, xs]) => 고르기칸('shop', 'g:' + g, `
         <div class="lgrp"><span class="lgl">${esc(g)}<button type="button" class="sdet lgo" data-poilist="${esc(xs.map(x => x.항목).join(','))}" data-poinm="${esc(g)}" title="이 묶음의 점포 목록">목록 ›</button></span><div class="lifegrid">${xs.map(x => `
         <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}"
              data-pt-r="${Number(x.r500) ? 500 : 1000}"
              title="가장 가까운 곳 ${fmt(x.최단m)}m">
           <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
-          <span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div></div>`).join('')}
-        ` : ''}
-      <div class="lt2">그 밖에 많은 업종 (500m)</div>
+          <span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div></div>`, 칸들)).join('')}
+        ` : '')
+      + 고르기칸('shop', 'many', `<div class="lt2">그 밖에 많은 업종 (500m)</div>
       <div class="zlist">${pz.filter(r => Number(r.r500) > 0).slice(0, 8).map(r => `
         <div class="zrow"><span class="zn">${esc(r.소분류 || '')}</span>
           <span class="zbar"><i style="width:${
             (100 * Number(r.r500) / Math.max(1, Number(pz[0].r500))).toFixed(1)}%"></i></span>
-          <b>${fmt(r.r500)}</b></div>`).join('')}</div>
+          <b>${fmt(r.r500)}</b></div>`).join('')}</div>`, 칸들); })()}
       ${pOn ? `<p class="note sm">단지 안 점포 <b>${fmt(pOn)}곳</b></p>` : ''}
       `
       : `<p class="note">${(받은자료 && 받은자료['상가'])
@@ -4856,10 +4857,9 @@ function 주변판들(p) {
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 어린이집 · 유치원 · 학교를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${/* 2026-10-31 사장님 "탭을 열자마자 다 펴져 있으니 보기 힘들어 — 선택해서 나오게": 고른 칸 하나만 보인다(고른 것은 이 브라우저에 기억) */''}
-    <div class="edupick" role="tablist">${교육칸들.map(([k, 이름]) => `<button type="button" role="tab" data-edupick="${k}"${k === 교육고름 ? ' class="on" aria-selected="true"' : ' aria-selected="false"'}>${이름}</button>`).join('')}</div>
-    <div class="edupane" data-pick="${esc(교육고름)}">
-    <div class="edusec" data-edu="cc">${c && c.complex_id ? `<div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>` : ''}</div>
-    <div class="edusec" data-edu="kinder">
+    ${고르기단추('edu', 교육칸들)}
+    ${고르기칸('edu', 'cc', c && c.complex_id ? `<div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>` : '', 교육칸들)}
+    ${고르기칸('edu', 'kinder', `
     ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
     ${kin.length ? `
       <div class="schrow">${kin.map(x => `
@@ -4880,37 +4880,58 @@ function 주변판들(p) {
           kinderLoaded
             ? '이 단지 500m 안에 유치원이 없습니다'
             : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
-    </div>
+    `, 교육칸들)}
 
-    ${['초등학교', '중학교', '고등학교'].map(급 => `<div class="edusec" data-edu="${({ 초등학교: 'elem', 중학교: 'mid', 고등학교: 'high' })[급]}">${학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
-        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)}</div>`).join('')}
-    <div class="edusec" data-edu="elem mid high">
+    ${['초등학교', '중학교', '고등학교'].map(급 => 고르기칸('edu', ({ 초등학교: 'elem', 중학교: 'mid', 고등학교: 'high' })[급], 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
+        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded), 교육칸들)).join('')}
+    ${고르기칸('edu', 'elem mid high', `
     ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</p>` : ''}
 
-    </div>
-    <div class="edusec" data-edu="acad">${학원칸(academy)}</div>
-    </div>
+`, 교육칸들)}
+    ${고르기칸('edu', 'acad', 학원칸(academy), 교육칸들)}
 `;
 
   return { paneN, paneC, paneH, paneE };
 }
 
-/* 교육 탭 고르기 (2026-10-31) — 칸 순서는 아이 나이 순. 기본은 초등학교(배정 초등이 가장 많이 찾는 것) · 'all' 은 전부 */
-const 교육칸들 = [['cc', '어린이집'], ['kinder', '유치원'], ['elem', '초등학교'], ['mid', '중학교'], ['high', '고등학교'], ['acad', '학원'], ['all', '전체']];
-let 교육고름 = 'elem';
-try { const v = localStorage.getItem('teomoony.edu'); if (교육칸들.some(([k]) => k === v)) 교육고름 = v; } catch { /* 저장소가 막힌 곳 */ }
-function 교육고르기표시() {
-  document.querySelectorAll('.edupane').forEach(p => { p.dataset.pick = 교육고름; });
-  document.querySelectorAll('[data-edupick]').forEach(b => {
-    const on = b.dataset.edupick === 교육고름; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
-  });
+/* 탭 안 고르기 (2026-10-31 사장님 "교육 탭이 열자마자 다 펴져 있어 보기 힘들어 — 선택해서 나오게" → "상권이나 교통도")
+   고르기단추(ns, 칸들) = 단추 줄 · 고르기칸(ns, 키, html) = 그 키를 골랐을 때만 보이는 칸(키는 여럿을 띄어 쓸 수 있다 · 'all' 은 전부).
+   고른 것은 이 브라우저에만 기억(편의). 고른 키가 이 단지에 없으면 첫 칸. 누르면 다시 그리지 않고 hidden 만 바꾼다. */
+const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: '' };
+const 고르기값 = {};
+function 고른(ns, 칸들) {
+  let v = 고르기값[ns];
+  if (v == null) { try { v = localStorage.getItem('teomoony.pick.' + ns); } catch { v = null; } }
+  if (v == null || v === '') v = 고르기기본[ns] || '';
+  if (칸들 && !칸들.some(([k]) => k === v)) v = 칸들.length ? 칸들[0][0] : 'all';
+  return v;
+}
+function 고르기단추(ns, 칸들) {
+  const v = 고른(ns, 칸들);
+  return `<div class="edupick" role="tablist" data-pickns="${ns}" data-pickcur="${esc(v)}">${칸들.map(([k, 이름]) =>
+    `<button type="button" role="tab" data-pick="${esc(k)}"${k === v ? ' class="on" aria-selected="true"' : ' aria-selected="false"'}>${이름}</button>`).join('')}</div>`;
+}
+function 고르기칸(ns, 키, html, 칸들) {
+  const v = 고른(ns, 칸들);
+  const 보임 = v === 'all' || String(키).split(/\s+/).includes(v);
+  return `<div class="picksec" data-pickns="${ns}" data-picksec="${esc(키)}"${보임 ? '' : ' hidden'}>${html}</div>`;
 }
 document.addEventListener('click', e => {
-  const b = e.target.closest('[data-edupick]'); if (!b) return;
-  교육고름 = b.dataset.edupick;
-  try { localStorage.setItem('teomoony.edu', 교육고름); } catch { /* 편의 기능 */ }
-  교육고르기표시();
+  const b = e.target.closest('[data-pickns] > [data-pick]'); if (!b) return;
+  const ns = b.parentElement.dataset.pickns, v = b.dataset.pick;
+  고르기값[ns] = v;
+  try { localStorage.setItem('teomoony.pick.' + ns, v); } catch { /* 편의 기능 */ }
+  b.parentElement.querySelectorAll('[data-pick]').forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); });
+  const 판 = b.closest('.pane') || document;
+  판.querySelectorAll(`.picksec[data-pickns="${ns}"]`).forEach(x => { x.hidden = !(v === 'all' || x.dataset.picksec.split(/\s+/).includes(v)); });
 });
+const 교통칸들 = [['subway', '지하철'], ['bus', '버스'], ['all', '전체']];
+/* 상권 칸은 단지마다 다르다 — 있는 생활 묶음(병원·약국은 따로 탭) + 브랜드 + 그 밖 업종 + 전체 */
+function 상권칸들(pl, pb) {
+  const 묶 = (pl && pl.length ? 생활묶음(pl) : []).filter(([g]) => g !== '병원·약국').map(([g]) => ['g:' + g, g]);
+  return [...묶, ...(pb && pb.length ? [['brand', '브랜드']] : []), ['many', '그 밖 업종'], ['all', '전체']];
+}
+const 교육칸들 = [['cc', '어린이집'], ['kinder', '유치원'], ['elem', '초등학교'], ['mid', '중학교'], ['high', '고등학교'], ['acad', '학원'], ['all', '전체']];
 
 function renderDetail(payload) {
   lastDetail = payload;
