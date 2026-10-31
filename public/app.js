@@ -4855,7 +4855,11 @@ function 주변판들(p) {
   const paneE = 좌표없음 ? `
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 어린이집 · 유치원 · 학교를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
-    ${c && c.complex_id ? `<div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>` : ''}
+    ${/* 2026-10-31 사장님 "탭을 열자마자 다 펴져 있으니 보기 힘들어 — 선택해서 나오게": 고른 칸 하나만 보인다(고른 것은 이 브라우저에 기억) */''}
+    <div class="edupick" role="tablist">${교육칸들.map(([k, 이름]) => `<button type="button" role="tab" data-edupick="${k}"${k === 교육고름 ? ' class="on" aria-selected="true"' : ' aria-selected="false"'}>${이름}</button>`).join('')}</div>
+    <div class="edupane" data-pick="${esc(교육고름)}">
+    <div class="edusec" data-edu="cc">${c && c.complex_id ? `<div class="ccbox" data-cc="${esc(String(c.complex_id))}"></div>` : ''}</div>
+    <div class="edusec" data-edu="kinder">
     ${sect('유치원', 'kinder', kin.length ? ` ${fmt(Number(kin[0].전체) || kin.length)}` : '')}
     ${kin.length ? `
       <div class="schrow">${kin.map(x => `
@@ -4876,16 +4880,37 @@ function 주변판들(p) {
           kinderLoaded
             ? '이 단지 500m 안에 유치원이 없습니다'
             : '유치원을 아직 적재하지 않았습니다 — 없는 게 아니라 안 받은 것입니다')}</p>`}
+    </div>
 
-    ${['초등학교', '중학교', '고등학교'].map(급 => 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
-        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)).join('')}
+    ${['초등학교', '중학교', '고등학교'].map(급 => `<div class="edusec" data-edu="${({ 초등학교: 'elem', 중학교: 'mid', 고등학교: 'high' })[급]}">${학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
+        (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded)}</div>`).join('')}
+    <div class="edusec" data-edu="elem mid high">
     ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</p>` : ''}
 
-    ${학원칸(academy)}
+    </div>
+    <div class="edusec" data-edu="acad">${학원칸(academy)}</div>
+    </div>
 `;
 
   return { paneN, paneC, paneH, paneE };
 }
+
+/* 교육 탭 고르기 (2026-10-31) — 칸 순서는 아이 나이 순. 기본은 초등학교(배정 초등이 가장 많이 찾는 것) · 'all' 은 전부 */
+const 교육칸들 = [['cc', '어린이집'], ['kinder', '유치원'], ['elem', '초등학교'], ['mid', '중학교'], ['high', '고등학교'], ['acad', '학원'], ['all', '전체']];
+let 교육고름 = 'elem';
+try { const v = localStorage.getItem('teomoony.edu'); if (교육칸들.some(([k]) => k === v)) 교육고름 = v; } catch { /* 저장소가 막힌 곳 */ }
+function 교육고르기표시() {
+  document.querySelectorAll('.edupane').forEach(p => { p.dataset.pick = 교육고름; });
+  document.querySelectorAll('[data-edupick]').forEach(b => {
+    const on = b.dataset.edupick === 교육고름; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-edupick]'); if (!b) return;
+  교육고름 = b.dataset.edupick;
+  try { localStorage.setItem('teomoony.edu', 교육고름); } catch { /* 편의 기능 */ }
+  교육고르기표시();
+});
 
 function renderDetail(payload) {
   lastDetail = payload;
