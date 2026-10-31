@@ -2848,7 +2848,7 @@ let detailTab = 'info';
 /* 10-31 사장님 "실거래 → 교통 → 다음으로 넘어갈 때 탭으로 확실하게 분리되고, 오른쪽 · 왼쪽을 눌러서 이동 · 마우스로 꾹 눌러 좌우로" —
    상세 탭 줄이 패널보다 길면 양 끝에 ‹ › 단추(누르면 한 화면씩 민다) · 마우스로 잡아 끌기 · 휠 굴리기를 붙인다.
    끄는 중에 손을 떼면 탭이 눌린 것으로 치지 않는다(5px 넘게 움직였으면). 폰(터치)은 원래대로 손가락으로 민다. */
-function 탭줄손잡이(bar) {
+function 탭줄손잡이(bar, 작은줄) {
   if (!bar || bar.dataset.grip) return;
   bar.dataset.grip = '1';
   const wrap = document.createElement('div'); wrap.className = 'tabwrap';
@@ -2858,7 +2858,7 @@ function 탭줄손잡이(bar) {
     b.addEventListener('click', () => bar.scrollBy({ left: 방향 * Math.max(120, bar.clientWidth * 0.7), behavior: 'smooth' })); wrap.appendChild(b); return b; };
   const L = 단추('l', '‹', -1), R = 단추('r', '›', 1);
   const 맞춤 = () => { const 끝 = bar.scrollWidth - bar.clientWidth;
-    L.hidden = bar.scrollLeft <= 2; R.hidden = 끝 <= 2 || bar.scrollLeft >= 끝 - 2; 탭줄위치 = bar.scrollLeft; };
+    L.hidden = bar.scrollLeft <= 2; R.hidden = 끝 <= 2 || bar.scrollLeft >= 끝 - 2; if (!작은줄) 탭줄위치 = bar.scrollLeft; };
   bar.addEventListener('scroll', 맞춤, { passive: true });
   new ResizeObserver(맞춤).observe(bar);
   맞춤();
@@ -4843,7 +4843,7 @@ function 주변판들(p) {
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 병원·약국을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null;
-      const 칸들 = [['hosp', '병원'], ['pharm', '약국'], ...(g ? [['shop', '상가 업종']] : []), ['all', '전체']];
+      const 칸들 = [['all', '전체'], ['hosp', '병원'], ['pharm', '약국'], ...(g ? [['shop', '상가 업종']] : [])];
       return 고르기단추('med', 칸들)
         + 고르기칸('med', 'hosp', c && c.complex_id ? `<div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>` : '', 칸들)
         + 고르기칸('med', 'pharm', c && c.complex_id ? `<div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>` : '', 칸들)
@@ -4908,13 +4908,14 @@ function 고른(ns, 칸들) {
   let v = 고르기값[ns];
   if (v == null) { try { v = localStorage.getItem('teomoony.pick.' + ns); } catch { v = null; } }
   if (v == null || v === '') v = 고르기기본[ns] || '';
-  if (칸들 && !칸들.some(([k]) => k === v)) v = 칸들.length ? 칸들[0][0] : 'all';
+  if (칸들 && !칸들.some(([k]) => k === v)) { const 첫 = 칸들.find(([k]) => k !== 'all'); v = 첫 ? 첫[0] : 'all'; }
   return v;
 }
 function 고르기단추(ns, 칸들) {
   const v = 고른(ns, 칸들);
-  return `<div class="edupick" role="tablist" data-pickns="${ns}" data-pickcur="${esc(v)}">${칸들.map(([k, 이름]) =>
-    `<button type="button" role="tab" data-pick="${esc(k)}"${k === v ? ' class="on" aria-selected="true"' : ' aria-selected="false"'}>${이름}</button>`).join('')}</div>`;
+  /* 10-31 20:00 사장님 "전체가 왼쪽에 · 탭 방식으로" — 위 탭 줄과 같은 모양의 작은 탭 줄(한 줄 · 넘치면 ‹ › · 끌기) */
+  return `<div class="tabs subtabs" role="tablist" data-pickns="${ns}" data-pickcur="${esc(v)}">${칸들.map(([k, 이름]) =>
+    `<button type="button" role="tab" class="tab" data-pick="${esc(k)}" aria-selected="${k === v}">${이름}</button>`).join('')}</div>`;
 }
 function 고르기칸(ns, 키, html, 칸들) {
   const v = 고른(ns, 칸들);
@@ -4926,17 +4927,17 @@ document.addEventListener('click', e => {
   const ns = b.parentElement.dataset.pickns, v = b.dataset.pick;
   고르기값[ns] = v;
   try { localStorage.setItem('teomoony.pick.' + ns, v); } catch { /* 편의 기능 */ }
-  b.parentElement.querySelectorAll('[data-pick]').forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); });
+  b.parentElement.querySelectorAll('[data-pick]').forEach(x => { x.setAttribute('aria-selected', x === b ? 'true' : 'false'); });
   const 판 = b.closest('.pane') || document;
   판.querySelectorAll(`.picksec[data-pickns="${ns}"]`).forEach(x => { x.hidden = !(v === 'all' || x.dataset.picksec.split(/\s+/).includes(v)); });
 });
-const 교통칸들 = [['subway', '지하철'], ['bus', '버스'], ['all', '전체']];
+const 교통칸들 = [['all', '전체'], ['subway', '지하철'], ['bus', '버스']];
 /* 상권 칸은 단지마다 다르다 — 있는 생활 묶음(병원·약국은 따로 탭) + 브랜드 + 그 밖 업종 + 전체 */
 function 상권칸들(pl, pb) {
   const 묶 = (pl && pl.length ? 생활묶음(pl) : []).filter(([g]) => g !== '병원·약국').map(([g]) => ['g:' + g, g]);
-  return [...묶, ...(pb && pb.length ? [['brand', '브랜드']] : []), ['many', '그 밖 업종'], ['all', '전체']];
+  return [['all', '전체'], ...묶, ...(pb && pb.length ? [['brand', '브랜드']] : []), ['many', '그 밖 업종']];
 }
-const 교육칸들 = [['cc', '어린이집'], ['kinder', '유치원'], ['elem', '초등학교'], ['mid', '중학교'], ['high', '고등학교'], ['acad', '학원'], ['all', '전체']];
+const 교육칸들 = [['all', '전체'], ['cc', '어린이집'], ['kinder', '유치원'], ['elem', '초등학교'], ['mid', '중학교'], ['high', '고등학교'], ['acad', '학원']];
 
 function renderDetail(payload) {
   lastDetail = payload;
@@ -5462,13 +5463,14 @@ function renderDetail(payload) {
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   }
 
-  $('#detail').querySelectorAll('.tab').forEach(b =>
-    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs') || {}).scrollLeft || 0; detailTab = b.dataset.tab; renderDetail(lastDetail); }));
+  $('#detail').querySelectorAll('.tab[data-tab]').forEach(b =>   /* 10-31: 탭 안 작은 탭 줄(.subtabs)은 여기서 안 받는다 */
+    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs:not(.subtabs)') || {}).scrollLeft || 0; detailTab = b.dataset.tab; renderDetail(lastDetail); }));
   /* ★ 2026-10-24 사장님 "상권 탭을 누르면 단지정보 탭으로 가" — 다시 그리면 탭 줄(폰에서 가로로 넘김)이 맨 왼쪽으로 돌아가
        오른쪽 끝 탭(상권 · 병원·약국)을 눌러도 '단지정보 · 동·호 …' 만 보였다. 누르기 전 위치를 되살리고, 고른 탭이 안 보이면 보이게 민다. */
   { const 줄위치 = 탭줄위치;   /* 감싸면(요소를 옮기면) 가로 위치가 0 으로 돌아간다 — 감싼 뒤에 되살린다 */
-    탭줄손잡이($('#detail .tabs')); 탭줄위치 = 줄위치; }
-  { const bar = $('#detail .tabs'), on = bar && bar.querySelector('.tab[aria-selected="true"]');
+    탭줄손잡이($('#detail .tabs:not(.subtabs)')); 탭줄위치 = 줄위치; }
+  document.querySelectorAll('#detail .subtabs').forEach(b => 탭줄손잡이(b, true));   // 10-31 탭 안 작은 탭 줄
+  { const bar = $('#detail .tabs:not(.subtabs)'), on = bar && bar.querySelector('.tab[aria-selected="true"]');
     if (bar && on) {
       bar.scrollLeft = 탭줄위치;
       if (on.offsetLeft < bar.scrollLeft || on.offsetLeft + on.offsetWidth > bar.scrollLeft + bar.clientWidth)
