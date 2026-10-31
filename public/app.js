@@ -1339,8 +1339,9 @@ function renderNewbuild(data) {
     ${tradeBlocks}
     ${목록.length ? '' : '<p class="muted" style="padding:6px 2px">이 지번에 매칭된 실거래가 없습니다.</p>'}
     <div class="ahbox" data-ah="k|${esc(n.kapt_code)}"></div>
-    ${costBlock(cost)}`;
+    ${costBlock(cost, { kapt코드: n.kapt_code, hhld: 999 })}`;
   분양채우기();
+  관리비추이채우기();
 }
 
 document.addEventListener('click', e => {
@@ -3799,6 +3800,11 @@ function dongLabel(d, total) {
       사람값비중 27.3% 인데 위탁을 넣으면 81.6% 다. 다만 138개 중 1개뿐이라
       예외 표시(`급여없음`)로만 알린다. */
 function costBlock(co, ctx) {
+  /* 10-31 관리비 추이(K-apt 자료실 엑셀) 그릇 — 이어진 K-apt 코드가 있을 때만. API 관리비가 없는 단지는 이 그릇이 엑셀의 마지막 달을 대신 보인다 */
+  const 추이 = ctx && ctx.kapt코드 ? `<div class="costhist" data-kapt="${esc(ctx.kapt코드)}" data-api="${co ? 1 : 0}"></div>` : '';
+  return costBlock0(co, ctx) + 추이;
+}
+function costBlock0(co, ctx) {
   if (!co) {
     /* **빈칸은 '왜 없지' 를 남긴다** — 이 함수 아래쪽(값 없음)에는 그 원칙이
        지켜져 있었는데, 한 단계 앞인 '연결 실패' 만 설명 없이 사라지고 있었다.
@@ -3814,7 +3820,7 @@ function costBlock(co, ctx) {
     if (hh < 150) return '';   // K-apt 대상이 아니다. 단독주택이 절대다수라 안내도 잡음이 된다
     const inLawd = Number((ctx && ctx.kapt) || 0);
     /* 2026-10-23: K-apt 가 **이어져 있는데** 관리비만 없으면 '연결이 확정되지 않았다' 는 틀린 말이다(관악드림타운) — 그 경우를 가른다 */
-    if (ctx && ctx.이음) return sect('관리비', 'cost') + `<p class="note">${Number(ctx.관리비구)
+    if (ctx && ctx.이음) return sect('관리비', 'cost') + `<p class="note costnone">${Number(ctx.관리비구)
       ? gapCell('', 'UNSURE', '이 K-apt 단지의 관리비가 없습니다(공시 안 함인지 못 받음인지 모름)')
       : gapCell('', 'SCOPE', '이 구의 K-apt 관리비를 아직 받지 않았습니다')}</p>`;
     return sect('관리비', 'cost') + `<p class="note">${
@@ -3870,6 +3876,56 @@ function costBlock(co, ctx) {
     tbl(ind, '개별사용료 — 사용량 통과분. <b>단지 간 비교에 쓰지 않는다</b> (계약 형태가 단지마다 다르다)');
 }
 
+/* 10-31 사장님 "관리비도 엑셀로" · "ㄱㄱ" — K-apt 자료실 연도별 엑셀(2015 ~ · 주 1회)의 달별 세대당 공용관리비 추이.
+   값 = 엑셀의 '공용관리비(합계)' ÷ 지금 K-apt 세대수. API 관리비가 없는 단지는 엑셀 마지막 달을 대신 보인다(출처를 적는다). */
+const 관리비추이기억 = new Map();
+async function 관리비추이채우기() {
+  const box = document.querySelector('#detail .costhist');
+  if (!box) return;
+  const code = box.dataset.kapt;
+  let r = 관리비추이기억.get(code);
+  if (!r) {
+    try { r = await fetch(`/api/kapt/${encodeURIComponent(code)}/cost-hist`).then(x => x.json()); } catch (e) { return; }
+    if (!r || r.error) return;
+    관리비추이기억.set(code, r);
+  }
+  const 지금 = document.querySelector('#detail .costhist');
+  if (!지금 || 지금.dataset.kapt !== code) return;
+  const 점 = (r.달 || []).filter(x => x.세대당 > 0);
+  if (!점.length) return;
+  const won = n => (n == null ? '—' : fmt(Math.round(n)) + '원');
+  const ym = v => `${String(v).slice(0, 4)}.${String(v).slice(4, 6)}`;
+  const 끝 = 점[점.length - 1];
+  let 머리 = '';
+  if (지금.dataset.api !== '1') {
+    /* API 관리비가 없는 단지 — 엑셀 마지막 달로 대신(출처 적음) */
+    document.querySelectorAll('#detail .costnone').forEach(e => { e.hidden = true; });
+    머리 = `<dl><dt>세대당 공용관리비</dt><dd><b>${won(끝.세대당)}</b> <span class="muted">/ 월 · ${esc(ym(끝.ym))} · K-apt 자료실 엑셀</span></dd>${
+      끝.장충월세대당 ? `<dt>장기수선충당금</dt><dd>월 부과 세대당 ${won(끝.장충월세대당)}${끝.장충총 ? ` <span class="muted">· 적립 ${won(끝.장충총)}</span>` : ''}</dd>` : ''}${
+      r.분양임대 ? `<dt>분양 / 임대</dt><dd>${esc(r.분양임대)}</dd>` : ''}</dl>`;
+  }
+  /* 그림: 세대당 공용관리비 달별 선 하나 — 축 끝 두 값과 처음 · 끝 달만 적는다 */
+  const W = 320, H = 92, L = 4, R = 4, T = 10, B = 16;
+  const vs = 점.map(x => x.세대당), lo = Math.min(...vs), hi = Math.max(...vs), 폭 = Math.max(1, hi - lo);
+  const X = i => L + (점.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (점.length - 1));
+  const Y = v => T + (H - T - B) * (1 - (v - lo) / 폭);
+  const 선 = 점.map((x, i) => `${X(i).toFixed(1)},${Y(x.세대당).toFixed(1)}`).join(' ');
+  const 열두 = 점.slice(-12), 평균 = 열두.reduce((t, x) => t + x.세대당, 0) / 열두.length;
+  const 작년 = 점.find(x => Number(x.ym) === Number(끝.ym) - 100);
+  const 변화 = 작년 ? Math.round((끝.세대당 - 작년.세대당) / 작년.세대당 * 1000) / 10 : null;
+  const 제목있음 = !!document.querySelector('#detail .costnone');   // '관리비' 제목은 위(costBlock0)가 이미 그렸다
+  지금.innerHTML = (지금.dataset.api !== '1' ? (제목있음 ? '' : sect('관리비', 'cost', ` <span class="muted">${esc(ym(끝.ym))}</span>`)) + 머리 : '') + `
+    <div class="sub">관리비 추이 — 세대당 공용관리비 <span class="muted">${esc(ym(점[0].ym))} ~ ${esc(ym(끝.ym))} · ${fmt(점.length)}달</span></div>
+    <svg class="chist" viewBox="0 0 ${W} ${H}" role="img" aria-label="세대당 공용관리비 ${esc(ym(점[0].ym))}부터 ${esc(ym(끝.ym))}까지, 최저 ${won(lo)} 최고 ${won(hi)}">
+      <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" class="ax"/>
+      <polyline points="${선}" class="ln"/>
+      ${점.map((x, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(x.세대당).toFixed(1)}" r="${점.length > 60 ? 1.6 : 2.4}" class="pt"><title>${esc(ym(x.ym))} ${won(x.세대당)}</title></circle>`).join('')}
+      <text x="${L}" y="${H - 3}" class="tk">${esc(ym(점[0].ym))}</text><text x="${W - R}" y="${H - 3}" class="tk" text-anchor="end">${esc(ym(끝.ym))}</text>
+      <text x="${W - R}" y="${T - 2}" class="tk" text-anchor="end">최고 ${won(hi)}</text>
+    </svg>
+    <p class="srcline">최근 12달 평균 <b>${won(평균)}</b>${변화 == null ? '' : ` · 1년 전 같은 달보다 <b>${변화 > 0 ? '+' : ''}${변화}%</b>`} · 최저 ${won(lo)}
+      · 출처: K-apt 자료실 관리비정보(연도별 엑셀 · 주 1회) '공용관리비(합계)' ÷ 지금 세대수${r.세대 ? `(${fmt(r.세대)})` : ''} · 엑셀은 K-apt 가 '참고자료' 로 내는 것이라 위 항목별 값(OpenAPI)과 조금 다를 수 있습니다</p>`;
+}
 function kaptBlock(k) {
   if (!k) return '';
   const r = [];
@@ -5114,7 +5170,7 @@ function renderDetail(payload) {
   /* 사는 정보 — K-apt 축. 대장에도 실거래에도 없는 것들이 여기 있다. */
   const _관리 = `
     ${kaptBlock(kapt)}
-    ${costBlock(cost, { hhld: (spec && spec.세대) || c.hhld_cnt_sum, ...(scope || {}), 이음: Boolean(kapt) })}`;
+    ${costBlock(cost, { hhld: (spec && spec.세대) || c.hhld_cnt_sum, ...(scope || {}), 이음: Boolean(kapt), kapt코드: kapt && kapt.kapt_code })}`;
   /* ★ 2026-10-21 QA: 150세대 미만이면 두 칸이 **둘 다 일부러 비어** 탭이 통째로 빈 화면이었다
      (리얼파크2차 16세대). 칸마다 안내를 띄우면 잡음이지만, 탭 전체가 비면 '왜 비었나' 를 한 줄 적는다. */
   const paneM = V ? 대장전말(V, '관리비 · K-apt') : _관리.trim() ? _관리 : `<p class="note">${gapCell('', 'NA',
@@ -5245,6 +5301,7 @@ function renderDetail(payload) {
   동공고그리기(c.sigungu_cd && c.bjdong_cd ? `${c.sigungu_cd}${c.bjdong_cd}` : null);   // 이 법정동의 단지 밖 청약 공고
   if (c.complex_id != null) {
   주변카드채우기(c);       // 10-31 단지정보 탭 아래 '주변 단지' · '주변 분양 · 공사 중'
+  관리비추이채우기();      // 10-31 관리 탭 관리비 아래 '관리비 추이'(K-apt 자료실 엑셀)
   어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
   병원채우기();            // 심평원 병원·약국 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
@@ -5810,6 +5867,7 @@ const 정책 = [
     '관리비가 비어 있는 까닭을 가릅니다 — <b>이 구의 관리비를 아직 안 받음</b>(SCOPE) · <b>K-apt 에 이어져 있는데 그 단지 관리비가 없음</b>(같은 구는 받았으니 그 단지가 공시하지 않았거나 그 단지만 못 받은 것 — 둘을 가를 기록은 아직 없음) · <b>K-apt 연결이 확정되지 않음</b>(같은 날 승인된 단지가 여럿이라 버림 — 추측으로 붙이면 다른 단지의 관리비가 사실처럼 보입니다).',
     '교통 탭의 \'K-apt 신고\' 역 · 도보 시간은 관리주체가 적은 값이라, 단지 중심점에서 잰 직선거리와 잰 방법이 다릅니다.',
     '건축물대장이 아직 없는 신축은 K-apt 정보만 보입니다(동 목록 · 필지 · 공시지가는 대장에서 나오므로 없음). 대장이 공개되면 정식 단지로 바뀝니다. 한 지번에 여러 단지가 있으면 실거래 신고의 단지 일련번호로 가릅니다.',
+    '<b>관리비 추이</b>(관리 탭): K-apt 자료실이 매주 올리는 연도별 관리비 엑셀(2015년~)의 \'공용관리비(합계)\' 를 지금 세대수로 나눈 달별 선입니다. 위 세대당 공용관리비와 항목 표는 OpenAPI 값이고, 엑셀은 K-apt 가 참고자료로 내는 것이라 두 값이 조금 다를 수 있습니다 — 단지가 일반관리비를 세부 없이 합계로만 올리면 엑셀 쪽이 큽니다(2025년 단지·달의 약 6.5%).',
   ] },
   { 키: 'permit', 제목: '건축인허가 (국토교통부 세움터)', 글: [
     '허가 건수는 건물 수가 아닙니다 — 설계변경·취소로 한 지번에 여러 건이 쌓입니다.',

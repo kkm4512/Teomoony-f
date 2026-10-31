@@ -4958,6 +4958,33 @@ async function costOf(pool, kaptCode) {
            peer: peer.recordset[0] || null };
 }
 
+/* ---------- 관리비 추이 · 엑셀 대체 (2026-10-31 사장님 "관리비도 엑셀로" · "ㄱㄱ") ----------
+   K-apt 자료실 연도별 엑셀(393 silver.kapt_cost_xlsx · 2015 ~ 올해 · 주 1회)의 달별 합계를 그대로 준다.
+   ★ 세대당 = 그 달 합계 ÷ 지금 K-apt 세대수(달별 세대수는 엑셀에 없다). 값은 엑셀 원문 합계 — API 세부 항목을 더한 값과 다를 수 있다(정책).
+   ★ API 관리비(silver.kapt_cost)가 하나도 없는 단지는 이 엑셀의 마지막 달을 '최신' 으로 같이 준다(화면이 출처를 적는다). */
+app.get('/api/kapt/:code/cost-hist', async (req, res) => {
+  const code = String(req.params.code || '');
+  if (!/^[A-Za-z0-9]{1,20}$/.test(code)) return res.status(400).json({ error: 'bad kapt_code' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('c', sql.VarChar(20), code).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('silver.kapt_cost_xlsx') IS NULL BEGIN SELECT TOP 0 ym = '' ; SELECT TOP 0 x = 1; SELECT TOP 0 x = 1; RETURN; END
+      SELECT x.ym, 공용 = x.[공용관리비(합계)], 개별 = x.[개별사용료계], 장충월 = x.[장충금 월부과액], 장충총 = x.[장충금 총적립금액]
+        FROM silver.kapt_cost_xlsx x WHERE x.kapt_code = @c ORDER BY x.ym;
+      SELECT 세대 = NULLIF(k.hhld_cnt, 0), 분양임대 = k.code_sale_nm, 관리방식 = k.code_mgr_nm, 사용승인 = k.kapt_usedate
+        FROM silver.kapt_complex k WHERE k.kapt_code = @c AND k.is_current = 1;
+      SELECT API = CASE WHEN EXISTS (SELECT 1 FROM silver.kapt_cost WHERE kapt_code = @c) THEN 1 ELSE 0 END,
+             파일 = (SELECT TOP 1 파일 FROM silver.kapt_cost_xlsx WHERE kapt_code = @c ORDER BY ym DESC);`);
+    const 달 = r.recordsets[0] || [], 단지 = (r.recordsets[1] || [])[0] || {}, 덤 = (r.recordsets[2] || [])[0] || {};
+    const 세대 = Number(단지.세대) || null;
+    const 세대당 = v => (세대 && v != null ? Math.round(Number(v) / 세대) : null);
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 출처: 'K-apt 자료실 관리비정보(연도별 엑셀 · 주 1회)', 파일: 덤.파일 || null, 세대, API있음: !!덤.API, ...단지,
+      달: 달.map(x => ({ ym: x.ym, 공용: x.공용 == null ? null : Number(x.공용), 세대당: 세대당(x.공용), 개별세대당: 세대당(x.개별),
+                         장충월세대당: 세대당(x.장충월), 장충총: x.장충총 == null ? null : Number(x.장충총) })) });
+  } catch (e) { fail(res, e, 'kapt-cost-hist'); }
+});
+
 /* ---------- 신축 상세 ----------
    대장이 없으므로 동 목록·필지·공시지가가 없다. 그 자리를 비워 두는 대신
    "왜 없는지" 를 화면이 말할 수 있도록 축별 유무를 같이 내려보낸다. */
