@@ -2092,3 +2092,7 @@ table.cned td.sm { line-height: 1.6; }
 /* 2026-10-30 공사 중 건물 핀(건축허가 · 착공 · 사용승인 전) — 승인 핀과 같은 꼴, 색만 다르게 */
 .pbmark { border-style: dashed !important; }
 .pbmark b { color: #7c3aed !important; }
+/* 10-31 보유세 계산값(호 상세) */
+.hm-tax{margin:10px 0 4px;padding-top:8px;border-top:1px dashed var(--line)}
+.hm-taxd summary{cursor:pointer;color:var(--muted,#888)}
+.hm-taxd .hm-a td:first-child{padding-right:10px}
