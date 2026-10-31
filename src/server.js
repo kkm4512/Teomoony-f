@@ -2136,17 +2136,17 @@ app.get('/api/suggest', async (req, res) => {
                           AND c.rep_pnu <= CAST(d.lawd_cd + '999999999' AS CHAR(19))) b
          ORDER BY d.순, d.emd_nm, d.lawd_cd;
         /* 3 행정동 */
-        SELECT TOP 5 a.adm_cd_sgis, a.year, a.adm_nm, a.emd_nm, a.mois_nm, a.연결비율,
+        SELECT TOP 5 a.adm_cd_sgis, a.year, a.adm_nm, a.emd_nm, mois_nm = k.행정동명, a.연결비율,
                minx = a.bbox_minx, miny = a.bbox_miny, maxx = a.bbox_maxx, maxy = a.bbox_maxy,
                전체 = COUNT(*) OVER (),
-               걸린이름 = CASE WHEN a.emd_nm LIKE @q THEN a.emd_nm ELSE a.mois_nm END,
-               /* 308: 경계(SGIS)는 해마다라 늦다 — 최신 연계정보 분기에 이 행정구역코드가 없으면 '지금은 없는 동' */
-               지금없음 = CASE WHEN @최신분기 IS NOT NULL AND NOT EXISTS (SELECT 1 FROM silver.region_link l
-                                 WHERE l.개정일자 = @최신분기 AND l.행정구역코드 = a.adm_cd_sgis) THEN 1 ELSE 0 END
+               걸린이름 = CASE WHEN a.emd_nm LIKE @q THEN a.emd_nm ELSE k.행정동명 END,
+               /* 397 (2026-10-31): 경계(SGIS)는 해마다라 늦다 — 공식 연계로 이은 행안부 행정동이 말소됐으면 '지금은 없는 동' */
+               지금없음 = CASE WHEN k.현행 = 0 THEN 1 ELSE 0 END
           FROM silver.adm_boundary a
+          LEFT JOIN gold.adm_link k ON k.adm_cd_sgis = a.adm_cd_sgis AND k.year = a.year
          WHERE a.year = (SELECT MAX(year) FROM silver.adm_boundary)
-           AND (a.emd_nm LIKE @q OR a.mois_nm LIKE @q)
-         ORDER BY CASE WHEN a.emd_nm = @raw OR a.mois_nm = @raw THEN 0 WHEN a.emd_nm LIKE @p THEN 1 ELSE 2 END, a.emd_nm, a.adm_cd_sgis;
+           AND (a.emd_nm LIKE @q OR k.행정동명 LIKE @q)
+         ORDER BY CASE WHEN a.emd_nm = @raw OR k.행정동명 = @raw THEN 0 WHEN a.emd_nm LIKE @p THEN 1 ELSE 2 END, a.emd_nm, a.adm_cd_sgis;
         /* 4 단지 — 이름이 진짜 이름인 것만(주소로 대신한 이름은 뺀다). 단지코드 숫자면 그것도 */
         /* ★ OR 로 엮으면 거른 색인(ix_complex_nm_real)을 못 탄다 - 둘로 나눠 UNION ALL */
         SELECT TOP 5 c.complex_id, c.complex_nm, c.rep_plat_plc, c.hhld_cnt_sum, c.dong_cnt,
@@ -2301,9 +2301,12 @@ app.get('/api/adms/:cd/geo', async (req, res) => {
   try {
     const pool = await getPool();
     const r = await pool.request().input('cd', sql.VarChar(10), cd).query(`
-      SELECT TOP 1 adm_cd_sgis, year, adm_nm, emd_nm, mois_nm, 상가수, 연결비율, 갈림내역, geojson,
-             연결 = CASE WHEN 연결비율 >= 90 THEN N'확인' WHEN 연결비율 IS NOT NULL THEN N'갈림' END
-        FROM silver.adm_boundary WHERE adm_cd_sgis = @cd ORDER BY year DESC`);
+      SELECT TOP 1 a.adm_cd_sgis, a.year, a.adm_nm, a.emd_nm, mois_nm = k.행정동명, a.상가수, a.연결비율, a.갈림내역, a.geojson,
+             연결 = CASE WHEN k.행정동코드 IS NOT NULL THEN N'확인' END,
+             행정동표시 = k.표시, 현행 = CAST(k.현행 AS INT), 말소일자 = k.말소일자
+        FROM silver.adm_boundary a
+        LEFT JOIN gold.adm_link k ON k.adm_cd_sgis = a.adm_cd_sgis AND k.year = a.year
+       WHERE a.adm_cd_sgis = @cd ORDER BY a.year DESC`);
     const d = r.recordset[0];
     if (!d || !d.geojson) return res.status(404).json({ error: 'not found' });
     const { geojson, ...p } = d;
@@ -4620,7 +4623,7 @@ app.get('/api/near/cards', async (req, res) => {
       const m = 직선m(lat, lng, x.lat, x.lng); if (m <= 1500) 단지.push({ ...x, m });
     }
     단지.sort((a, b) => a.m - b.m || b.세대 - a.세대);
-    const 동 = lawd && 색.동.get(lawd);
+    const 동 = lawd && 색.동.get((색.바꿈 && 색.바꿈.get(lawd)) || lawd);
     const pool = await getPool();
     const r = await pool.request().input('lat', sql.Float, lat).input('lng', sql.Float, lng).input('id', sql.Int, id).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT g.complex_id, g.종류, g.이름, g.lat, g.lng,
@@ -5094,10 +5097,13 @@ app.get('/api/adms', async (req, res) => {
       .input('x0', sql.Decimal(12, 7), bbox[0]).input('y0', sql.Decimal(12, 7), bbox[1])
       .input('x1', sql.Decimal(12, 7), bbox[2]).input('y1', sql.Decimal(12, 7), bbox[3])
       .query(`
+        /* 397 (2026-10-31): 행안부 코드 · 이름은 공식 연계(gold.adm_link)로 — 상가 다수결 추정은 쓰지 않는다 */
         SELECT a.adm_cd_sgis, a.year, a.adm_nm, a.emd_nm, a.centroid_lat, a.centroid_lng,
-               a.adm_cd_mois, a.mois_nm, a.상가수, a.연결상가, a.연결비율, a.갈림내역, a.geojson,
-               연결 = CASE WHEN a.연결비율 >= 90 THEN N'확인' WHEN a.연결비율 IS NOT NULL THEN N'갈림' END
+               adm_cd_mois = LEFT(k.행정동코드, 8), mois_nm = k.행정동명, a.상가수, a.연결상가, a.연결비율, a.갈림내역, a.geojson,
+               연결 = CASE WHEN k.행정동코드 IS NOT NULL THEN N'확인' END,
+               행정동표시 = k.표시, 현행 = CAST(k.현행 AS INT), 말소일자 = k.말소일자
           FROM silver.adm_boundary a
+          LEFT JOIN gold.adm_link k ON k.adm_cd_sgis = a.adm_cd_sgis AND k.year = a.year
          WHERE a.year = (SELECT MAX(year) FROM silver.adm_boundary)
            AND a.bbox_minx <= @x1 AND a.bbox_maxx >= @x0
            AND a.bbox_miny <= @y1 AND a.bbox_maxy >= @y0`);
@@ -5113,6 +5119,8 @@ app.get('/api/adms', async (req, res) => {
         /* 갈린 곳은 행안부 코드를 **안 준다** - 받은 쪽이 그걸로 잇지 못하게 */
         adm_cd_mois: d.연결 === '확인' ? d.adm_cd_mois : null,
         mois_nm: d.mois_nm,
+        /* 397: 행안부 공식 상태 — 현행 0 이면 경계(통계청 해마다)가 행안부 변경보다 늦은 것 */
+        행정동표시: d.행정동표시 || null, 현행: d.현행 == null ? null : Number(d.현행), 말소일자: d.말소일자 || null,
       },
     }));
     res.json({ type: 'FeatureCollection', 출처: '통계청 SGIS 행정구역 경계', features });
@@ -8612,34 +8620,42 @@ function 지역색인() {
       const pool = await getPool();
       const r = await pool.request().input('m', sql.Int, 사이트맵_최소세대).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT c.complex_id, 이름 = CASE WHEN c.complex_nm = c.rep_plat_plc AND al.실거래이름 IS NOT NULL THEN al.실거래이름 ELSE c.complex_nm END,
-               세대 = c.hhld_cnt_sum, lawd = LEFT(c.rep_pnu, 10), 연 = LEFT(c.oldest_use_apr, 4), mx = t.max_amt,
+               /* 396: 대표 PNU 코드가 옛 코드면 단지 중심점이 든 지금 필지의 코드(gold.complex_lawd_now)로 묶는다 */
+               세대 = c.hhld_cnt_sum, lawd = COALESCE(nw.지금코드, LEFT(c.rep_pnu, 10)), 연 = LEFT(c.oldest_use_apr, 4), mx = t.max_amt,
                lat = CAST(c.centroid_lat AS FLOAT), lng = CAST(c.centroid_lng AS FLOAT)
           FROM gold.complex c
+          LEFT JOIN gold.complex_lawd_now nw ON nw.complex_id = c.complex_id
           LEFT JOIN gold.complex_alias al ON al.complex_id = c.complex_id
           LEFT JOIN gold.complex_trade_max t ON t.complex_id = c.complex_id AND t.종류 = 'ALL'
          WHERE c.merged_into IS NULL AND c.is_active = 1 AND c.hhld_cnt_sum >= @m AND LEN(c.rep_pnu) = 19;
-        SELECT lawd_cd, sido_nm, sgg_nm, emd_nm, ri_nm, is_abolished FROM meta.lawd_code ORDER BY is_abolished DESC;`);
+        /* 396 (2026-10-31): 이름은 사전 + 행안부 이력(말소 포함) — 사전에 없는 옛 코드도 이름이 있다.
+           지금코드 = 옛 코드가 확실히 이어진 지금 코드(gold.bdong_succ_code) — 그 단지는 지금 동네에 묶는다. 못 이은 옛 코드는 '옛 ○○동' 으로 따로 */
+        SELECT lawd_cd, sido_nm, sgg_nm, emd_nm, ri_nm, 현행 = CAST(현행 AS INT), 지금코드 FROM gold.v_lawd_name ORDER BY 현행;`);
       const 이름표 = new Map();   // 없어진 코드 먼저 → 지금 코드가 덮는다
       for (const x of r.recordsets[1]) 이름표.set(x.lawd_cd, x);
-      const 시도 = new Map(), 구 = new Map(), 동 = new Map(), 단지 = new Map();
+      const 시도 = new Map(), 구 = new Map(), 동 = new Map(), 단지 = new Map(), 바꿈 = new Map();
       const 이름 = cd => 이름표.get(cd) || {};
+      const 옛 = (n, t) => (t && Number(n.현행) === 0 ? '옛 ' + t : t);
       for (const x of r.recordsets[0]) {
-        const lawd = String(x.lawd || ''); if (!/^\d{10}$/.test(lawd)) continue;
+        const 원 = String(x.lawd || ''); if (!/^\d{10}$/.test(원)) continue;
+        const n0 = 이름(원);
+        const lawd = (Number(n0.현행) === 0 && /^\d{10}$/.test(String(n0.지금코드 || ''))) ? String(n0.지금코드) : 원;
+        if (lawd !== 원) 바꿈.set(원, lawd);
         const sgg = lawd.slice(0, 5), sido = lawd.slice(0, 2);
         const 하나 = { id: x.complex_id, 이름: x.이름 || `단지 ${x.complex_id}`, 세대: Number(x.세대) || 0, 연: x.연 || null, mx: x.mx ? Number(x.mx) : null, lawd,
                       lat: x.lat == null ? null : Number(x.lat), lng: x.lng == null ? null : Number(x.lng) };
         단지.set(하나.id, 하나);
-        if (!동.has(lawd)) { const n = 이름(lawd); 동.set(lawd, { cd: lawd, 이름: [n.emd_nm, n.ri_nm].filter(Boolean).join(' ') || lawd, sgg, 단지: [] }); }
+        if (!동.has(lawd)) { const n = 이름(lawd); 동.set(lawd, { cd: lawd, 이름: 옛(n, [n.emd_nm, n.ri_nm].filter(Boolean).join(' ')) || lawd, sgg, 단지: [] }); }
         동.get(lawd).단지.push(하나);
-        if (!구.has(sgg)) 구.set(sgg, { cd: sgg, 이름: 이름(sgg + '00000').sgg_nm || 이름(lawd).sgg_nm || sgg, sido, 동: [] });
-        if (!시도.has(sido)) 시도.set(sido, { cd: sido, 이름: 이름(sido + '00000000').sido_nm || 이름(lawd).sido_nm || sido, 구: [] });
+        if (!구.has(sgg)) { const n = 이름(sgg + '00000'); 구.set(sgg, { cd: sgg, 이름: 옛(n, n.sgg_nm) || 이름(lawd).sgg_nm || sgg, sido, 동: [] }); }
+        if (!시도.has(sido)) { const n = 이름(sido + '00000000'); 시도.set(sido, { cd: sido, 이름: 옛(n, n.sido_nm) || 이름(lawd).sido_nm || sido, 구: [] }); }
       }
       for (const d of 동.values()) { d.단지.sort((a, b) => b.세대 - a.세대 || a.id - b.id); 구.get(d.sgg).동.push(d.cd); }
       for (const g of 구.values()) { g.동.sort((a, b) => 동.get(a).이름.localeCompare(동.get(b).이름, 'ko')); 시도.get(g.sido).구.push(g.cd); }
       for (const t of 시도.values()) t.구.sort((a, b) => 구.get(a).이름.localeCompare(구.get(b).이름, 'ko'));
       const 수 = new Map();   // 구 · 시도 단지 수
       for (const d of 동.values()) { 수.set(d.sgg, (수.get(d.sgg) || 0) + d.단지.length); 수.set(d.sgg.slice(0, 2), (수.get(d.sgg.slice(0, 2)) || 0) + d.단지.length); }
-      지역색인값 = { 때: Date.now(), 시도, 구, 동, 단지, 수 };
+      지역색인값 = { 때: Date.now(), 시도, 구, 동, 단지, 수, 바꿈 };
       return 지역색인값;
     })().finally(() => { 지역색인중 = null; });
   }
@@ -8648,6 +8664,7 @@ function 지역색인() {
 /* 단지 쪽 아래: 지역 길(지역 › 시도 › 시군구 › 동) + 같은 동네 단지(세대 큰 순 12곳, 모자라면 같은 시군구에서) */
 function 동네링크(색, lawd, 나) {
   if (!색 || !/^\d{10}$/.test(String(lawd || ''))) return '';
+  lawd = (색.바꿈 && 색.바꿈.get(lawd)) || lawd;   // 396: 옛 코드면 이어진 지금 코드로
   const 동 = 색.동.get(lawd), 구 = 색.구.get(lawd.slice(0, 5)), 시도 = 색.시도.get(lawd.slice(0, 2));
   if (!구 || !시도) return '';
   const 길 = [`<a href="/r">지역별 단지</a>`, `<a href="/r/${시도.cd}">${h(시도.이름)}</a>`, `<a href="/r/${구.cd}">${h(구.이름)}</a>`]
@@ -8769,7 +8786,10 @@ app.get('/c/:id', async (req, res, next) => {
           ${tr.map(t => `<tr><td>${h(날짜표기(t.deal_ymd))}</td><td>${h(Number(t.exclu_use_ar || 0).toFixed(2))}㎡</td><td>${h(t.floor_no ?? '')}</td><td>${h(억표기(t.deal_amount))}</td></tr>`).join('')}
         </tbody></table>` : ''}
         <p class="srcline">출처: 건축물대장(국토교통부) · 아파트·연립 매매 실거래가(국토교통부). 자세한 내용은 화면을 불러오면 보입니다.</p>
-        ${동네링크(await 지역색인().catch(() => null), String(c.rep_pnu || '').slice(0, 10), id)}
+        ${await (async () => {   /* 396: 색인에 있으면 색인의 동(옛 코드면 지금 위치의 동), 없으면 대표 PNU 코드 */
+          const 색 = await 지역색인().catch(() => null);
+          return 동네링크(색, (색 && 색.단지.get(id) || {}).lawd || String(c.rep_pnu || '').slice(0, 10), id);
+        })()}
       </article>`;
 
     const 쪽 = { 제목, 설명, url, ld, 요약 };
@@ -8790,6 +8810,8 @@ app.get(['/r', '/r/', '/r/:cd'], async (req, res, next) => {
     let 쪽 = 쪽기억꺼내기(기억키);
     if (!쪽) {
       const 색 = await 지역색인();
+      /* 396: 옛 법정동 코드 주소로 오면 이어진 지금 코드 쪽으로 넘긴다(동이 바뀌어도 옛 링크가 살아 있게) */
+      if (cd.length === 10 && 색.바꿈 && 색.바꿈.get(cd)) return res.redirect(301, '/r/' + 색.바꿈.get(cd));
       const 억 = v => (v ? 억표기(v) : '');
       const 단지줄 = xs => `<table class="mini ssr-list"><thead><tr><th>단지</th><th>세대</th><th>사용승인</th><th>최근 3년 최고 매매</th></tr></thead><tbody>${xs.map(x =>
         `<tr><td><a href="/c/${x.id}">${h(x.이름)}</a></td><td>${x.세대.toLocaleString('ko-KR')}</td><td>${h(x.연 || '')}</td><td>${h(억(x.mx))}</td></tr>`).join('')}</tbody></table>`;

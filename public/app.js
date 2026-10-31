@@ -1631,8 +1631,10 @@ async function loadAdms() {
       L.marker([p.centroid_lat, p.centroid_lng], {
         icon: L.divIcon({ className: 'cmark-wrap', iconSize: null, iconAnchor: [0, 0],
           html: `<div class="lmark amark"><b>${esc(p.emd_nm || '')}</b></div>` }),
+        /* 397 (2026-10-31): 경계가 이어진 행안부 행정동이 그 뒤 없어졌으면(통계청 새 경계가 나오기 전) 그렇게 적는다 */
         title: [`${p.adm_nm} (행정동)`, `경계 출처 통계청 SGIS ${p.year}`,
-                '누르면 확대합니다'].join(' · '),
+                p.현행 === 0 && p.행정동표시 ? `행정안전부 기준 ${p.행정동표시} — 새 경계는 통계청이 아직 내지 않았습니다` : null,
+                '누르면 확대합니다'].filter(Boolean).join(' · '),
         우선: Number(p.상가수) || 0,
       }).on('click', function () {
         map.setView(this.getLatLng(), LAWD_ZOOM);

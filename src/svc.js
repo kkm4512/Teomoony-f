@@ -306,6 +306,8 @@ const 행정동 = 층('adms', async (req, b) => {
       갈림내역: d.연결 === '갈림' ? d.갈림내역 : null,
       adm_cd_mois: d.연결 === '확인' ? d.adm_cd_mois : null,
       mois_nm: d.mois_nm,
+      /* 397: 행안부 공식 상태 — 현행 0 이면 경계(통계청 해마다)가 행안부 변경보다 늦은 것 */
+      행정동표시: d.행정동표시 || null, 현행: d.현행 == null ? null : Number(d.현행), 말소일자: d.말소일자 || null,
     },
   }));
   return { type: 'FeatureCollection', 출처: '통계청 SGIS 행정구역 경계', features };
