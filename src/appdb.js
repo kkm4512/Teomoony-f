@@ -62,12 +62,12 @@ async function 이용현황(a) {   // { 오늘, 이레, 보름, d0, d1 } — 'YY
     q(`SELECT "동작", sum(CASE WHEN "시각" >= $1::timestamp THEN "횟수" ELSE 0 END)::int AS "오늘",
               sum(CASE WHEN "시각" >= $2::timestamp THEN "횟수" ELSE 0 END)::int AS "이레", sum("횟수")::int AS "전체"
          FROM app.usage_hour WHERE "갈래" IN ('사람', '모름') AND ${날거름} AND $3::text IS NOT NULL
-        GROUP BY "동작" ORDER BY sum("횟수") DESC`, 인자),
+        GROUP BY "동작" ORDER BY sum("횟수") DESC, "동작" COLLATE svc.ko_ci`, 인자),
     q(`SELECT to_char("시각", 'YYYY-MM-DD') AS "날", sum("횟수")::int AS "횟수" FROM app.usage_hour
         WHERE "시각" >= $1::timestamp AND "갈래" IN ('사람', '모름') GROUP BY 1 ORDER BY 1`, [a.보름]),
     q(`SELECT "갈래", sum(CASE WHEN "시각" >= $1::timestamp THEN "횟수" ELSE 0 END)::int AS "오늘",
               sum(CASE WHEN "시각" >= $2::timestamp THEN "횟수" ELSE 0 END)::int AS "이레", sum("횟수")::int AS "전체"
-         FROM app.usage_hour WHERE ${날거름} AND $3::text IS NOT NULL GROUP BY "갈래" ORDER BY sum("횟수") DESC`, 인자),
+         FROM app.usage_hour WHERE ${날거름} AND $3::text IS NOT NULL GROUP BY "갈래" ORDER BY sum("횟수") DESC, "갈래" COLLATE svc.ko_ci`, 인자),
     q(`SELECT min("시각") AS "처음" FROM app.usage_hour WHERE "갈래" <> '모름'`),
     q(`SELECT l.ip, l."나라", l.ua, count(*)::int AS n FROM app.req_log l
         WHERE l."때" >= coalesce($1::timestamp, $2::timestamp) AND ($3::timestamp IS NULL OR l."때" < $3::timestamp)

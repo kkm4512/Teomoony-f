@@ -573,7 +573,7 @@ app.get('/api/usage', async (req, res) => {
         FROM ops.usage_hour WHERE 갈래 IN (N'사람', N'모름')
          AND (@d0 IS NULL OR (시각 >= CAST(@d0 AS DATETIME2(0)) AND 시각 < CAST(@d1 AS DATETIME2(0))))
        GROUP BY 동작
-       ORDER BY SUM(횟수) DESC;
+       ORDER BY SUM(횟수) DESC, 동작;   /* 11-01 같은 수는 이름순(서비스DB 경로와 같게) */
 
       SELECT 날 = CONVERT(CHAR(10), 시각, 23), 횟수 = SUM(횟수)
         FROM ops.usage_hour
@@ -587,7 +587,7 @@ app.get('/api/usage', async (req, res) => {
              전체 = SUM(횟수)
         FROM ops.usage_hour
        WHERE (@d0 IS NULL OR (시각 >= CAST(@d0 AS DATETIME2(0)) AND 시각 < CAST(@d1 AS DATETIME2(0))))
-       GROUP BY 갈래 ORDER BY SUM(횟수) DESC;
+       GROUP BY 갈래 ORDER BY SUM(횟수) DESC, 갈래;
 
       SELECT 처음 = MIN(시각) FROM ops.usage_hour WHERE 갈래 <> N'모름';
 
