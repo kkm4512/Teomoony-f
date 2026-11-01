@@ -5287,7 +5287,23 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
              l.근거, l.면적차pct
         FROM gold.redev_plan_link l JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
        WHERE l.present_sn = @sn;
-      ${분양권줄SQL}`);
+      ${분양권줄SQL}
+      /* 11-01 사장님 "재개발 지역에 왜 특정 단지?" — 이 구역 사업으로 짓는 **대장 전 단지**(사업승인 · 건축허가 · 공사 중).
+         가단지 지도 경계와 같은 규칙(가상구역경계): 대표 필지가 절반 넘게 든 재개발 구역 중 가장 작은 것이 이 구역일 때만. 위치로만 · 이름 안 봄 */
+      IF OBJECT_ID('gold.fn_pnu_redev') IS NULL OR OBJECT_ID('gold.pre_complex') IS NULL SELECT TOP 0 complex_id = 0, 이름 = N'';
+      ELSE SELECT g.complex_id, g.이름
+        FROM silver.redev_zone z0
+        JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
+         AND cp.bbox_minx <= z0.bbox_maxx AND cp.bbox_maxx >= z0.bbox_minx AND cp.bbox_miny <= z0.bbox_maxy AND cp.bbox_maxy >= z0.bbox_miny
+         AND cp.geom.STIntersects(z0.geom) = 1
+        JOIN gold.pre_complex g ON g.pnu = cp.pnu AND g.상태 = N'살아있음'
+       WHERE z0.present_sn = @sn AND z0.is_current = 1 AND ${재개발조건('z0.biz_nm')}
+         AND (SELECT TOP 1 z.present_sn
+                FROM (SELECT v.present_sn, x = SUM(v.xarea), p = SUM(v.parea) FROM gold.fn_pnu_redev(g.pnu, 0) v GROUP BY v.present_sn) h
+                JOIN silver.redev_zone z ON z.present_sn = h.present_sn AND z.is_current = 1
+               WHERE z.geojson IS NOT NULL AND h.x >= 0.5 * h.p AND ${재개발조건('z.biz_nm')}
+               ORDER BY z.area_m2, z.present_sn) = @sn
+       ORDER BY g.complex_id;`);
     const z = r.recordsets[0][0];
     if (!z) return res.status(404).json({ error: 'not found' });
     res.json({ 출처: '서울 열린데이터광장 정비사업 구역(OA-22712)',
@@ -5297,7 +5313,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
       단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
       공고: r.recordsets[2], 계획: (r.recordsets[3] || [])[0] || null,
-      분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {} });
+      분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {}, 짓는단지: r.recordsets[6] || [] });
   } catch (e) { fail(res, e, 'redev-detail'); }
 });
 
