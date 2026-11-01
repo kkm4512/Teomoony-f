@@ -5239,7 +5239,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
   const sn = String(req.params.sn || '').slice(0, 40);
   try {
     const pool = await getPool();
-    const r = await pool.request().input('sn', sql.VarChar(40), sn).input('svtop', sql.Int, 분양권다(req)).query(`
+    const r = await pool.request().input('sn', sql.VarChar(40), sn).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT TOP 1 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
         FROM silver.redev_zone WHERE is_current = 1 AND present_sn = @sn;
@@ -5266,45 +5266,14 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
        WHERE z.is_current = 1 AND z.present_sn = @sn
        ORDER BY p.rcrit_pblanc_de DESC;
       /* 2026-10-22 09:05 사장님 "임의로 계산해서 하는 건 하지 마" — 지금 건물 기준 용적률·건폐율·노후도 셈을 뺐다 */
-      /* 2026-10-22 사장님 "4번 그렇게해" — 구역 안 필지(지금 필지와 구역 경계가 겹침)에서 맺은 분양권·입주권. 지번으로만 · 이름 안 봄 */
-      IF OBJECT_ID('tempdb..#sv') IS NOT NULL DROP TABLE #sv;
-      CREATE TABLE #sv (trade_sk BIGINT NOT NULL, 근거 NVARCHAR(30) NOT NULL);
-      INSERT INTO #sv SELECT t.trade_sk, N'구역 안 필지'
-        FROM silver.rtms_trade t
-       WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (
-             SELECT cp.pnu FROM silver.redev_zone z
-               JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
-                AND cp.bbox_minx <= z.bbox_maxx AND cp.bbox_maxx >= z.bbox_minx AND cp.bbox_miny <= z.bbox_maxy AND cp.bbox_maxy >= z.bbox_miny
-                AND cp.geom.STIntersects(z.geom) = 1
-              WHERE z.is_current = 1 AND z.present_sn = @sn
-                /* 한 사업 = 한 구역인 것만 — 도시재생·모아타운·촉진지구·역세권처럼 넓고 여러 사업이 들어 있는 구역은 남의 사업 권리가 섞인다 */
-                AND z.biz_nm IN (N'재건축(공동)', N'재건축(단독)', N'재개발(주택정비형)', N'재개발(도시정비형)', N'신속통합기획',
-                                 N'주거환경개선(정비형)', N'가로주택정비사업', N'소규모재건축사업', N'소규모재개발사업', N'자율주택정비사업',
-                                 N'재정비촉진구역', N'존치정비구역', N'도심 공공주택 복합사업'));
+      /* 11-01 사장님 "짓는 단지나 관련된 분양 실거래가는 다 빼는 게" — 구역 안 분양권·입주권 · 짓는 단지를 뺐다(구역은 땅 · 한 구역에 단지가 여럿일 수 있고, 겹친 구역 기록마다 같은 거래가 되풀이됐다). 권리 거래는 단지 상세의 분양·청약 탭에서 */
       /* 301: 서울플랜+ 정비계획(계획 용적률·건폐율·층수·높이·공급세대) — 위치 지번 + 면적 5% 로 이은 것만 */
       SELECT p.basic_info_seq, p.자료, p.사업명, p.소분류, p.위치, p.사업면적, p.용도지역_전, p.용도지역_후, p.추진단계, p.추진일, p.지정일,
              p.연면적, p.용적률, p.건폐율, p.층수, p.높이m, p.용도, p.공급세대, p.분양세대, p.임대세대, p.임대비율, p.홈페이지,
              l.근거, l.면적차pct
         FROM gold.redev_plan_link l JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
        WHERE l.present_sn = @sn;
-      ${분양권줄SQL}
-      /* 11-01 사장님 "재개발 지역에 왜 특정 단지?" — 이 구역 사업으로 짓는 **대장 전 단지**(사업승인 · 건축허가 · 공사 중).
-         가단지 지도 경계와 같은 규칙(가상구역경계): 대표 필지가 절반 넘게 든 재개발 구역 중 가장 작은 것이 이 구역일 때만. 위치로만 · 이름 안 봄 */
-      IF OBJECT_ID('gold.fn_pnu_redev') IS NULL OR OBJECT_ID('gold.pre_complex') IS NULL SELECT TOP 0 complex_id = 0, 이름 = N'';
-      ELSE SELECT g.complex_id, g.이름,
-             공고들 = CASE WHEN OBJECT_ID('gold.pre_applyhome') IS NOT NULL THEN (SELECT STRING_AGG(x.house_manage_no, ',') FROM gold.pre_applyhome x WHERE x.complex_id = g.complex_id) END
-        FROM silver.redev_zone z0
-        JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
-         AND cp.bbox_minx <= z0.bbox_maxx AND cp.bbox_maxx >= z0.bbox_minx AND cp.bbox_miny <= z0.bbox_maxy AND cp.bbox_maxy >= z0.bbox_miny
-         AND cp.geom.STIntersects(z0.geom) = 1
-        JOIN gold.pre_complex g ON g.pnu = cp.pnu AND g.상태 = N'살아있음'
-       WHERE z0.present_sn = @sn AND z0.is_current = 1 AND ${재개발조건('z0.biz_nm')}
-         AND (SELECT TOP 1 z.present_sn
-                FROM (SELECT v.present_sn, x = SUM(v.xarea), p = SUM(v.parea) FROM gold.fn_pnu_redev(g.pnu, 0) v GROUP BY v.present_sn) h
-                JOIN silver.redev_zone z ON z.present_sn = h.present_sn AND z.is_current = 1
-               WHERE z.geojson IS NOT NULL AND h.x >= 0.5 * h.p AND ${재개발조건('z.biz_nm')}
-               ORDER BY z.area_m2, z.present_sn) = @sn
-       ORDER BY g.complex_id;`);
+      `);
     const z = r.recordsets[0][0];
     if (!z) return res.status(404).json({ error: 'not found' });
     res.json({ 출처: '서울 열린데이터광장 정비사업 구역(OA-22712)',
@@ -5314,7 +5283,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
       단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
       공고: r.recordsets[2], 계획: (r.recordsets[3] || [])[0] || null,
-      분양권: r.recordsets[4] || [], 분양권수: (r.recordsets[5] || [])[0] || {}, 짓는단지: r.recordsets[6] || [] });
+      });
   } catch (e) { fail(res, e, 'redev-detail'); }
 });
 
