@@ -532,9 +532,11 @@ async function 목록검색(req, res, next) {
     /* 11-01 QA: 단지 656만 곳 — 두 글자 검색이 큰 표를 정렬 색인 순으로 훑다 55초(3초 제한 → 적재DB 경로 1분+).
        두 글자 이하는 좁은 표(svc.lyr_sg_cmap_s: 번호 · 정렬 칸 · s_all — **정렬 순서대로 담김**)를 정렬 색인 순으로 읽다가 상한에서 멈추고(차례 읽기),
        그 번호만 큰 표에서 칸을 꺼낸다. 세 글자 이상 · 빈 검색은 예전 그대로. 좁은 표가 아직 없으면 예전 길. */
-    const 좁은표 = q && [...q].length < 3 && await 좁은표있나();
-    const QQ = 좁은표 ? 오래Q : Q;   /* 두 글자는 덤 질의(법정동 · 신축 · 이름 · 정비 · 공고)도 흔한 말이라 3초를 넘길 수 있다 — 10초까지 */
-    const 본 = 좁은표 ? 오래Q(`
+    const 좁은있음 = q ? await 좁은표있나() : false;
+    const 좁은표 = 좁은있음 && [...q].length < 3;
+    /* 흔한 말('강남' · '아파트')은 덤 질의(법정동 · 신축 · 이름 · 정비 · 공고)도 3초를 넘길 수 있다 — 검색어가 있으면 10초까지(적재DB 경로로 넘어가면 1분+) */
+    const QQ = q ? 오래Q : Q;
+    const 좁은질의 = () => 오래Q(`
       WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id),
            t AS MATERIALIZED (SELECT s.complex_id FROM svc.lyr_sg_cmap_s s
                                WHERE (s.s_all LIKE lower($1) OR s.complex_id IN (SELECT complex_id FROM am) OR s.complex_id = $2::int)
@@ -545,7 +547,9 @@ async function 목록검색(req, res, next) {
                   THEN (SELECT am.부속지번 FROM am WHERE am.complex_id = v.complex_id) END AS 부속지번,
              v."폐쇄"
         FROM svc.lyr_sg_cmap v JOIN t ON t.complex_id = v.complex_id
-       ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id`, [qq, qid, onlyRecap, limit + 1]) : Q(`
+       ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id`, [qq, qid, onlyRecap, limit + 1]);
+    /* 세 글자 이상은 trigram 길(드문 말에 빠르다)을 먼저 — 3초를 넘기면(흔한 말 '아파트') 좁은 표 차례 읽기로 */
+    const 본 = 좁은표 ? 좁은질의() : Q(`
       WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id)
       SELECT ${목록칸},
              CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1)
@@ -560,7 +564,7 @@ async function 목록검색(req, res, next) {
                    OR v.complex_id IN (SELECT complex_id FROM am) OR v.complex_id = $2::int)`}
          AND ($3::boolean = false OR v.has_recap)
        ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id
-       LIMIT $4`, [qq, qid, onlyRecap, limit + 1]);
+       LIMIT $4`, [qq, qid, onlyRecap, limit + 1]).catch(e => { if (좁은있음 && q && [...q].length >= 3) return 좁은질의(); throw e; });
     const 법정동들 = q ? QQ(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
                                  complex_cnt, trade_cnt, max_amount
                             FROM svc.lyr_lawd_stat WHERE emd_nm ILIKE $1 OR full_nm ILIKE $1 OR lawd_cd ILIKE $1
