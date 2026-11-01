@@ -1366,6 +1366,7 @@ code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 4px;borde
   padding: 5px 2px; border-bottom: 1px solid var(--line-2);
 }
 .trow:last-child { border-bottom: 0; }
+.trow[hidden] { display: none; }   /* 11-01 고르기 · 더보기가 줄을 숨길 때 — .trow 의 display 가 hidden 을 덮었다 */
 .trow .td { font: 400 11px var(--mono); color: var(--ink-3); white-space: nowrap; }
 .trow .tm {
   font: 500 12.5px var(--mono); font-variant-numeric: tabular-nums;
