@@ -1527,6 +1527,9 @@ code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 4px;borde
 
 /* ---------- 학원·교습소 표 (2026-10-21) — 덧붙이기만 ---------- */
 table.mini{width:100%;border-collapse:collapse;font-size:12.5px;margin:4px 0 8px}
+/* 11-01 QA: 폰에서 분양 주택형 표(6칸)가 상세 폭을 21px 넘었다 — 표만 옆으로 밀리게 */
+.tblx{overflow-x:auto;max-width:100%}
+.tblx table.mini{min-width:max-content}
 table.mini th{font-weight:600;color:var(--ink-3);text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}
 table.mini th:first-child,table.mini td:first-child{text-align:left}
 table.mini td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}

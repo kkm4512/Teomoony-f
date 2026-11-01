@@ -432,7 +432,10 @@ async function 자동완성(req, res, next) {
       /* 7 지하철역 */
       Q(`SELECT sttn_nm, "노선", lat, lon, count(*) OVER ()::int AS 전체
            FROM svc.lyr_sg_subway WHERE sttn_nm ILIKE $2
-          ORDER BY CASE WHEN lower(sttn_nm) = lower($1) OR lower(sttn_nm) = lower($1 || '역') THEN 0 WHEN sttn_nm ILIKE $3 THEN 1 ELSE 2 END,
+             OR (length($1) > 1 AND right($1, 1) = '역' AND lower(sttn_nm) = lower(left($1, -1)))   /* 11-01 '강남역' → 역 이름 '강남'(적재DB 경로와 같게) */
+          ORDER BY CASE WHEN lower(sttn_nm) = lower($1) OR lower(sttn_nm) = lower($1 || '역')
+                          OR (length($1) > 1 AND right($1, 1) = '역' AND lower(sttn_nm) = lower(left($1, -1))) THEN 0
+                        WHEN sttn_nm ILIKE $3 THEN 1 ELSE 2 END,
                    ${이름순('sttn_nm')} LIMIT 4`, [raw, q, p]),
       /* 8 학교 */
       Q(`SELECT school_nm, school_se, "주소", lat, lon, count(*) OVER ()::int AS 전체, to_jsonb(s) ->> 'school_id' AS school_id, to_jsonb(s) ->> 'complex_id' AS complex_id
@@ -496,6 +499,19 @@ async function 자동완성(req, res, next) {
    ★ 켜고 끄기: svc_mode.json "search". 물음표는 q · limit · recap 만(그 밖은 옛 경로). */
 const 목록칸 = `v.complex_id, v.complex_nm, v.grouping_rule, v.has_recap, v.rep_jibun, v.rep_plat_plc, v.rep_road_addr, v.lawd_nm,
                 v.dong_cnt, v.pnu_cnt, v.parcel_hit, v.hhld_cnt_sum, v.tot_area_sum, v.oldest_use_apr, v.jiga_avg, v.centroid_lat, v.centroid_lng`;
+/* 좁은 검색 표가 있나(10분 기억) · 오래 걸려도 되는 질의(두 글자 통째 거름 — 3초 제한 대신 10초) */
+let 좁은표기억 = { v: false, t: 0 };
+async function 좁은표있나() {
+  if (Date.now() - 좁은표기억.t < 600000) return 좁은표기억.v;
+  try { const r = await pg().query("SELECT to_regclass('svc.lyr_sg_cmap_s') IS NOT NULL AS ok"); 좁은표기억 = { v: r.rows[0].ok, t: Date.now() }; }
+  catch (e) { 좁은표기억 = { v: false, t: Date.now() }; }
+  return 좁은표기억.v;
+}
+async function 오래Q(sql, v) {
+  const c = await pg().connect();
+  try { await c.query('SET statement_timeout = 10000'); return (await c.query(sql, v)).rows; }
+  finally { c.query('SET statement_timeout = 3000').catch(() => {}).finally(() => c.release()); }
+}
 async function 목록검색(req, res, next) {
   const 강제 = req.query._svc === '1';
   if (!지금설정().read || !(지금설정().search || 강제) || Date.now() < 쉬는끝) return next();
@@ -513,7 +529,22 @@ async function 목록검색(req, res, next) {
     const qid = /^\d+$/.test(q) ? Number(q) : null;
     /* 10-25: 이름 · 지번 · 도로명 세 칸 ILIKE 대신 s_all(소문자 한 칸) LIKE — 두 글자 검색(trigram 못 씀)이 2.6초 → 아래.
        부속지번 맞음(am)은 해시 반조인으로 · 보여 줄 줄의 부속지번만 따로 꺼낸다(정렬 색인 순으로 읽다가 상한에서 멈출 수 있게) */
-    const 본 = Q(`
+    /* 11-01 QA: 단지 656만 곳 — 두 글자 검색이 큰 표를 정렬 색인 순으로 훑다 55초(3초 제한 → 적재DB 경로 1분+).
+       두 글자 이하는 좁은 표(svc.lyr_sg_cmap_s: 번호 · 정렬 칸 · s_all)를 **통째로 걸러** 맞는 번호를 모으고(MATERIALIZED — 정렬 색인을 따라가지 않게),
+       그 안에서 같은 순서로 세운 뒤 상한만큼 큰 표에서 칸을 꺼낸다. 세 글자 이상 · 빈 검색은 예전 그대로. 좁은 표가 아직 없으면 예전 길. */
+    const 좁은표 = q && [...q].length < 3 && await 좁은표있나();
+    const 본 = 좁은표 ? 오래Q(`
+      WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id),
+           m AS MATERIALIZED (SELECT s.complex_id, s.dong_cnt, s.pnu_cnt FROM svc.lyr_sg_cmap_s s
+                               WHERE (s.s_all LIKE lower($1) OR s.complex_id IN (SELECT complex_id FROM am) OR s.complex_id = $2::int)
+                                 AND ($3::boolean = false OR s.has_recap)),
+           t AS (SELECT complex_id FROM m ORDER BY dong_cnt DESC NULLS LAST, pnu_cnt DESC NULLS LAST, complex_id LIMIT $4)
+      SELECT ${목록칸},
+             CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1)
+                  THEN (SELECT am.부속지번 FROM am WHERE am.complex_id = v.complex_id) END AS 부속지번,
+             v."폐쇄"
+        FROM svc.lyr_sg_cmap v JOIN t ON t.complex_id = v.complex_id
+       ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id`, [qq, qid, onlyRecap, limit + 1]) : Q(`
       WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id)
       SELECT ${목록칸},
              CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1)
@@ -523,7 +554,7 @@ async function 목록검색(req, res, next) {
        WHERE ${[...q].length >= 3
                /* 세 글자 이상: trigram 색인으로 맞는 번호를 먼저 모은다(드문 말도 빠르다) */
                ? `v.complex_id IN (SELECT complex_id FROM svc.lyr_sg_cmap WHERE s_all LIKE lower($1) UNION SELECT complex_id FROM am UNION SELECT $2::int WHERE $2::int IS NOT NULL)`
-               /* 두 글자 이하 · 빈 검색: 색인이 못 받치니 정렬 순으로 읽다가 상한에서 멈춘다(흔한 말이 대부분) */
+               /* 빈 검색(· 좁은 표가 아직 없을 때의 두 글자): 정렬 순으로 읽다가 상한에서 멈춘다 */
                : `(($1::text IS NULL AND $2::int IS NULL) OR ($1::text IS NOT NULL AND v.s_all LIKE lower($1))
                    OR v.complex_id IN (SELECT complex_id FROM am) OR v.complex_id = $2::int)`}
          AND ($3::boolean = false OR v.has_recap)

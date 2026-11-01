@@ -6903,7 +6903,7 @@ function 분양칸(공고, 머리에적음 = false) {   // 머리에적음: 공�
           p.cnstrct_entrps_nm ? ['시공', esc(p.cnstrct_entrps_nm)] : null,
           p.pblanc_url ? ['공고 원문', `<a href="${esc(p.pblanc_url)}" target="_blank" rel="noopener">청약홈 공고</a>`] : null,
         ].filter(Boolean).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
-        ${형.length ? `<table class="mini"><thead><tr><th>주택형(전용)</th><th class="n">공급</th><th class="n">최고 분양가</th><th class="n">전용 평당</th>${
+        ${형.length ? `<div class="tblx"><table class="mini"><thead><tr><th>주택형(전용)</th><th class="n">공급</th><th class="n">최고 분양가</th><th class="n">전용 평당</th>${
             형.some(m => m.경쟁 != null) ? '<th class="n">경쟁률</th>' : ''}${형.some(m => m.가점최저 != null) ? '<th class="n">당첨가점</th>' : ''}</tr></thead><tbody>
           ${형.map(m => `<tr><td>${esc(m.house_ty || '')}${m.전용m2 ? `<span class="muted"> ${(Number(m.전용m2) / 3.3058).toFixed(1)}평</span>` : ''}</td>
             <td class="n">${fmt(m.공급 || 0)}</td>
@@ -6914,7 +6914,7 @@ function 분양칸(공고, 머리에적음 = false) {   // 머리에적음: 공�
                 : /^\d+(\.\d+)?$/.test(String(m.경쟁).trim()) ? esc(String(m.경쟁)) + ':1'
                 : `<span class="muted" title="원문 경쟁률 칸 '${esc(String(m.경쟁))}' — 숫자가 아님(접수가 없었거나 집계 안 함)">${esc(String(m.경쟁)) === '-' ? '—' : esc(String(m.경쟁))}</span>`)}</td>` : ''}${
             형.some(z => z.가점최저 != null) ? `<td class="n">${m.가점최저 != null ? `${Number(m.가점최저)}~${Number(m.가점최고)}` : '—'}</td>` : ''}</tr>`).join('')}
-          </tbody></table>
+          </tbody></table></div>
           ${형.some(m => m.경쟁 != null) ? `` : ''}` : ''}
         ${p.공고종류 === 'PBLPVT' ? '<p class="note sm">공공지원민간임대는 분양이 아니라 임대라 금액 칸을 비웠습니다(조건은 공고문).</p>' : ''}
       </div>`;

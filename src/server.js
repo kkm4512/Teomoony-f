@@ -2226,9 +2226,13 @@ app.get('/api/suggest', async (req, res) => {
         SELECT TOP 4 s.sttn_nm, 노선 = STRING_AGG(s.line_nm, N' · ') WITHIN GROUP (ORDER BY s.line_nm), lat = AVG(s.lat), lon = AVG(s.lon),
                전체 = COUNT(*) OVER ()
           FROM silver.subway_station s
-         WHERE s.is_current = 1 AND s.lat IS NOT NULL AND s.sttn_nm LIKE @q
+         /* 11-01 QA: '강남역' 을 치면 역 이름(원문 '강남')이 안 나왔다 — 끝의 '역' 을 뗀 이름과 **똑같은** 역도 넣는다 */
+         WHERE s.is_current = 1 AND s.lat IS NOT NULL
+           AND (s.sttn_nm LIKE @q OR (LEN(@raw) > 1 AND RIGHT(@raw, 1) = N'역' AND s.sttn_nm = LEFT(@raw, LEN(@raw) - 1)))
          GROUP BY s.sttn_nm
-         ORDER BY CASE WHEN s.sttn_nm = @raw OR s.sttn_nm = @raw + N'역' THEN 0 WHEN s.sttn_nm LIKE @p THEN 1 ELSE 2 END, s.sttn_nm;
+         ORDER BY CASE WHEN s.sttn_nm = @raw OR s.sttn_nm = @raw + N'역'
+                         OR (LEN(@raw) > 1 AND RIGHT(@raw, 1) = N'역' AND s.sttn_nm = LEFT(@raw, LEN(@raw) - 1)) THEN 0
+                       WHEN s.sttn_nm LIKE @p THEN 1 ELSE 2 END, s.sttn_nm;
         /* 8 학교 */
         SELECT TOP 4 s.school_nm, s.school_se, 주소 = COALESCE(s.rdnmadr, s.lnmadr), s.lat, s.lon, 전체 = COUNT(*) OVER (), s.school_id,
                complex_id = (SELECT g.complex_id FROM gold.complex_school_site g WHERE g.종류 = N'학교' AND g.키 = s.school_id)
