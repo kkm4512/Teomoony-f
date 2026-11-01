@@ -442,13 +442,13 @@ async function 자동완성(req, res, next) {
            FROM svc.lyr_sg_kinder k WHERE kinder_nm ILIKE $1
           ORDER BY CASE WHEN kinder_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('kinder_nm')}, ${이름순('"주소"')} LIMIT 3`, [q, p]),
       /* 10 학원 */
-      Q(`SELECT aca_nm, realm_sc_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체,
+      Q(`SELECT aca_nm, realm_sc_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체, to_jsonb(a0) ->> 'aca_asnum' AS aca_asnum,
                 (SELECT count(*)::int FROM svc.lyr_sg_academy x WHERE x.lat IS NULL AND x.aca_nm ILIKE $1) AS 좌표없음
-           FROM svc.lyr_sg_academy WHERE lat IS NOT NULL AND aca_nm ILIKE $1
+           FROM svc.lyr_sg_academy a0 WHERE lat IS NOT NULL AND aca_nm ILIKE $1
           ORDER BY CASE WHEN aca_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('aca_nm')}, ${이름순('"주소"')}, ${이름순('realm_sc_nm')} LIMIT 4`, [q, p]),
       /* 11 상가 — 앞부분 일치 */
       /* 적재DB 처럼 너비도 무시: nm_key = lower(NFKC(이름)) · 검색어도 같게 */
-      Q(`SELECT bizes_nm, brch_nm, inds_scls_nm, "주소", lat, lon, adong_nm, count(*) OVER ()::int AS 전체
+      Q(`SELECT bizes_nm, brch_nm, inds_scls_nm, "주소", lat, lon, adong_nm, count(*) OVER ()::int AS 전체, bizes_id
            FROM svc.lyr_sg_semas WHERE nm_key LIKE $2
           ORDER BY CASE WHEN nm_key = $1 THEN 0 ELSE 1 END, ${이름순('bizes_nm')}, ${이름순('brch_nm')}, ${이름순('"주소"')}, bizes_id LIMIT 5`,
         [raw.normalize('NFKC').toLowerCase(), 같이(글자.normalize('NFKC').toLowerCase()) + '%']),

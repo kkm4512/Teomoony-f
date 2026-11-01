@@ -2220,7 +2220,7 @@ app.get('/api/suggest', async (req, res) => {
          WHERE k.lat IS NOT NULL AND k.kinder_nm LIKE @q
          ORDER BY CASE WHEN k.kinder_nm LIKE @p THEN 0 ELSE 1 END, k.kinder_nm, k.addr;
         /* 10 학원 (교육청 등록) — 좌표를 붙인 것만 지도로 갈 수 있다. 못 붙인 수도 같이 센다 */
-        SELECT TOP 4 a.aca_nm, a.realm_sc_nm, 주소 = a.road_addr, a.lat, a.lon,
+        SELECT TOP 4 a.aca_nm, a.realm_sc_nm, 주소 = a.road_addr, a.lat, a.lon, a.aca_asnum,
                전체 = COUNT(*) OVER (),
                좌표없음 = (SELECT COUNT(*) FROM silver.academy x
                            WHERE x.is_current = 1 AND x.lat IS NULL AND x.aca_nm LIKE @q)
@@ -2229,7 +2229,7 @@ app.get('/api/suggest', async (req, res) => {
          ORDER BY CASE WHEN a.aca_nm LIKE @p THEN 0 ELSE 1 END, a.aca_nm, a.road_addr, a.realm_sc_nm;
         /* 11 상가 — 앞부분 일치 · 두 글자부터 */
         SELECT TOP 5 m.bizes_nm, m.brch_nm, m.inds_scls_nm, 주소 = m.rdnm_adr, m.lat, m.lon, m.adong_nm,
-               전체 = COUNT(*) OVER ()
+               전체 = COUNT(*) OVER (), m.bizes_id
           FROM silver.semas_store m
          WHERE @상가 = 1 AND m.is_current = 1 AND m.lat IS NOT NULL AND m.bizes_nm LIKE @p
          ORDER BY CASE WHEN m.bizes_nm = @raw THEN 0 ELSE 1 END, m.bizes_nm, m.brch_nm, m.rdnm_adr, m.bizes_id;
@@ -5834,6 +5834,41 @@ app.get('/api/complexes/:id/usage', async (req, res) => {
    원문 값 그대로(계산 없음) · 대표자 · 원장 이름은 내보내지 않는다. */
 const _한점 = id => `DECLARE @g geography = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
                      WHERE complex_id = ${Number(id) || 0} AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL);`;
+/* 2026-11-01 사장님 "학원이나 상가도 (검색에서 고르면 정보가) 나오게" — 학원 · 상가 상세(원문 칸 그대로).
+   학원 = 교육청 등록(NEIS 학원교습소정보 · silver.academy) · 학원지정번호(aca_asnum)로 · 지금 줄만.
+   상가 = 소상공인시장진흥공단 상가(상권)정보(silver.semas_store) · 상가업소번호(bizes_id)로 · 지금 줄만. */
+app.get('/api/academy/:no', async (req, res) => {
+  const no = String(req.params.no || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20);
+  if (!no) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('a', sql.VarChar(20), no).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 aca_asnum, aca_nm, insti_sc_nm, office_nm, admst_zone_nm, estbl_ymd, reg_ymd, reg_sttus_nm, caa_begin_ymd, caa_end_ymd,
+             tofor_smtot, dtm_nmpr_smtot, realm_sc_nm, le_ord_nm, le_crse_list_nm, le_crse_nm,
+             수강료 = CASE WHEN thcc_othbc_yn = 'Y' THEN thcc_cntnt END, thcc_othbc_yn, brhs_aca_yn, road_addr, road_addr_dtl, tel_no, load_dtm, lat, lon
+        FROM silver.academy WHERE aca_asnum = @a AND is_current = 1 ORDER BY academy_sk DESC`);
+    if (!r.recordset.length) return res.status(404).json({ error: '학원을 찾지 못했습니다' });
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 학원: r.recordset[0] });
+  } catch (e) { fail(res, e, 'academy'); }
+});
+app.get('/api/store/:id', async (req, res) => {
+  const id = String(req.params.id || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 30);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('b', sql.VarChar(30), id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      SELECT TOP 1 bizes_id, bizes_nm, brch_nm, inds_lcls_nm, inds_mcls_nm, inds_scls_nm, ksic_nm, adong_nm, ldong_nm, lno_adr, rdnm_adr,
+             bld_nm, flr_no, ho_no, lat, lon, collected_at
+        FROM silver.semas_store WHERE bizes_id = @b AND is_current = 1`);
+    if (!r.recordset.length) return res.status(404).json({ error: '상가를 찾지 못했습니다' });
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 상가: r.recordset[0] });
+  } catch (e) { fail(res, e, 'store'); }
+});
+
 app.get('/api/kinder/:code', async (req, res) => {
   const code = String(req.params.code || '').replace(/[^0-9A-Za-z-]/g, '').slice(0, 64);
   const cid = Number(req.query.cid) || 0;

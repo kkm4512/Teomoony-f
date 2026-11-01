@@ -85,10 +85,10 @@ function 묶음만들기(rs, 길이) {
       { 종류: '유치원', 전체: 전체(rs[8]), 항목: rs[8].map(x => ({
           이름: x.kinder_nm, 보조: x.주소, 동작: { 종류: '점', lat: x.lat, lng: x.lon, ...(x.kinder_cd ? { kcd: x.kinder_cd } : {}) } })) },
       { 종류: '학원', 전체: 전체(rs[9]), 좌표없음: rs[9].length ? Number(rs[9][0].좌표없음) : 0, 항목: rs[9].map(x => ({
-          이름: x.aca_nm, 보조: [x.realm_sc_nm, x.주소].filter(Boolean).join(' · '), 동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
+          이름: x.aca_nm, 보조: [x.realm_sc_nm, x.주소].filter(Boolean).join(' · '), 동작: { 종류: '점', lat: x.lat, lng: x.lon, ...(x.aca_asnum ? { aid: x.aca_asnum } : {}) } })) },
       { 종류: '상가', 전체: 전체(rs[10]), 앞부분만: true, 두글자부터: 길이 < 2, 항목: rs[10].map(x => ({
           이름: x.bizes_nm + (x.brch_nm ? ` ${x.brch_nm}` : ''), 보조: [x.inds_scls_nm, x.adong_nm, x.주소].filter(Boolean).join(' · '),
-          동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
+          동작: { 종류: '점', lat: x.lat, lng: x.lon, ...(x.bizes_id ? { stid: x.bizes_id } : {}) } })) },
     ].filter(g => g.항목.length);
   return 묶음;
 }

@@ -1536,6 +1536,8 @@ async function 제안고르기(it) {
     /* 11-01 사장님 "장위초등학교를 치면 학교 정보가 안 나와" — 학교 · 유치원은 그 상세(학생 · 교원 · 공시)도 연다 */
     if (d.sid) 학교상세(d.sid);
     else if (d.kcd) 유치원상세(d.kcd);
+    else if (d.aid) 학원상세(d.aid);
+    else if (d.stid) 상가상세(d.stid);
   }
 }
 
@@ -5002,10 +5004,10 @@ function 주변판들(p) {
 /* 탭 안 고르기 (2026-10-31 사장님 "교육 탭이 열자마자 다 펴져 있어 보기 힘들어 — 선택해서 나오게" → "상권이나 교통도")
    고르기단추(ns, 칸들) = 단추 줄 · 고르기칸(ns, 키, html) = 그 키를 골랐을 때만 보이는 칸(키는 여럿을 띄어 쓸 수 있다 · 'all' 은 전부).
    고른 것은 이 브라우저에만 기억(편의). 고른 키가 이 단지에 없으면 첫 칸. 누르면 다시 그리지 않고 hidden 만 바꾼다. */
-const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: 'all', med: 'hosp' };
+const 고르기기본 = { edu: 'all', traffic: 'all', shop: 'all', med: 'all' };
 const 고르기값 = {};
 /* 기억하지 않고 늘 '전체' 로 시작하는 고르기(단지마다 값이 다른 것 — 평형 등) */
-const 고르기전체로 = new Set(['sv-gb', 'sv-py', 'shop']);   /* 11-01 사장님 "상권 탭 눌렀을 때도 디폴트가 전체" — 상권은 늘 전체로 시작(기억 안 함) */
+const 고르기전체로 = new Set(['sv-gb', 'sv-py', 'shop', 'edu', 'traffic', 'med']);   /* 11-01 사장님 "상권 탭 눌렀을 때도 디폴트가 전체" — 상권은 늘 전체로 시작(기억 안 함) */
 function 고른(ns, 칸들) {
   let v = 고르기값[ns];
   if (고르기전체로.has(ns)) v = v || 'all';
@@ -5618,7 +5620,7 @@ function renderDetail(payload) {
   }
 
   $('#detail').querySelectorAll('.tab[data-tab]').forEach(b =>   /* 10-31: 탭 안 작은 탭 줄(.subtabs)은 여기서 안 받는다 */
-    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs:not(.subtabs)') || {}).scrollLeft || 0; detailTab = b.dataset.tab; if (detailTab === 'shop') delete 고르기값.shop; renderDetail(lastDetail); }));
+    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs:not(.subtabs)') || {}).scrollLeft || 0; detailTab = b.dataset.tab; for (const k of Object.keys(고르기값)) delete 고르기값[k]; renderDetail(lastDetail); }));   /* 11-01 사장님 "전부 디폴트를 전체로" — 탭을 열 때마다 칩은 전체부터 */
   /* ★ 2026-10-24 사장님 "상권 탭을 누르면 단지정보 탭으로 가" — 다시 그리면 탭 줄(폰에서 가로로 넘김)이 맨 왼쪽으로 돌아가
        오른쪽 끝 탭(상권 · 병원·약국)을 눌러도 '단지정보 · 동·호 …' 만 보였다. 누르기 전 위치를 되살리고, 고른 탭이 안 보이면 보이게 민다. */
   { const 줄위치 = 탭줄위치;   /* 감싸면(요소를 옮기면) 가로 위치가 0 으로 돌아간다 — 감싼 뒤에 되살린다 */
@@ -8202,6 +8204,46 @@ async function 모달받기(url, 무엇) {
 const 수칸 = v => { if (v == null) return null; const t = String(v).replace(/[^0-9.]/g, ''); return t === '' ? null : Number(t); };   /* 원문이 '5개' · '2명' 처럼 단위를 달고 올 때가 있다 */
 const 공시차수말 = t => { const s = String(t || ''); return /^\d{5}$/.test(s) ? `${s.slice(0, 4)}년 ${s.slice(4)}차 공시` : (s || ''); };
 
+/* 11-01 사장님 "학원이나 상가도" — 검색에서 고르면 여는 학원 · 상가 상세(원문 칸 그대로 · 설명은 정책) */
+async function 학원상세(no) {
+  const d = await 모달받기(`/api/academy/${encodeURIComponent(no)}`, '학원 상세');
+  if (!d) return;
+  const a = d.학원 || {};
+  const 끝없음 = v => !v || String(v).startsWith('9999');
+  const 수강료 = String(a.수강료 || '').split(/,\s*/).map(x => x.split(':')).filter(x => x[0] && x[1])
+    .map(([과목, 원]) => [과목.trim(), Number(String(원).replace(/[^0-9]/g, '')) || null]);
+  모달열기(`${모달머리(a.aca_nm, [a.insti_sc_nm, a.realm_sc_nm].filter(Boolean).join(' · '))}
+    <p class="hm-addr">${esc([a.road_addr, String(a.road_addr_dtl || '').replace(/^,\s*/, '')].filter(Boolean).join(' '))}</p>
+    <dl class="ahkv">${[
+      모달줄('교습계열', esc(a.le_ord_nm || '')),
+      모달줄('교습과정', esc([a.le_crse_nm, a.le_crse_list_nm].filter(Boolean).join(' · '))),
+      모달줄('정원', a.tofor_smtot != null ? `${fmt(a.tofor_smtot)}명` : ''),
+      모달줄('일시 수용', a.dtm_nmpr_smtot != null ? `${fmt(a.dtm_nmpr_smtot)}명` : ''),
+      모달줄('등록 상태', esc(a.reg_sttus_nm || '')),
+      모달줄('휴원', !끝없음(a.caa_end_ymd) || a.caa_begin_ymd ? `${esc(날짜(a.caa_begin_ymd, ''))} ~ ${esc(끝없음(a.caa_end_ymd) ? '' : 날짜(a.caa_end_ymd, ''))}` : ''),
+      모달줄('개설일', esc(날짜(a.estbl_ymd, ''))),
+      모달줄('등록일', esc(날짜(a.reg_ymd, ''))),
+      모달줄('전화', esc(a.tel_no || '')),
+      모달줄('교육청', esc([a.office_nm, a.admst_zone_nm].filter(Boolean).join(' · '))),
+    ].join('')}</dl>
+    ${수강료.length ? `<div class="lt2">수강료</div>${모달표(['과목', '원'], 수강료)}` : ''}`);
+}
+async function 상가상세(id) {
+  const d = await 모달받기(`/api/store/${encodeURIComponent(id)}`, '상가 상세');
+  if (!d) return;
+  const m = d.상가 || {};
+  모달열기(`${모달머리([m.bizes_nm, m.brch_nm].filter(Boolean).join(' '), m.inds_scls_nm || '')}
+    <p class="hm-addr">${esc(m.rdnm_adr || m.lno_adr || '')}</p>
+    <dl class="ahkv">${[
+      모달줄('업종', esc([m.inds_lcls_nm, m.inds_mcls_nm, m.inds_scls_nm].filter(Boolean).join(' › '))),
+      모달줄('표준산업분류', esc(m.ksic_nm || '')),
+      모달줄('건물', esc(m.bld_nm || '')),
+      모달줄('층 · 호', esc([m.flr_no ? `${m.flr_no}층` : '', m.ho_no ? `${m.ho_no}호` : ''].filter(Boolean).join(' '))),
+      모달줄('지번 주소', esc(m.lno_adr || '')),
+      모달줄('행정동 · 법정동', esc([m.adong_nm, m.ldong_nm].filter(Boolean).join(' · '))),
+      모달줄('자료 기준', esc(날짜(m.collected_at, ''))),
+    ].join('')}</dl>`);
+}
 async function 유치원상세(code) {
   const d = await 모달받기(`/api/kinder/${encodeURIComponent(code)}${selected ? `?cid=${encodeURIComponent(selected)}` : ''}`, '유치원 상세');
   if (!d) return;
