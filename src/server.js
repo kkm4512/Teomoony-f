@@ -531,6 +531,9 @@ app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지�
   app.get('/api/suggest', s.자동완성); app.get('/api/complexes', s.목록검색);
   app.get('/api/areas/here', s.여기지역); app.get('/api/complexes/near', s.주변단지); app.get('/api/applyhome/pins', s.청약핀);   /* svc_mode "misc" */
   app.use(s.응답캐시);
+  /* 11-01 서비스DB 분리 1묶음: 지도 위 bbox 층 넷(svc_mode "map2") · 주소 단위로 미리 담은 응답(svc_mode "pub" — 동네 고르기 · 범위 · 정비구역 상세) */
+  app.get('/api/prebuilds', s.공사핀); app.get('/api/houseplans', s.승인핀); app.get('/api/redev', s.정비층); app.get('/api/zones', s.용도층);
+  app.use(s.공개응답);
   app.get('/api/closed/empty', s.빈자리); }   /* 10-25 지금 대장 없는 자리(닫힌 대장만 남은 필지) */   /* 호 상세 · 주변 지점 · 점포 목록 지나며 담기 — svc_mode "cache" */   /* 자동완성 · 목록 검색 — svc_mode "suggest" · "search" */   /* 자동완성 — svc_mode "suggest" */
 
 app.get('/api/usage', async (req, res) => {
@@ -5202,8 +5205,7 @@ app.get('/api/zones', async (req, res) => {
 /* 2026-11-01 사장님 "정비와 재개발을 분리" — 원본 사업 소분류(biz_nm)로만 가른다(이름 · 위치로 고치지 않는다).
    재개발 = **다시 짓는 사업**만 적은 목록(화이트리스트). 목록에 없는 새 소분류는 '정비'(그 밖의 구역)로 간다 — 모르는 걸 재개발이라 하지 않는다.
    ★ 모아타운(여러 모아주택을 묶는 관리지역) · 주거환경개선(관리형, 다시 짓지 않음) · 지구 · 존치 구역은 '정비'. 가단지 지도 경계(가상구역경계)도 같은 목록. */
-const 재개발소분류 = ['신속통합기획', '재건축(공동)', '재건축(단독)', '재개발(주택정비형)', '재개발(도시정비형)', '주거환경개선(정비형)',
-  '재정비촉진구역', '가로주택정비사업', '소규모재건축사업', '소규모재개발사업', '자율주택정비사업'];
+const { 재개발소분류 } = require('./redev_groups');   /* svc.js 와 같은 목록 */
 const 재개발조건 = (열) => `${열} IN (${재개발소분류.map(x => `N'${x}'`).join(', ')})`;
 app.get('/api/redev', async (req, res) => {
   const bbox = String(req.query.bbox || '').split(',').map(Number);

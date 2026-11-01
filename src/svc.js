@@ -782,4 +782,89 @@ async function 빈자리(req, res) {
   }
 }
 
-module.exports = { 빈자리, 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, 여기지역, 주변단지, 청약핀, 응답캐시, pg, 지금설정 };
+/* ---------- 서비스DB 분리 1묶음 (2026-11-01 사장님 "서비스 DB 로 분리하는 건 해야 하는 거니까 해봐") ----------
+   ① 지도 위 bbox 층 넷 — svc.lyr_prebuild · lyr_houseplan · lyr_redev_zone · lyr_landzone (svc_misc_src.py). 화면 질의와 같은 거름 · 순서 · 상한.
+      켜고 끄기 svc_mode.json "map2" · _svc=1 = 켜기 전 대조용.
+   ② 주소 단위로 미리 담은 응답 — svc.resp_pub (svc_pub_urls.py: 같은 서버 · 같은 주소의 몸을 그대로). 키 = 경로 + 물음표 칸 이름순.
+      켜고 끄기 svc_mode.json "pub". 없으면 옛 경로. */
+const { 재개발소분류 } = require('./redev_groups');
+function 층2(이름, 허용, 반올림, 만들기) {
+  return async (req, res, next) => {
+    const 강제 = req.query._svc === '1';
+    if (!지금설정().read || !(지금설정().map2 || 강제) || Date.now() < 쉬는끝) return next();
+    if (Object.keys(req.query).some(k => !허용.includes(k) && k !== '_svc')) return next();
+    const b0 = String(req.query.bbox || '').split(',').map(Number);
+    if (b0.length !== 4 || b0.some(n => !Number.isFinite(n))) return next();   // 틀린 bbox → 옛 경로가 400
+    const b = 반올림 ? b0.map(소수7) : b0;
+    try {
+      const 몸 = await 만들기(req, b);
+      if (몸 === undefined) return next();
+      실패 = 0; 세기('map2:' + 이름, 'hit'); res.set('X-Svc', 'hit');
+      return res.json(몸);
+    } catch (e) {
+      if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+      세기('map2:' + 이름, 'fallback'); return next();
+    }
+  };
+}
+/* 공사 중 핀 — 옛 경로: sql.Float(반올림 없음) · TOP 300 · ORDER BY ISNULL(세대,0)+ISNULL(호,0) DESC, pk */
+const 공사핀 = 층2('prebuilds', ['bbox'], false, async (req, b) => {
+  const r = await pg().query(`SELECT pk, "이름", "대지위치", "용도", "세대", "호", "착공일", lat, lng, complex_id
+                                FROM svc.lyr_prebuild WHERE lat BETWEEN $2 AND $4 AND lng BETWEEN $1 AND $3
+                               ORDER BY coalesce("세대", 0) + coalesce("호", 0) DESC, pk ${K} LIMIT 300`, b);
+  return { 출처: '건축HUB 건축인허가 기본개요 원문 — 착공 · 사용승인 전', markers: r.rows };
+});
+/* 승인 핀 — 옛 경로: TOP 300 · ORDER BY 세대 DESC(NULL 은 MSSQL 내림차순에서 뒤), hp_pk */
+const 승인핀 = 층2('houseplans', ['bbox'], false, async (req, b) => {
+  const r = await pg().query(`SELECT hp_pk, "이름", "대지위치", "세대", "주건축물수", "용도", "승인일", "착공예정일", "착공일", "사용검사예정일", "상태", lat, lng, "위치근거", complex_id
+                                FROM svc.lyr_houseplan WHERE lat BETWEEN $2 AND $4 AND lng BETWEEN $1 AND $3
+                               ORDER BY "세대" DESC NULLS LAST, hp_pk ${K} LIMIT 300`, b);
+  return { 출처: '건축HUB 주택인허가(주택법 사업계획승인) — 원문', markers: r.rows };
+});
+/* 정비사업 구역 — 옛 경로: Decimal(12,7) · TOP 800 · ORDER BY area_m2 DESC · ?g=reb|etc 는 server.js 와 같은 목록 */
+const 정비층 = 층2('redev', ['bbox', 'g'], true, async (req, b) => {
+  const g = ['reb', 'etc'].includes(req.query.g) ? req.query.g : '';
+  const 거름 = g === 'reb' ? 'AND biz_nm = ANY($5)' : g === 'etc' ? "AND NOT (coalesce(biz_nm, '') = ANY($5))" : '';
+  const r = await pg().query(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
+                                FROM svc.lyr_redev_zone WHERE ${상자} ${거름} ORDER BY area_m2 DESC NULLS LAST LIMIT 800`,
+                              g ? [b[0], b[1], b[2], b[3], 재개발소분류] : b);
+  return { type: 'FeatureCollection', features: r.rows.map(d => ({
+    type: 'Feature', geometry: JSON.parse(d.geojson),
+    properties: { present_sn: d.present_sn, zone_nm: d.zone_nm, lclas: d.biz_lclas_nm, biz: d.biz_nm,
+                  cd: d.propel_cd, stage: d.propel_nm, pct: d.propel_pct, fam: d.propel_fam, area: d.area_m2 } })) };
+});
+/* 용도지역 — 옛 경로: Decimal(12,7) · TOP 1200 · ORDER BY area_m2_approx DESC */
+const 용도층 = 층2('zones', ['bbox'], true, async (req, b) => {
+  const r = await pg().query(`SELECT uname, dyear, dnum, sigg_name, area_m2_approx, geojson, grp
+                                FROM svc.lyr_landzone WHERE ${상자} ORDER BY area_m2_approx DESC NULLS LAST LIMIT 1200`, b);
+  return { type: 'FeatureCollection', features: r.rows.map(d => ({
+    type: 'Feature', geometry: JSON.parse(d.geojson),
+    properties: { uname: d.uname, grp: d.grp, dyear: d.dyear, dnum: d.dnum, sigg_name: d.sigg_name, area: d.area_m2_approx } })) };
+});
+/* 주소 단위 미리 담은 응답 — 키는 svc_pub_urls.py 키()와 같은 규칙(경로 + 물음표 칸 이름순 · _svc* · _t 뺌) */
+function 공개키(req) {
+  const q = Object.entries(req.query).filter(([k]) => !k.startsWith('_svc') && k !== '_t')
+    .map(([k, v]) => [k, Array.isArray(v) ? v[v.length - 1] : String(v)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return req.path + (q.length ? '?' + q.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '');
+}
+const 공개길 = /^\/api\/(areas\/(sido|sgg|dongs|ris)|coverage|redev\/[A-Za-z0-9]{10,40}(\/detail)?)$/;
+async function 공개응답(req, res, next) {
+  if (req.method !== 'GET' || !공개길.test(req.path)) return next();
+  const 강제 = req.query._svc === '1';
+  if (req.query._svcbuild || req.query._t) return next();   // 발행기가 받는 길 — 늘 적재DB 경로
+  if (!지금설정().read || !(지금설정().pub || 강제) || Date.now() < 쉬는끝) return next();
+  try {
+    const r = await pg().query('SELECT status, body_gz FROM svc.resp_pub WHERE url = $1', [공개키(req)]);
+    실패 = 0;
+    if (!r.rows.length) { 세기('pub', 'miss'); res.set('X-Svc', 'miss'); return next(); }
+    세기('pub', 'hit');
+    res.status(r.rows[0].status).set({ 'Content-Type': 'application/json; charset=utf-8', 'X-Svc': 'hit', 'Cache-Control': 'no-store', 'Vary': 'Accept-Encoding' });
+    if (/\bgzip\b/.test(req.get('accept-encoding') || '')) return res.set('Content-Encoding', 'gzip').end(r.rows[0].body_gz);
+    return res.end(zlib.gunzipSync(r.rows[0].body_gz));
+  } catch (e) {
+    if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
+    세기('pub', 'fallback'); return next();
+  }
+}
+
+module.exports = { 빈자리, 단지응답, 마커, 필지, 건물, 법정동, 행정동, 닫힌핀, 신축핀, 자동완성, 목록검색, 여기지역, 주변단지, 청약핀, 응답캐시, 공사핀, 승인핀, 정비층, 용도층, 공개응답, pg, 지금설정 };
