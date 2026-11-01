@@ -509,8 +509,15 @@ app.use(async (req, res, next) => {
     if (!m[2]) {
       const 몸 = await 가상몸(pool, g.종류, g.원문pk, id);
       if (!몸) return res.status(404).json({ error: 'not found' });
+      const 구 = await 가상구역경계(pool, g.pnu);
+      if (구) 몸.geo = 구;
       res.set('Cache-Control', 'no-store');
       return res.json(몸);
+    }
+    /* 11-01 사장님 (수색8 재개발) "재개발은 폴리곤이 없나? — 1 ㄱㄱ": 대장 전 단지의 경계 = 대표 필지가 든 정비구역 경계(있을 때) */
+    if (m[2] === 'geo') {
+      const 구 = await 가상구역경계(pool, g.pnu);
+      if (구) { res.set('Cache-Control', 'no-store'); return res.json(구); }
     }
     가단지자리.run({ id, 이름: g.이름, 주소: null, pnu: g.pnu, lat: g.lat, lng: g.lng }, () => next());
   } catch (e) { fail(res, e, 'pre-complex'); }
@@ -4365,6 +4372,25 @@ SELECT n = ${받았나SQL('유치원', 점시군구SQL)}`,
    응답 칸 이름은 /api/complexes/:id 와 같다(complex · dongs · spec · floors · parcels · zones · redev · permits · poi · schools …) — 화면이 renderDetail 로 그대로 그린다.
    ★ 값은 전부 허가(설계) · 승인 원문이다. 대장에서 오는 칸(호 · 실거래 · 공시가격 · 관리비)은 비워 두고 `가상` 이 그 까닭을 들고 간다.
    ★ 동 키(mgm_bldrgst_pk 자리)는 허가 동별개요 PK — 대장 PK 와 섞이지 않게 앞에 'P:' · 'H:' 를 붙인다. */
+/* 11-01 대장 전 단지(주택 사업계획승인 · 건축허가)의 원문에는 대표 지번 하나뿐이라 지도에 그 필지만 작게 그려졌다(수색8 재개발 = 16-2 한 필지).
+   → 대표 필지가 **절반 넘게 들어간 정비구역**(재개발 · 재건축 · 재정비촉진구역 · 소규모 정비 — 지구 단위 · 역세권 공급 · 도시재생 같은 넓은 것은 빼고)이 있으면
+     그 구역 경계를 이 단지의 경계로 그린다. 여럿이면 가장 작은 구역. 위치(도형)로만 잇는다 — 이름은 안 본다. 없으면 null(예전처럼 필지). */
+async function 가상구역경계(pool, pnu) {
+  if (!/^\d{19}$/.test(String(pnu || ''))) return null;
+  try {
+    const r = await pool.request().input('pnu', sql.Char(19), pnu).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('gold.fn_pnu_redev') IS NULL SELECT TOP 0 sn = '', 구역 = N'', 사업 = N'', geojson = N'';
+      ELSE SELECT TOP 1 sn = z.present_sn, 구역 = z.zone_nm, 사업 = z.biz_nm, z.geojson
+        FROM (SELECT v.present_sn, x = SUM(v.xarea), p = SUM(v.parea) FROM gold.fn_pnu_redev(@pnu, 0) v GROUP BY v.present_sn) h
+        JOIN silver.redev_zone z ON z.present_sn = h.present_sn AND z.is_current = 1
+       WHERE z.geojson IS NOT NULL AND h.x >= 0.5 * h.p
+         AND z.biz_lclas_nm IN (N'정비사업', N'재정비촉진사업', N'소규모 정비사업') AND z.biz_nm NOT LIKE N'%지구%'
+       ORDER BY z.area_m2, z.present_sn;`);
+    const z = r.recordset[0];
+    if (!z) return null;
+    return { type: 'FeatureCollection', 출처: '정비구역 경계', features: [{ type: 'Feature', properties: { 구역: z.구역, 사업: z.사업, sn: z.sn }, geometry: JSON.parse(z.geojson) }] };
+  } catch (e) { return null; }
+}
 async function 가상필지(pool, pnu) {
   if (!/^\d{19}$/.test(String(pnu || ''))) return { parcels: [], zones: [], redev: [], geo: { type: 'FeatureCollection', features: [] } };
   const r = await pool.request().input('pnu', sql.Char(19), pnu).query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
