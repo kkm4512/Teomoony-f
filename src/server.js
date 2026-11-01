@@ -5239,7 +5239,7 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
   const sn = String(req.params.sn || '').slice(0, 40);
   try {
     const pool = await getPool();
-    const r = await pool.request().input('sn', sql.VarChar(40), sn).query(`
+    const r = await pool.request().input('sn', sql.VarChar(40), sn).input('svtop', sql.Int, 분양권다(req)).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT TOP 1 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
         FROM silver.redev_zone WHERE is_current = 1 AND present_sn = @sn;
@@ -5497,7 +5497,7 @@ app.get('/api/applyhome', async (req, res) => {
   if (!cid && !kapt && !house) return res.status(400).json({ error: 'complex_id · kapt_code · house 중 하나가 필요합니다' });
   try {
     const pool = await getPool();
-    const r = await pool.request().input('cid', sql.Int, cid).input('k', sql.VarChar(20), kapt).input('hm', sql.VarChar(20), house).query(`
+    const r = await pool.request().input('cid', sql.Int, cid).input('k', sql.VarChar(20), kapt).input('hm', sql.VarChar(20), house).input('svtop', sql.Int, 분양권다(req)).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       IF OBJECT_ID('tempdb..#ahkey') IS NOT NULL DROP TABLE #ahkey;
       SELECT DISTINCT x.house_manage_no, x.pblanc_no INTO #ahkey FROM (
@@ -5574,8 +5574,8 @@ app.get('/api/applyhome', async (req, res) => {
          WHERE t.trade_kind LIKE 'SILV%' AND t.match_pnu IN (SELECT pnu FROM #ahpn) AND @첫 IS NOT NULL
            AND (t.deal_ymd >= @첫   /* 입주권(조합원 권리)은 공고 전 10년까지 — 316 과 같은 규칙 */
                 OR (t.ownership_gbn = N'입' AND t.deal_ymd >= CONVERT(CHAR(8), DATEADD(YEAR, -10, TRY_CONVERT(DATE, @첫)), 112)));
-      SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
-             구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn,
+      SELECT TOP (@svtop) 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
+             구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn, 이름 = t.bld_nm,
              취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk
        ORDER BY t.deal_ymd DESC, t.trade_sk DESC;
@@ -5583,7 +5583,10 @@ app.get('/api/applyhome', async (req, res) => {
              취소 = SUM(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END),
              입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END),
              필지로 = SUM(CASE WHEN v.근거 LIKE N'같은 필지%' THEN 1 ELSE 0 END),
-             공고전 = SUM(CASE WHEN v.근거 LIKE N'%공고 전%' THEN 1 ELSE 0 END)
+             공고전 = SUM(CASE WHEN v.근거 LIKE N'%공고 전%' THEN 1 ELSE 0 END),
+             셈 = (SELECT 이름 = ISNULL(NULLIF(LTRIM(t2.bld_nm), ''), N''), 구분 = ISNULL(NULLIF(LTRIM(t2.ownership_gbn), ''), ''), 평 = CAST(FLOOR(t2.exclu_use_ar) AS INT), n = COUNT(*)
+                     FROM #sv v2 JOIN silver.rtms_trade t2 ON t2.trade_sk = v2.trade_sk
+                    GROUP BY ISNULL(NULLIF(LTRIM(t2.bld_nm), ''), N''), ISNULL(NULLIF(LTRIM(t2.ownership_gbn), ''), ''), CAST(FLOOR(t2.exclu_use_ar) AS INT) FOR JSON PATH)
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;
       /* 같은 공고 지번의 공고 가운데 **이미 단지에 이어진** 것 — 어느 단지인지(링크 표 그대로). 관리번호로 열 때만 */
       /* 단지(대장)가 있으면 단지, 대장 없는 신축(K-apt 만)이면 K-apt — 링크 표에 적힌 그대로 */
@@ -6193,8 +6196,10 @@ app.get('/api/complexes/:id/pharmacy', async (req, res) => {
    ★ 현재 단지와 섞지 않는다(gold.closed_site 따로). '폐쇄' ≠ '철거' — 구분은 원문(말소·폐쇄·일부말소·일부폐쇄) 그대로 보인다.
    ★ 지금 단지와는 **같은 필지(PNU)** 로만 — 이름으로 잇지 않는다. 같은 필지라고 '이어 지은 것' 이라는 뜻은 아니다. */
 /* 분양권·입주권 줄 + 셈 — #sv(trade_sk, 근거) 를 채운 뒤 붙인다. 화면의 분양권칸() 이 읽는 모양(/api/applyhome 과 같은 칸) */
+/* 11-01 사장님 "120건 맞아? · 어떤 단지인지 · 구분 탭" — 처음엔 최근 40줄만 보내고(@svtop, ?sv=all 이면 5000),
+   칩 건수는 **전부**를 신고 단지명 · 구분 · 평형(전용 정수)으로 센 것(셈, JSON 한 칸 — 결과표 수를 안 바꾸려고)으로 준다 */
 const 분양권줄SQL = `
-      SELECT TOP 40 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
+      SELECT TOP (@svtop) 계약일 = t.deal_ymd, 거래원 = t.deal_amount, 전용 = t.exclu_use_ar, 층 = t.floor_no,
              구분 = NULLIF(LTRIM(t.ownership_gbn), ''), 거래방식 = t.dealing_gbn, 이름 = t.bld_nm,
              취소 = CAST(ISNULL(t.is_canceled, 0) AS INT), 해제일 = NULLIF(LTRIM(t.cdeal_day), ''), v.근거
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk
@@ -6202,8 +6207,12 @@ const 분양권줄SQL = `
       SELECT 건수 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 THEN 1 ELSE 0 END),
              취소 = SUM(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END),
              입주권 = SUM(CASE WHEN ISNULL(t.is_canceled, 0) = 0 AND t.ownership_gbn = N'입' THEN 1 ELSE 0 END),
+             셈 = (SELECT 이름 = ISNULL(NULLIF(LTRIM(t2.bld_nm), ''), N''), 구분 = ISNULL(NULLIF(LTRIM(t2.ownership_gbn), ''), ''), 평 = CAST(FLOOR(t2.exclu_use_ar) AS INT), n = COUNT(*)
+                     FROM #sv v2 JOIN silver.rtms_trade t2 ON t2.trade_sk = v2.trade_sk
+                    GROUP BY ISNULL(NULLIF(LTRIM(t2.bld_nm), ''), N''), ISNULL(NULLIF(LTRIM(t2.ownership_gbn), ''), ''), CAST(FLOOR(t2.exclu_use_ar) AS INT) FOR JSON PATH),
              처음 = MIN(t.deal_ymd), 끝 = MAX(t.deal_ymd)
         FROM #sv v JOIN silver.rtms_trade t ON t.trade_sk = v.trade_sk;`;
+const 분양권다 = req => (req.query.sv === 'all' ? 5000 : 40);
 const 폐쇄칸 = `s.site_key, s.pnu, s.shter_day, s.이름, s.이름출처, s.주용도, s.동수, s.총괄세대, s.사용승인일, s.폐쇄구분,
                 s.plat_plc, s.new_plat_plc, s.lat, s.lng, s.now_complex_id, now_nm = c.complex_nm, s.위치근거`;   /* 319: 지금 필지가 없는 자리는 어떻게 찍었는지 */
 const 폐쇄동칸 = `t.mgm_shtreg_pk, t.pnu, t.shter_day, t.shter_gb_nm, t.regstr_kind_nm, bld_nm = gold.fn_name_mask(t.bld_nm), t.dong_nm, t.main_atch_gb_nm,
@@ -6229,7 +6238,7 @@ app.get('/api/closed/site/:key', async (req, res) => {
   if (!/^\d{19}-\d{1,8}$/.test(k)) return res.status(400).json({ error: 'bad key' });
   try {
     const pool = await getPool();
-    const r = await pool.request().input('k', sql.VarChar(30), k).query(`
+    const r = await pool.request().input('k', sql.VarChar(30), k).input('svtop', sql.Int, 분양권다(req)).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT ${폐쇄칸} FROM gold.closed_site s LEFT JOIN gold.complex c ON c.complex_id = s.now_complex_id WHERE s.site_key = @k;
       SELECT ${폐쇄동칸} FROM silver.bld_closed_title t JOIN gold.closed_site s ON s.site_key = @k

@@ -5021,7 +5021,7 @@ function 주변판들(p) {
 const 고르기기본 = { edu: 'all', traffic: 'all', shop: 'all', med: 'all' };
 const 고르기값 = {};
 /* 기억하지 않고 늘 '전체' 로 시작하는 고르기(단지마다 값이 다른 것 — 평형 등) */
-const 고르기전체로 = new Set(['sv-gb', 'sv-py', 'shop', 'edu', 'traffic', 'med']);   /* 11-01 사장님 "상권 탭 눌렀을 때도 디폴트가 전체" — 상권은 늘 전체로 시작(기억 안 함) */
+const 고르기전체로 = new Set(['sv-nm', 'sv-gb', 'sv-py', 'shop', 'edu', 'traffic', 'med']);   /* 11-01 사장님 "상권 탭 눌렀을 때도 디폴트가 전체" — 상권은 늘 전체로 시작(기억 안 함) */
 function 고른(ns, 칸들) {
   let v = 고르기값[ns];
   if (고르기전체로.has(ns)) v = v || 'all';
@@ -5088,6 +5088,8 @@ function 고르기줄거르기(판) {
       if (ok) 맞음++;
       tr.hidden = !(ok && 보임 < 한도); if (!tr.hidden) 보임++;
     });
+    /* 11-01 받은 줄이 일부뿐인 표(분양권 — 처음 40줄) — 아무것도 안 골랐으면 전부의 수(data-ptotal)로 센다(더보기는 그때 전부를 받는다) */
+    if (표.dataset.ptotal && 값.every(([, v]) => v === 'all')) 맞음 = Math.max(맞음, Number(표.dataset.ptotal) || 0);
     /* 11-01: 실거래처럼 '10건 더보기' 단추(data-pickmore) — 누르면 한도를 10 늘린다 */
     const 더 = 표.parentElement && 표.parentElement.querySelector('[data-pickmore]');
     if (더) { 더.hidden = 보임 >= 맞음; 더.innerHTML = `10건 더보기 <span class="muted">(${fmt(보임)} / ${fmt(맞음)})</span>`; }
@@ -6802,7 +6804,7 @@ async function 분양채우기() {
     }
     const 지금 = document.querySelector('#detail .ahbox');
     if (!지금 || 지금.dataset.ah !== 키) return;  // 그사이 다른 단지로 옮겼다
-    지금.innerHTML = 분양칸(r.공고 || []) + 분양권칸(r);
+    지금.innerHTML = 분양칸(r.공고 || []) + 분양권칸({ ...r, 분양권url: `/api/applyhome?${kind === 'c' ? 'complex_id' : 'kapt_code'}=${encodeURIComponent(id)}&sv=all` });
     지금.querySelectorAll('.subtabs').forEach(b => 탭줄손잡이(b, true));   // 10-31 구분 · 평형 작은 탭 줄
   } catch { /* 덤 */ }
 }
@@ -7053,42 +7055,86 @@ function 과목칸(r) {
    ★ '분양가와 차이' 는 **같은 전용면적(±0.05㎡)의 최고 분양가**와의 뺄셈일 뿐이다. 옵션·확장비·층은 모른다.
    ★ 입주권('입')은 조합원 권리라 분양가와 견줄 값이 아니다 — 차이를 안 적는다.
      원본 구분 칸이 빈 거래는 빈 채로 둔다(분양권이라고 단정하지 않는다). */
+/* 11-01 사장님 "120건 맞아? · 어떤 단지의 실거래인지 명시 · 다른 실거래처럼 구분 탭" —
+   서버는 최근 40줄 + **전부를 센 수**(셈: 신고 단지명 · 구분 · 평형)를 준다. 칩 건수 · 머리 수는 셈으로(받은 40줄로 세지 않는다).
+   칩을 고르거나 더보기가 받은 줄을 넘으면 그때 전부(?sv=all)를 받아 다시 그린다(r.분양권url). */
+const 분양권원 = new Map(); let 분양권번호 = 0;
+function 분양권셈(r) {
+  const n = r.분양권수 || {};
+  let 셈 = n.셈;
+  if (typeof 셈 === 'string') { try { 셈 = JSON.parse(셈); } catch { 셈 = null; } }
+  if (Array.isArray(셈) && 셈.length) return 셈.map(x => ({ 이름: x.이름 || '', 구분: x.구분 || '', 평: x.평 == null ? null : Number(x.평), n: Number(x.n) || 0 }));
+  const m = new Map();   // 옛 응답(셈 없음) — 받은 줄로
+  (r.분양권 || []).forEach(x => { const k = [x.이름 || '', x.구분 || '', Math.floor(Number(x.전용))].join('|');
+    const v = m.get(k) || { 이름: x.이름 || '', 구분: x.구분 || '', 평: Number.isFinite(Math.floor(Number(x.전용))) ? Math.floor(Number(x.전용)) : null, n: 0 }; v.n++; m.set(k, v); });
+  return [...m.values()];
+}
 function 분양권칸(r) {
-  const t = r.분양권 || [], n = r.분양권수 || {};
+  const t = r.분양권 || [];
   if (!t.length) return '';
+  const 셈 = 분양권셈(r);
+  const 전 = 셈.reduce((a, x) => a + x.n, 0) || t.length;
   const 형 = (r.공고 || []).flatMap(p => p.주택형 || []);
   const 최고 = a => { const v = 형.filter(m => m.전용m2 != null && Math.abs(Number(m.전용m2) - Number(a)) < 0.05 && m.최고원)
                                  .map(m => Number(m.최고원)); return v.length ? Math.max(...v) : null; };
   const 억 = v => { const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4);
     return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
   const 날 = d => 날짜(d);
-  /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '해제' 표시. 분양가와 차이는 취소 줄엔 안 적는다.
-     11-01 사장님 "분양 청약 탭도 일반 실거래 탭처럼" — 실거래 탭 '거래 내역' 과 같은 줄(계약일 · 거래가 · 전용면적 · 층 + 꼬리표) · 10건씩 더보기.
-     작은 안내(첫 공고 전 입주권 · 공고 없이 이은 계약)는 화면에서 빼고 정책 '청약홈' 에. */
-  const 전 = (Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length;
-  return `${sect('분양권·입주권 거래', 'applyhome', ` ${fmt(전)}`)}
-    ${(() => { /* 2026-10-31 사장님 "구분이나 평형별로 고를 수 있는 탭" — 구분(원문) · 평형(전용면적 정수 ㎡) 작은 탭 줄. 단지마다 다르니 늘 '전체' 로 시작 */
-      const 구분들 = [...new Set(t.map(x => x.구분 || ''))];
-      const 이름 = g => g === '입' ? '입주권' : g === '분' ? '분양권' : '구분 없음';
-      const gb = [['all', '전체'], ...['분', '입', ''].filter(g => 구분들.includes(g)).map(g => [g || 'none', 이름(g), t.filter(x => (x.구분 || '') === g).length])];
-      const 평들 = [...new Set(t.map(x => Math.floor(Number(x.전용))).filter(Number.isFinite))].sort((a, b) => a - b);
-      const py = [['all', '전체'], ...평들.map(v => [String(v), `${v}㎡`, t.filter(x => Math.floor(Number(x.전용)) === v).length])];
-      return (gb.length > 2 ? 고르기단추('sv-gb', gb) : '') + (py.length > 2 ? 고르기단추('sv-py', py) : ''); })()}
-    <div class="tlist" data-pickrows="sv-gb sv-py|10"><div class="trow thd"><div class="td">계약일</div><div class="tm">거래가</div><div class="tx">전용면적 · 층</div></div>
+  const id = ++분양권번호; 분양권원.set(id, r);
+  if (분양권원.size > 30) 분양권원.delete(분양권원.keys().next().value);
+  const 부분 = t.length < 전 && r.분양권url;
+  /* 단지 이름 = 실거래 신고의 단지명 원문(이름으로 단지에 잇지 않는다 — 어느 단지 계약인지 보여 줄 뿐) */
+  const 이름들 = [...new Set(셈.map(x => x.이름))].sort((a, b) => (a === '') - (b === '') || 셈.filter(x => x.이름 === b).reduce((s, x) => s + x.n, 0) - 셈.filter(x => x.이름 === a).reduce((s, x) => s + x.n, 0));
+  const 이름키 = nm => 'n' + 이름들.indexOf(nm);
+  const 수 = f => 셈.filter(f).reduce((a, x) => a + x.n, 0);
+  const nm = 이름들.length === 1
+    ? [['all', `${esc(이름들[0] || '신고 단지명 없음')}<b>${fmt(전)}</b>`]]
+    : [['all', '전체'], ...이름들.map(x => [이름키(x), esc(x || '신고 단지명 없음'), 수(y => y.이름 === x)])];
+  const 구분이름 = g => g === '입' ? '입주권' : g === '분' ? '분양권' : '구분 없음';
+  const 구분들 = ['분', '입', ''].filter(g => 셈.some(x => x.구분 === g));
+  const gb = [['all', '전체'], ...구분들.map(g => [g || 'none', 구분이름(g), 수(x => x.구분 === g)])];
+  const 평들 = [...new Set(셈.map(x => x.평).filter(Number.isFinite))].sort((a, b) => a - b);
+  const py = [['all', '전체'], ...평들.map(v => [String(v), `${v}㎡`, 수(x => x.평 === v)])];
+  return `<div class="svbox" data-svid="${id}"${부분 ? ` data-svurl="${esc(r.분양권url)}"` : ''}>${sect(...(r.분양권머리 || ['분양권·입주권 거래', 'applyhome']), ` ${fmt(전)}`)}
+    ${고르기단추('sv-nm', nm)}${gb.length > 2 ? 고르기단추('sv-gb', gb) : ''}${py.length > 2 ? 고르기단추('sv-py', py) : ''}
+    <div class="tlist" data-pickrows="sv-nm sv-gb sv-py|10"${부분 ? ` data-ptotal="${전}"` : ''}><div class="trow thd"><div class="td">계약일</div><div class="tm">거래가</div><div class="tx">전용면적 · 층</div></div>
     ${t.map((x, i) => {
       const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);
       const 차 = 기준 != null && x.거래원 ? Number(x.거래원) - 기준 : null;
       const 취 = Number(x.취소);
       const 꼬 = [x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '',
+                 /직거래/.test(x.거래방식 || '') ? '직거래' : '',
                  차 == null ? '' : `분양가 ${(차 >= 0 ? '+' : '−') + 억(Math.abs(차))}`].filter(Boolean);
-      return `<div class="trow${취 ? ' canc' : ''}" data-prow data-p-sv-gb="${esc(x.구분 || 'none')}" data-p-sv-py="${Math.floor(Number(x.전용))}"${i >= 10 ? ' hidden' : ''}>
+      return `<div class="trow${취 ? ' canc' : ''}" data-prow data-p-sv-nm="${이름키(x.이름 || '')}" data-p-sv-gb="${esc(x.구분 || 'none')}" data-p-sv-py="${Math.floor(Number(x.전용))}"${i >= 10 ? ' hidden' : ''}>
         <div class="td">${esc(날(x.계약일))}</div>
         <div class="tm">${x.거래원 ? (취 ? `<s>${억(Number(x.거래원))}</s>` : 억(Number(x.거래원))) : '—'}</div>
         <div class="tx">${Math.floor(Number(x.전용))}㎡${x.층 != null ? ` · ${x.층}층` : ''}${꼬.length ? ` <span class="muted">· ${esc(꼬.join(' · '))}</span>` : ''}${취 ? ` <span class="tcx">${용어('해제')}</span>` : ''}</div>
       </div>`; }).join('')}
     </div>
-    <button type="button" class="moreb" data-pickmore${t.length > 10 ? '' : ' hidden'}>10건 더보기 <span class="muted">(${fmt(Math.min(10, t.length))} / ${fmt(t.length)})</span></button>`;
+    <button type="button" class="moreb" data-pickmore${전 > 10 ? '' : ' hidden'}>10건 더보기 <span class="muted">(${fmt(Math.min(10, 전))} / ${fmt(전)})</span></button></div>`;
 }
+/* 받은 줄보다 더 봐야 할 때(칩을 골랐거나 더보기가 받은 줄을 넘음) — 전부를 받아 그 자리에 다시 그린다. 고른 칩 · 보일 수는 그대로 */
+document.addEventListener('click', async e => {
+  const box = e.target.closest('.svbox[data-svurl]'); if (!box || box.dataset.svbusy) return;
+  const 칩 = e.target.closest('[data-pickns] > [data-pick]'), 더 = e.target.closest('[data-pickmore]');
+  if (!칩 && !더) return;
+  const 표 = box.querySelector('[data-pickrows]'), 받은 = 표 ? 표.querySelectorAll('[data-prow]').length : 0;
+  const 한도 = 표 ? Number(표.dataset.pickrows.split('|')[1]) || 10 : 10;
+  if (!칩 && 한도 <= 받은) return;                       // 아직 받은 줄 안에서 넘긴다
+  if (칩 && 칩.dataset.pick === 'all' && 한도 <= 받은) return;
+  box.dataset.svbusy = '1';
+  try {
+    const r0 = 분양권원.get(Number(box.dataset.svid)); if (!r0) return;
+    const r = await fetch(box.dataset.svurl).then(x => x.json());
+    if (!r || r.error || !box.isConnected) return;
+    const 틀 = document.createElement('div');
+    틀.innerHTML = 분양권칸({ ...r0, 분양권: r.분양권 || [], 분양권수: r.분양권수 || r0.분양권수, 분양권url: null });
+    const 새 = 틀.firstElementChild; if (!새) return;
+    const 새표 = 새.querySelector('[data-pickrows]'); if (새표) 새표.dataset.pickrows = `${새표.dataset.pickrows.split('|')[0]}|${한도}`;
+    box.replaceWith(새);
+    고르기줄거르기(새);
+  } catch { /* 덤 — 받은 줄은 그대로 */ } finally { delete box.dataset.svbusy; }
+});
 
 /* ================= 폰 바텀시트 (2026-10-22, 사장님 "너 생각대로 ㄱㄱ") =================
    ≤640px 지도 보기에서만 쓴다(넓은 화면은 CSS 가 아무것도 안 바꾼다 — 상태 값만 달린다).
@@ -7249,7 +7295,7 @@ async function 분양핀열기(house, ll) {
   try {
     const r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json());   // 같은 공고 지번의 안 이어진 공고까지
     if (r.error) throw new Error(r.error);
-    pop.setContent(`<div class="ahpopin">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸(r) : ''}</div>`);
+    pop.setContent(`<div class="ahpopin">${분양칸(r.공고 || [])}${(r.공고 || []).length ? 분양권칸({ ...r, 분양권url: `/api/applyhome?house=${encodeURIComponent(house)}&sv=all` }) : ''}</div>`);
   } catch (e) { pop.setContent(`<p class="note">공고를 불러오지 못했습니다 — ${esc(e.message || String(e))}</p>`); }
 }
 document.addEventListener('click', e => {
@@ -7936,7 +7982,7 @@ async function 공고상세(house, lat, lng) {
     <p class="note sm">단지에 아직 안 이어짐 · ${lat == null ? '지도 자리 없음(공고 지번 필지를 못 찾음)'
         : 근처 ? `지도 표는 '근처'(공고 지번 필지가 지금 없어 같은 본번 필지 ${fmt(w.근처필지)}개 가운데)` : '지도 표 = 공고 지번 자리'}</p>
     ${이력칸}
-    <div class="ahbox">${분양칸(공고들, true)}${공고들.length ? 분양권칸(r) : ''}</div>`;
+    <div class="ahbox">${분양칸(공고들, true)}${공고들.length ? 분양권칸({ ...r, 분양권url: `/api/applyhome?house=${encodeURIComponent(house)}&sv=all` }) : ''}</div>`;
 }
 /* 12:44 사장님 "따로 버튼 안 눌러도 X 누른 것처럼" — 단지 상세를 열면 그 단지 필지 중 닫힌 대장이 있는 필지에 **저절로** ✕ + 회색 점선.
    ★ 구역층(정비·토지이용 토글)과 따로 둔다 — 그걸 켜고 꺼도 이 표시는 남는다. 단지를 닫거나 바꾸면 지운다.
@@ -8167,8 +8213,7 @@ function 폐쇄그리기() {
     ${거래탭UI}
     ${tradeList(거래, 폐쇄거래탭, null)}
     ${옛거래칸(r.옛거래, s, ['뒤'])}
-    ${(r.분양권 || []).length ? sect('이 자리 사업의 분양권·입주권', 'rtms', ` ${fmt(분양권수)}`)
-      + 분양권칸({ ...r, 공고: [], 분양권말: `대장이 닫힌 ${esc(날(s.shter_day))} 이후 이 지번 계약(새로 짓는 사업의 권리) · 신고 이름 ${esc([...new Set(r.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} <span class="muted">(참고)</span>` }) : ''}
+    ${(r.분양권 || []).length ? 분양권칸({ ...r, 공고: [], 분양권머리: ['이 자리 사업의 분양권·입주권', 'rtms'], 분양권url: `/api/closed/site/${encodeURIComponent(s.site_key || '')}?sv=all` }) : ''}
     ${거래수 || (r.분양권 || []).length || (r.옛거래.셈 || []).length ? '' : `<p class="note">${gapCell('', 'NA', '이 지번으로 신고된 실거래 중 단지에 안 붙은 것이 없습니다')}</p>`}
     ${공시칸}`;
 
@@ -8650,8 +8695,7 @@ function 구역상세(d) {
     ${공.length ? `<ul class="lu">${공.map(p => `<li${p.이은단지 ? ` data-goto="${p.이은단지}"` : ` data-ahhouse="${esc(p.house_manage_no)}" data-lat="${p.lat}" data-lng="${p.lng}"`} style="cursor:pointer">
         <b>${esc(p.house_nm || '')}</b><span class="muted"> ${esc(공고종류말[p.공고종류] || p.공고종류 || '')} · 모집공고 ${날(p.rcrit_pblanc_de)} · 입주예정 ${월(p.mvn_prearnge_ym)} · 공급 ${fmt(p.tot_suply || 0)}세대</span></li>`).join('')}</ul>`
       : `<p class="note">${gapCell('', 'NA', `공고 지번이 이 구역 안에 있는 청약홈 공고가 없습니다 (${범위말로()} 공고만 받았습니다)`)}</p>`}
-    ${(d.분양권 || []).length ? sect('구역 안 분양권·입주권', 'rtms', ` ${fmt((Number(d.분양권수.건수) || 0) + (Number(d.분양권수.취소) || 0))}`)
-      + 분양권칸({ ...d, 공고: [], 분양권말: `이 구역 경계와 겹치는 <b>지금 필지</b>의 지번으로 신고된 계약입니다(${날(d.분양권수.처음)} ~ ${날(d.분양권수.끝)}). 실거래 신고의 단지명: ${esc([...new Set(d.분양권.map(x => x.이름).filter(Boolean))].slice(0, 3).join(', ') || '—')} (참고로만 보입니다 — 이름으로 잇지 않습니다)` }) : ''}
+    ${(d.분양권 || []).length ? 분양권칸({ ...d, 공고: [], 분양권머리: ['구역 안 분양권·입주권', 'rtms'], 분양권url: `/api/redev/${encodeURIComponent(z.sn || '')}/detail?sv=all` }) : ''}
     ${sect('구역에 걸친 단지', 'bld', ` ${fmt(단.length)}`)}
     ${/* 2026-10-22 사장님 "걸친 단지 10개씩, 더보기 누르면 10개씩 더" — 다 그려 두고 11번째부터 숨긴다(다시 받지 않는다) */''}
     ${단.length ? `<ul class="lu zcx">${단.map((x, i) => `<li data-goto="${x.complex_id}" style="cursor:pointer"${i >= 10 ? ' hidden' : ''}>
