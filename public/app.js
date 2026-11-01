@@ -3707,7 +3707,24 @@ function 동이름(d) {
    ★ 동·호는 **없다.** 실거래 원본에 안 온다(정책 4장) — 날짜·금액·층·면적뿐이다.
    ★ 자르는 곳마다 "몇 중 몇": 서버가 종류별 120건을 주고 화면은 10줄씩 펼친다.
      평형을 고르면 그 평형만 거르고, 그 수를 다시 적는다. */
-function tradeList(rows, 거래탭, 평형) {
+/* 11-01 평형 하나의 거래 내역 — 종류별 최근 120건에 그 평형이 다 안 들어 있을 때만 /trade-list 로 따로 받는다(사장님 DMC 롯데캐슬 114㎡) */
+const 평형거래캐시 = new Map();
+let 평형거래부를 = null;
+async function 평형거래채우기() {
+  const 키 = 평형거래부를; 평형거래부를 = null;
+  if (!키 || 평형거래캐시.has(키)) return;
+  const [id, k, 평형] = 키.split('§');
+  const [n, src] = 평형.split('|');
+  평형거래캐시.set(키, null);                     // 받는 중(같은 키로 두 번 안 부른다)
+  let 줄 = [];
+  try {
+    const x = await fetch(`/api/complexes/${encodeURIComponent(id)}/trade-list?k=${encodeURIComponent(k)}&p=${encodeURIComponent(n)}&s=${encodeURIComponent(src || '전용')}`);
+    if (x.ok) 줄 = (await x.json()).줄 || [];
+  } catch { /* 못 받으면 받은 것만으로 그린다 */ }
+  평형거래캐시.set(키, 줄);
+  if (lastDetail && String(lastDetail.complex && lastDetail.complex.complex_id) === id && 거래탭 === k && tradeArea === 평형) renderDetail(lastDetail);
+}
+function tradeList(rows, 거래탭, 평형, 단지id) {
   const 종 = r => r.전월세 ? (r.월세냐 ? '월세' : '전세') : '매매';
   const 종R = (rows || []).filter(r => 종(r) === 거래탭);
   if (!종R.length) return '';
@@ -3716,14 +3733,18 @@ function tradeList(rows, 거래탭, 평형) {
      그때 종류 전체를 분모로 쓰면 "매매 2,105건 중 12건" 이 되어 거짓이 된다.
      그래서 평형을 고른 경우에는 **받은 것 안에서** 센다고 적는다. */
   const 전체종류 = Number(종R[0].전체) || 종R.length;
-  /* 11-01: 서버가 종류별 최근 120건(기본 = 1) + 평형마다 최근 40건을 준다. '전체' 는 앞의 것만 —
-     뒤의 것을 섞으면 날짜가 띄엄띄엄 건너뛰어 '그 사이 거래 없음' 으로 읽힌다. 기본 칸이 없는 옛 응답은 전부 기본. */
-  const 기본R = 종R.filter(r => r.기본 == null || Number(r.기본) === 1);
-  const R = (평형 == null || 평형 === '') ? 기본R : 종R.filter(r => {
+  const 고름 = !(평형 == null || 평형 === '');
+  /* 11-01: 종류별 최근 120건이 잘렸고 평형을 골랐으면 그 평형만 따로 받는다(오래된 평형은 120건 안에 한 줄도 없을 수 있다) */
+  const 잘린종류 = 전체종류 > 종R.filter(r => !r.분양권).length;
+  const 따로키 = 고름 && 단지id && 평형 !== '' && 잘린종류 ? `${단지id}§${거래탭}§${평형}` : null;
+  const 따로 = 따로키 ? 평형거래캐시.get(따로키) : undefined;
+  if (따로키 && 따로 === undefined) 평형거래부를 = 따로키;
+  const 받는중 = 따로키 && !따로;
+  const R = !고름 ? 종R : (따로 && 따로.length) ? 따로 : 종R.filter(r => {
     const k = r.평형 == null ? '' : String(r.평형) + (r.면적칸 && r.면적칸 !== '전용' ? '|' + r.면적칸 : '');
     return k === 평형;
   });
-  if (!R.length) return '';
+  if (!R.length) return 받는중 ? sect('거래 내역', 'rtms', '') + '<p class="srcline">이 평형 거래를 불러오는 중…</p>' : '';
   const 받은 = R.length;
   const 보임 = Math.max(1, Math.min(거래Shown, 받은));
   const 돈 = r => r.전월세
@@ -3760,10 +3781,11 @@ function tradeList(rows, 거래탭, 평형) {
         /* ★ 2026-10-21 QA: 이 '전체' 는 **해제 포함**이다(목록은 해제도 제자리에 둔다). 바로 위 탭·평형 카드의
            건수는 해제를 뺀 수라 '매매 1,429' 옆에 '1,443건 중' 이 떠서 어긋나 보였다 - 그 말을 적는다. */
         ? `<p class="srcline">${esc(거래탭)} ${fmt(전체종류)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '')
+    : 받는중 ? '<p class="srcline">이 평형의 이전 거래를 불러오는 중…</p>'
     : (() => {
-        /* 11-01: 평형마다 따로 받으니 그 평형의 진짜 분모(평형전체 · 해제 포함)를 안다 — 다 받았으면 줄을 안 쓴다 */
-        const 평형전체 = Number((R.find(r => !r.분양권) || {}).평형전체) || 0;
-        if (!평형전체) return '';
+        /* 11-01: 따로 받았으면 그 평형의 진짜 분모(평형전체 · 해제 포함)를 안다 — 다 받았으면 줄을 안 쓴다.
+           따로 안 받았으면(종류 전체가 120건 안) 받은 것이 그 평형의 전부다. */
+        const 평형전체 = Number((R.find(r => r.평형전체 != null) || {}).평형전체) || 0;
         return 평형전체 > 받은본
           ? `<p class="srcline">이 평형 ${esc(거래탭)} ${fmt(평형전체)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '';
       })();
@@ -5287,7 +5309,7 @@ function renderDetail(payload) {
     ${거래탭UI}
     ${areaPick}
     ${statTable(stats.filter(고른거래[1]), 거래탭)}
-    ${tradeList(거래목록, 거래탭, tradeArea)}
+    ${tradeList(거래목록, 거래탭, tradeArea, V ? null : c.complex_id)}
     ${jeonseBlock(jeonse, tradeArea)}
     ${offsiteBlock(offsite)}
     ${stats.length ? '' : V ? 대장전말(V, '실거래') : `<p class="note">${gapCell('', 'NA',
@@ -5489,6 +5511,7 @@ function renderDetail(payload) {
   관리비추이채우기();      // 10-31 관리 탭 관리비 아래 '관리비 추이'(K-apt 자료실 엑셀)
   어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
   평단가채우기();          // 11-01 평단가 칸 — 실거래 탭에 있을 때만 그릇이 있다
+  평형거래채우기();        // 11-01 평형 하나의 거래 내역(목록이 잘린 단지에서 평형을 골랐을 때만)
   병원채우기();            // 심평원 병원·약국 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   }

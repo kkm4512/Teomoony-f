@@ -5919,6 +5919,58 @@ app.get('/api/complexes/:id/poi-list', async (req, res) => {
   } catch (e) { fail(res, e, 'poi-list'); }
 });
 
+/* 2026-11-01 평형 하나의 거래 내역 — 사장님 (DMC 롯데캐슬 114㎡) "실거래가 있는데 왜 저렇게 표현한 거야? 다른 실거래가 내역처럼".
+   단지 상세(_q_trades)는 종류별 **최근 120건**만 준다 → 마지막 매매가 오래된 평형(114㎡ · 2025.03)은 한 줄도 안 와서
+   평형을 골라도 '거래 내역' 이 비었다. 상세 몸을 키우지 않고(서비스DB 에 발행된 JSON 을 다시 만들 필요도 없게)
+   **평형을 고르고 · 목록이 잘린 단지일 때만** 화면이 이걸 따로 부른다.
+   ★ 칸 · 거르는 기준은 _q_trades 와 글자 그대로 같다(해제는 제자리에 같이 · 분양권·입주권은 매매에만 섞음). 평형마다 최근 120건 + 그 평형 전체 수. */
+app.get('/api/complexes/:id/trade-list', async (req, res) => {
+  const id = Number(req.params.id), p = Number(req.query.p);
+  const k = String(req.query.k || ''), s = String(req.query.s || '전용');
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(p) || p < 0 || p > 100000
+      || !['매매', '전세', '월세'].includes(k) || !['전용', '연', '건물'].includes(s)) return res.status(400).json({ error: 'bad query' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).input('p', sql.Int, p)
+      .input('rent', sql.Bit, k === '매매' ? 0 : 1).input('wol', sql.Int, k === '월세' ? 1 : 0).input('s', sql.NVarChar(4), s).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      WITH t AS (
+        SELECT 날짜 = deal_ymd,
+               취소 = CAST(CASE WHEN is_canceled = 1 THEN 1 ELSE 0 END AS INT),
+               전월세 = is_rent,
+               월세냐 = CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
+               금액 = deal_amount, 보증금 = deposit, 월세 = monthly_rent,
+               면적 = COALESCE(exclu_use_ar, total_floor_ar, building_ar),
+               면적칸 = CASE WHEN exclu_use_ar   IS NOT NULL THEN N'전용'
+                            WHEN total_floor_ar IS NOT NULL THEN N'연'
+                            WHEN building_ar    IS NOT NULL THEN N'건물' END,
+               평형 = CAST(FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)) AS INT),
+               층 = floor_no,
+               직거래 = CASE WHEN dealing_gbn LIKE N'%직거래%' THEN 1 ELSE 0 END,
+               갱신 = CASE WHEN contract_type = N'갱신' THEN 1 ELSE 0 END,
+               분양권 = CAST(NULL AS NVARCHAR(10)), 근거 = CAST(NULL AS NVARCHAR(30))
+          FROM silver.rtms_trade
+         WHERE match_complex_id = @id
+        UNION ALL
+        SELECT t.deal_ymd, CAST(CASE WHEN t.is_canceled = 1 THEN 1 ELSE 0 END AS INT), CAST(0 AS BIT), 0,
+               t.deal_amount, NULL, NULL, t.exclu_use_ar, N'전용', CAST(FLOOR(t.exclu_use_ar) AS INT), t.floor_no,
+               CASE WHEN t.dealing_gbn LIKE N'%직거래%' THEN 1 ELSE 0 END, 0,
+               CASE WHEN t.ownership_gbn = N'입' THEN N'입주권' WHEN t.ownership_gbn = N'분' THEN N'분양권' ELSE N'분양권·입주권' END, s.근거
+          FROM gold.fn_complex_silv(@id) s JOIN silver.rtms_trade t ON t.trade_sk = s.trade_sk
+      ), r AS (
+        SELECT *, 평형전체 = SUM(CASE WHEN 분양권 IS NULL THEN 1 ELSE 0 END) OVER (),
+               분양권수 = SUM(CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END) OVER (),
+               rn = ROW_NUMBER() OVER (PARTITION BY CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
+          FROM t
+         WHERE 전월세 = @rent AND 월세냐 = @wol AND 평형 = @p AND 면적칸 = @s
+      )
+      SELECT 평형전체, 분양권수, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거
+        FROM r WHERE rn <= 120 ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC`);
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 줄: r.recordset });
+  } catch (e) { fail(res, e, 'complex-trade-list'); }
+});
+
 /* 2026-11-01 평단가 (399) — 사장님 "평단가 같은 것도 중요해 · 지역 안에 이런 평형의 실거래가가 이 정도".
    단지 × 평형(전용 정수 ㎡)의 3.3㎡당 매매가 중앙값(실거래 원문만 · 전용 기준) + 같은 종류의 이 동네(법정동) · 시군구 평형대 중앙값.
    동네 = 단지의 지금 동(gold.complex_lawd_now → 396 확정 대응 → 대표 PNU 코드). 추정은 없다. */
@@ -6110,8 +6162,7 @@ app.get('/api/closed/site/:key', async (req, res) => {
                       WHERE a.pnu = e.pnu AND a.mgm_shtreg_pk = e.mgm_shtreg_pk AND a.expos_pubuse_gb_nm = N'전유') ea
        WHERE s.site_key = @k ORDER BY e.dong_nm, 층 DESC, e.ho_nm;
       /* 실거래 탭 — 단지 상세와 같은 칸(tradeList 가 읽는 모양). 옛 건물(닫히기 전) 것만 · 종류마다 120 */
-      SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수 = 0,
-             평형전체, 기본 = CASE WHEN rn <= 120 THEN 1 ELSE 0 END
+      SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수 = 0
         FROM (SELECT 날짜 = deal_ymd, 취소 = CAST(ISNULL(is_canceled, 0) AS INT), 전월세 = CAST(is_rent AS BIT),
                      월세냐 = CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
                      금액 = deal_amount, 보증금 = deposit, 월세 = monthly_rent,
@@ -6122,17 +6173,9 @@ app.get('/api/closed/site/:key', async (req, res) => {
                      분양권 = CAST(NULL AS NVARCHAR(10)), 근거 = CAST(NULL AS NVARCHAR(30)),
                      전체 = COUNT(*) OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END),
                      rn = ROW_NUMBER() OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END
-                                             ORDER BY deal_ymd DESC, trade_sk DESC),
-                     /* 11-01: 평형마다 최근 40건 보장(단지 상세와 같은 규칙) */
-                     평형전체 = COUNT(*) OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
-                                               FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)),
-                                               CASE WHEN exclu_use_ar IS NOT NULL THEN 1 WHEN total_floor_ar IS NOT NULL THEN 2 WHEN building_ar IS NOT NULL THEN 3 END),
-                     rnp = ROW_NUMBER() OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
-                                              FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)),
-                                              CASE WHEN exclu_use_ar IS NOT NULL THEN 1 WHEN total_floor_ar IS NOT NULL THEN 2 WHEN building_ar IS NOT NULL THEN 3 END
-                                              ORDER BY deal_ymd DESC, trade_sk DESC)
+                                             ORDER BY deal_ymd DESC, trade_sk DESC)
                 FROM #ot WHERE 때 = N'전') x
-       WHERE rn <= 120 OR rnp <= 40 ORDER BY 전월세, 월세냐, 날짜 DESC;
+       WHERE rn <= 120 ORDER BY 전월세, 월세냐, 날짜 DESC;
       SELECT op, 건수, 받은때 FROM silver.bld_closed_detail_done d JOIN gold.closed_site s ON s.pnu = d.pnu WHERE s.site_key = @k;
       /* 2026-10-23 사장님 "123 너가 ㄱㄱ" — 이 지번의 공동주택가격(VWorld NED, 국토부 공시) 연도별: 공시된 호 수 · 원문 값의 최저~최고(평균·중위는 안 낸다).
          ★ NED 는 **지번** 단위라 같은 지번의 지금 건물 값도 온다(국화연립 2002 폐쇄 자리 → 2006~ '국화아파트') — **대장이 닫힌 해까지만** 이 옛 건물 것으로 본다. */
@@ -7799,19 +7842,12 @@ app.get('/api/complexes/:id', async (req, res) => {
         SELECT *, 전체 = SUM(CASE WHEN 분양권 IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐),
                분양권수 = SUM(CASE WHEN 분양권 IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐),
                rn = ROW_NUMBER() OVER (PARTITION BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END
-                                       ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC),
-               /* 2026-11-01 사장님 (DMC 롯데캐슬 114㎡ "실거래가 있는데 왜 저렇게?"): 종류별 최근 120건만 주니
-                  마지막 매매가 오래된 평형(114㎡ · 2025.03)은 목록에 한 줄도 안 와서 평형을 골라도 '거래 내역' 이 비었다.
-                  → 평형마다 최근 40건은 **따로 보장**한다. '전체' 화면은 예전처럼 종류별 최근 120건(기본 = 1)만 쓴다. */
-               평형전체 = SUM(CASE WHEN 분양권 IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐, 평형, 면적칸),
-               rnp = ROW_NUMBER() OVER (PARTITION BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END, 평형, 면적칸
-                                        ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
+                                       ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
           FROM t
       )
       SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세,
-             면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수,
-             평형전체, 기본 = CASE WHEN rn <= 120 THEN 1 ELSE 0 END
-        FROM r WHERE rn <= 120 OR rnp <= 40
+             면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수
+        FROM r WHERE rn <= 120
        ORDER BY 전월세, 월세냐, 날짜 DESC, ISNULL(금액, 보증금) DESC`);   /* 2026-10-23: 날짜순으로 섞는다 — 준공 뒤(등기 전) 입주권도 붙어서 */
 
     /* 전세가율 (2026-10-19)
