@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const express = require('express');
 const { sql, getPool, 가단지자리 } = require('./db');
+const 앱 = require('./appdb');   /* 11-01 서비스DB 분리 4묶음: 앱 상태(회원 · 문의 · 알림 · 관심 · AI 질문 · 이용현황 · 접속 기록) — svc_mode "app" 이면 서비스DB(app.*) */
 
 /* ---------- 서버가 죽거나 다시 뜬 기록 (2026-10-25 문의 4: 08:25:27 에 서버가 다시 떴고 그 순간 사장님 화면이 502) ----------
    node --watch 창의 글은 남지 않는다 → ../Teomoony/logs/web_life.log 에 적는다(Teomoony-f 밖 — 여기 쓰면 --watch 가 그걸 보고 또 재시작한다).
@@ -249,8 +250,8 @@ function 갈래(ua) {
 /* 운영자 IP — root 로 로그인한 요청이 들어온 IP(계정이 root 하나라 그게 사장님). 표(ops.usage_owner_ip)와 메모리 둘 다 */
 const 운영자IP = new Set();
 async function 운영자IP읽기() {
-  try { const r = await (await getPool()).request().query('SELECT ip FROM ops.usage_owner_ip');
-        운영자IP.clear(); r.recordset.forEach(x => 운영자IP.add(x.ip)); }
+  try { const ips = 앱.켜짐() ? await 앱.운영자IP목록() : (await (await getPool()).request().query('SELECT ip FROM ops.usage_owner_ip')).recordset.map(x => x.ip);
+        운영자IP.clear(); ips.forEach(ip => 운영자IP.add(ip)); }
   catch (e) { console.error('[운영자IP] 못 읽었다 —', e.message); }
 }
 운영자IP읽기(); setInterval(운영자IP읽기, 10 * 60 * 1000).unref();
@@ -259,6 +260,7 @@ function 운영자IP더하기(req, 근거) {
   const ip = 진짜IP(req);
   if (!ip || 운영자IP.has(ip) || 이용_안세는호스트.has(req.hostname)) return;
   운영자IP.add(ip);
+  if (앱.켜짐()) return void 앱.운영자IP넣기(ip, 근거).catch(e => console.error('[운영자IP] 못 넣었다 —', e.message));
   getPool().then(pool => pool.request().input('ip', sql.VarChar(45), ip).input('g', sql.NVarChar(100), 근거).query(`
     IF NOT EXISTS (SELECT 1 FROM ops.usage_owner_ip WHERE ip = @ip) INSERT INTO ops.usage_owner_ip (ip, 근거) VALUES (@ip, @g);`))
     .catch(e => console.error('[운영자IP] 못 넣었다 —', e.message));
@@ -311,6 +313,7 @@ async function 이용_내보내기() {
   const 담음 = [...이용_모음.entries()];
   이용_모음.clear();
   try {
+    if (앱.켜짐()) { await 앱.이용넣기(담음.map(([키, 수]) => { const [때, 동작, 갈] = 키.split('\t'); return [때, 동작, 갈 || '모름', 수]; })); return; }
     const pool = await getPool();
     for (let i = 0; i < 담음.length; i += 200) {
       const 조각 = 담음.slice(i, i + 200), r = pool.request();
@@ -441,6 +444,7 @@ async function 기록_한묶음() {
      10-26 22:33 부터 접속 기록이 한 줄도 안 쌓였다(실패분을 앞에 돌려놓고 다시 500줄 → 또 실패). 13 × 150 = 1,950. */
   const 담음 = 기록_줄.splice(0, 150);
   try {
+    if (앱.켜짐()) { await 앱.기록넣기(담음); return; }
     const pool = await getPool();
     const r = pool.request();
     const 값들 = 담음.map((x, j) => {
@@ -477,10 +481,14 @@ setInterval(기록_내보내기, 15000).unref();
      걸면 로그가 부풀고 다른 쿼리가 막힌다. 다 못 지워도 다음 번에 또 돈다. */
 async function 기록_정리() {
   try {
-    const pool = await getPool();
-    const r = await pool.request().query(
-      'DELETE TOP (5000) FROM ops.req_log WHERE 때 < DATEADD(DAY, -90, SYSDATETIME());');
-    const n = r.rowsAffected && r.rowsAffected[0];
+    let n;
+    if (앱.켜짐()) n = await 앱.기록정리();
+    else {
+      const pool = await getPool();
+      const r = await pool.request().query(
+        'DELETE TOP (5000) FROM ops.req_log WHERE 때 < DATEADD(DAY, -90, SYSDATETIME());');
+      n = r.rowsAffected && r.rowsAffected[0];
+    }
     if (n) console.log(`[접속기록] 90일 지난 ${n}줄 지웠다`);
   } catch (e) { console.error('[접속기록] 정리 실패 —', e.message); }
 }
@@ -539,7 +547,6 @@ app.get('/api/complexes/markers', require('./svc').마커);   /* 2026-10-25 지�
 app.get('/api/usage', async (req, res) => {
   try {
     await 이용_내보내기();          /* 방금 것까지 보이게 하고 센다 */
-    const pool = await getPool();
     const 이제 = Date.now();
     const 오늘 = 이용_날(이제);
     const 이레 = 이용_날(이제 - 6 * 86400000);
@@ -549,15 +556,15 @@ app.get('/api/usage', async (req, res) => {
     const 날짜 = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? String(req.query.day) : null;
     const 날시작 = 날짜 ? 날짜 + 'T00:00:00' : null;
     const 날끝 = 날짜 ? 이용_날(Date.parse(날짜 + 'T00:00:00+09:00') + 86400000) : null;
-    const r = pool.request()
+    const 결 = 앱.켜짐() ? await 앱.이용현황({ 오늘, 이레, 보름, d0: 날시작, d1: 날끝 }) : await (await getPool()).request()
       .input('오늘', sql.VarChar(19), 오늘)
       .input('이레', sql.VarChar(19), 이레)
       .input('보름', sql.VarChar(19), 보름)
       .input('d0', sql.VarChar(19), 날시작)
-      .input('d1', sql.VarChar(19), 날끝);
+      .input('d1', sql.VarChar(19), 날끝)
     /* ★ 315: 맨 위 수 · 동작별 · 날짜별은 **사람**만(로봇이라고 밝히지 않은 것). 갈래별 표는 따로 — 로봇이 얼마나 오는지도 사실이다.
        ★ 운영자(사장님) 접속은 세지 않는다(셀 때 뺀다 · 지난 것은 다시 셌다). 나라는 접속 기록(req_log)의 최근 7일 — IP 는 내보내지 않는다. */
-    const 결 = await r.query(`
+    .query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT 동작,
              오늘 = SUM(CASE WHEN 시각 >= CAST(@오늘 AS DATETIME2(0)) THEN 횟수 ELSE 0 END),
@@ -689,7 +696,7 @@ app.get('/api/admin/collect', requireAuth, async (req, res) => {
 app.get('/api/admin/ips', requireAuth, async (req, res) => {
   if (!req.user || req.user.r !== 'root') return res.status(403).json({ error: '관리자만 볼 수 있습니다' });
   try {
-    const r = await (await getPool()).request().query(`
+    const r = 앱.켜짐() ? { recordset: await 앱.접속IP() } : await (await getPool()).request().query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT l.ip, 나라 = MAX(l.나라), ua = MAX(l.ua), n = COUNT(*),
              단지 = SUM(CASE WHEN l.경로 LIKE '/c/%' THEN 1 ELSE 0 END), api = SUM(CASE WHEN l.경로 LIKE '/api/%' THEN 1 ELSE 0 END),
@@ -2477,12 +2484,10 @@ app.post('/api/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: '아이디와 비밀번호가 필요합니다' });
   try {
-    const pool = await getPool();
-    const r = await pool.request()
+    const u = 앱.켜짐() ? await 앱.사용자(String(username).slice(0, 64)) : (await (await getPool()).request()
       .input('u', sql.NVarChar(64), String(username).slice(0, 64))
       .query(`SELECT user_id, username, pw_salt, pw_hash, role, is_active
-                FROM meta.app_user WHERE username = @u`);
-    const u = r.recordset[0];
+                FROM meta.app_user WHERE username = @u`)).recordset[0];
     /* 사용자가 없어도 **해시를 한 번 돌린다** - 있을 때와 걸리는 시간을 맞춘다 */
     const salt = u ? u.pw_salt : crypto.randomBytes(16).toString('hex');
     const calc = await pwHash(String(password), salt);
@@ -2490,7 +2495,8 @@ app.post('/api/login', async (req, res) => {
       && crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(u.pw_hash));
     if (!ok) return res.status(401).json({ error: '아이디나 비밀번호가 맞지 않습니다' });
 
-    await pool.request().input('id', sql.Int, u.user_id)
+    if (앱.켜짐()) await 앱.로그인때(u.user_id);
+    else await (await getPool()).request().input('id', sql.Int, u.user_id)
       .query(`UPDATE meta.app_user SET last_login = SYSDATETIME() WHERE user_id = @id`);
     const exp = Date.now() + TOKEN_HOURS * 3600 * 1000;
     res.json({ token: signToken({ uid: u.user_id, u: u.username, r: u.role, exp }),
@@ -2531,6 +2537,13 @@ app.post('/api/inquiry', requireAuth, async (req, res) => {
   const 기록 = (문의셈.get(uid) || []).filter(t => 이제 - t < 3600e3);
   if (기록.length >= 20) return res.status(429).json({ error: '문의를 너무 많이 남겼습니다 — 한 시간 뒤에 다시 남겨 주세요' });
   try {
+    if (앱.켜짐()) {
+      const 번호 = await 앱.문의넣기({ uid, u: 글(req.user && req.user.u, 50), 무엇: 글(b.무엇, 100), 말: 글(b.말, 300),
+        번호: /^[0-9A-Z-]{4,20}$/.test(String(b.오류번호 || '')) ? String(b.오류번호) : null, 단지: 글(b.단지코드, 30), 화면: 글(b.화면, 500),
+        내용: 글(b.내용, 2000), 종류: b.종류 === '일반' ? '일반' : '오류' });
+      기록.push(이제); 문의셈.set(uid, 기록);
+      return res.json({ ok: true, 문의번호: 번호 });
+    }
     const pool = await getPool();
     const r = await pool.request()
       .input('uid', sql.Int, uid)
@@ -2554,8 +2567,7 @@ app.post('/api/inquiry', requireAuth, async (req, res) => {
 app.get('/api/inquiries', async (req, res) => {
   const 쪽 = 상한(req.query.page, 1, 1000);
   try {
-    const pool = await getPool();
-    const r = await pool.request().input('o', sql.Int, (쪽 - 1) * 30).query(`
+    const r = 앱.켜짐() ? { recordset: await 앱.문의목록((쪽 - 1) * 30) } : await (await getPool()).request().input('o', sql.Int, (쪽 - 1) * 30).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT inquiry_id, 때, 아이디, 종류, 무엇, 말, 오류번호, 단지코드, 내용, 상태, 답변, 답변때, 답변자,
              전체 = COUNT(*) OVER ()
@@ -2576,6 +2588,11 @@ app.post('/api/inquiry/:id/answer', requireAuth, async (req, res) => {
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'bad id' });
   const 답 = String((req.body || {}).답변 || '').trim().slice(0, 4000) || null;
   try {
+    if (앱.켜짐()) {
+      const n = await 앱.답변(id, 답, String(req.user.u || '').slice(0, 50));
+      if (!n) return res.status(404).json({ error: 'not found' });
+      return res.json({ ok: true });
+    }
     const pool = await getPool();
     const r = await pool.request().input('id', sql.Int, id).input('a', sql.NVarChar(4000), 답)
       .input('u', sql.NVarChar(50), String(req.user.u || '').slice(0, 50)).query(`
@@ -2602,8 +2619,7 @@ app.get('/api/my', requireAuth, async (req, res) => {
   const uid = 내uid(req);
   if (!Number.isInteger(uid)) return res.status(401).json({ error: '로그인이 필요합니다' });
   try {
-    const pool = await getPool();
-    const r = await pool.request().input('u', sql.Int, uid).query(`
+    const r = 앱.켜짐() ? await 앱.내정보(uid) : await (await getPool()).request().input('u', sql.Int, uid).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       SELECT username, role, last_login FROM meta.app_user WHERE user_id = @u;
       SELECT TOP 50 notice_id, 때, 종류, 제목, 내용, inquiry_id, 읽은때 FROM ops.notice WHERE user_id = @u ORDER BY 때 DESC, notice_id DESC;
@@ -2624,6 +2640,7 @@ app.get('/api/my', requireAuth, async (req, res) => {
 app.get('/api/my/badge', requireAuth, async (req, res) => {
   const uid = 내uid(req);
   try {
+    if (앱.켜짐()) return res.json(await 앱.배지(uid));
     const pool = await getPool();
     const r = await pool.request().input('u', sql.Int, uid).query(`
       SELECT 안읽음 = COUNT(*) FROM ops.notice WHERE user_id = @u AND 읽은때 IS NULL;
@@ -2635,8 +2652,7 @@ app.put('/api/my/fav/:id', requireAuth, async (req, res) => {
   const uid = 내uid(req), id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'bad id' });
   try {
-    const pool = await getPool();
-    const r = await pool.request().input('u', sql.Int, uid).input('c', sql.Int, id).query(`
+    const r = 앱.켜짐() ? { recordset: [{ 결과: await 앱.관심넣기(uid, id) }] } : await (await getPool()).request().input('u', sql.Int, uid).input('c', sql.Int, id).query(`
       IF NOT EXISTS (SELECT 1 FROM gold.complex WHERE complex_id = @c) BEGIN SELECT 결과 = 'none'; RETURN; END
       IF (SELECT COUNT(*) FROM ops.fav_complex WHERE user_id = @u AND 뺀때 IS NULL) >= 500 BEGIN SELECT 결과 = 'full'; RETURN; END
       MERGE ops.fav_complex AS t USING (SELECT u = @u, c = @c) s ON t.user_id = s.u AND t.complex_id = s.c
@@ -2653,6 +2669,7 @@ app.delete('/api/my/fav/:id', requireAuth, async (req, res) => {
   const uid = 내uid(req), id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'bad id' });
   try {
+    if (앱.켜짐()) { await 앱.관심빼기(uid, id); return res.json({ ok: true }); }
     const pool = await getPool();
     await pool.request().input('u', sql.Int, uid).input('c', sql.Int, id).query(`
       UPDATE ops.fav_complex SET 뺀때 = SYSDATETIME() WHERE user_id = @u AND complex_id = @c AND 뺀때 IS NULL;`);
@@ -2665,6 +2682,7 @@ app.post('/api/my/notice/read', requireAuth, async (req, res) => {
   const id = (req.body || {}).id == null ? null : Number(req.body.id);
   if (id !== null && (!Number.isInteger(id) || id < 1)) return res.status(400).json({ error: 'bad id' });
   try {
+    if (앱.켜짐()) { await 앱.알림읽음(uid, id); return res.json({ ok: true }); }
     const pool = await getPool();
     await pool.request().input('u', sql.Int, uid).input('i', sql.Int, id).query(`
       UPDATE ops.notice SET 읽은때 = SYSDATETIME() WHERE user_id = @u AND 읽은때 IS NULL AND (@i IS NULL OR notice_id = @i);`);
@@ -3052,6 +3070,8 @@ async function llmParse(q) {
    응답을 기다리지 않는다 — 기록이 실패해도 검색은 나간다(실패는 서버 로그에만). */
 function 질문남기기(req, q, 종류, 해석, 결과수) {
   if (req.user && req.user.u === '_시험') return;     // 집안 시험(/api/_ask)은 남기지 않는다
+  if (앱.켜짐()) return void 앱.질문넣기({ uid: Number(req.user && req.user.uid) || null, u: String((req.user && req.user.u) || '').slice(0, 50) || null,
+    q: String(q).slice(0, 500), k: 종류, h: JSON.stringify(해석 || {}).slice(0, 4000), n: 결과수 == null ? null : Number(결과수) }).catch(e => console.error('[ask_log]', e.message));
   getPool().then(pool => pool.request()
     .input('uid', sql.Int, Number(req.user && req.user.uid) || null)
     .input('u', sql.NVarChar(50), String((req.user && req.user.u) || '').slice(0, 50) || null)
