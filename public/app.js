@@ -5470,6 +5470,7 @@ function renderDetail(payload) {
   const pb   = (poiBrand || []).filter(b => Number(b.r1000) > 0);
   const pl   = (poiLife || []).filter(x => Number(x.r1000) > 0);
 
+  /* 11-02 사장님 (900002528) "주택대장은 빼줘" — 사업승인 가단지의 '주택대장 <원문 번호>' 줄 · 출처 글의 그 번호를 안 보인다(사람이 읽을 값이 아님 · 원문 번호는 데이터에 그대로) */
   const paneI = `
     ${!V && c.complex_id ? `<div class="scbox" data-sc="${esc(String(c.complex_id))}"></div>` : ''}
     ${specBlock(spec, c, vlrat, 전용률, 호총수, kapt, dongs)}
@@ -5478,7 +5479,7 @@ function renderDetail(payload) {
                                                               가상: V ? V.종류 : null, 착공예정: V && V.착공예정일, 승인예정: V && V.사용검사예정일 })}
     ${sect('단지 요약', 'bld')}
     <dl>
-      ${row('단지코드', c.complex_id)}${V ? row(V.키말, esc(V.pk)) : ''}
+      ${row('단지코드', c.complex_id)}${V && V.종류 !== 'h' ? row(V.키말, esc(V.pk)) : ''}
       ${spec ? '' : `${row('대장 동 / 건물', `${fmt(c.dong_cnt)} / ${c.bld_cnt == null ? '—' : fmt(c.bld_cnt)}`)}
       ${c.max_floor ? row('최고 층수', '지상 ' + fmt(c.max_floor) + '층') : ''}
       ${row('세대수', fmt(c.hhld_cnt_sum))}
@@ -5611,7 +5612,7 @@ function renderDetail(payload) {
       `${i && 묶 !== TABS[i - 1][2] ? '<span class="tabsep" aria-hidden="true"></span>' : ''}<button type="button" class="tab" data-tab="${k}" aria-selected="${k === detailTab}"${k === 'sale' && !(V ? V.종류 === 'h' || (V.청약 || []).length : 분양수(c.complex_id)) && detailTab !== 'sale' ? ' hidden' : ''}>${label}</button>`).join('')}</div>
     <div class="pane">${({ info: paneI, near: paneN, shop: paneC, med: paneH, edu: paneE, dong: paneD, mgmt: paneM,
                            price: paneP, sale: paneS, land: paneL })[detailTab] || paneI}</div>
-    ${V ? `<p class="note sm muted">출처: ${esc(V.출처)} (${esc(V.키말)} ${esc(V.pk)}${V.원문처음월 ? ` · ${esc(V.원문처음월)}부터` : ''}) · ${V.지번없음 ? '공고 지번이 없는 택지 블록이라 지도 자리 · 주변 · 땅은 비어 있습니다' : '주변 · 땅은 그 지번 필지 기준'}. 이름은 원문 그대로이고 대장 단지와 이름으로 잇지 않습니다.</p>` : ''}`;
+    ${V ? `<p class="note sm muted">출처: ${esc(V.출처)} ${V.종류 !== 'h' ? `(${esc(V.키말)} ${esc(V.pk)}${V.원문처음월 ? ` · ${esc(V.원문처음월)}부터` : ''})` : V.원문처음월 ? `(${esc(V.원문처음월)}부터)` : ''} · ${V.지번없음 ? '공고 지번이 없는 택지 블록이라 지도 자리 · 주변 · 땅은 비어 있습니다' : '주변 · 땅은 그 지번 필지 기준'}. 이름은 원문 그대로이고 대장 단지와 이름으로 잇지 않습니다.</p>` : ''}`;
 
   그리는가상 = null;
   renderShots(c);          // innerHTML 이 바뀐 뒤여야 컨테이너가 존재한다
