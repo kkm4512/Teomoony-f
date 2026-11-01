@@ -4103,7 +4103,7 @@ function permitBlock(rows, scope, dongs, 단지번호, 대장날) {
   const 주택 = 대장날 && 대장날.가상 === 'h';
   const 대장칸 = 허가단계칸([{ k: 주택 ? '사업계획승인' : '허가', 짧: 주택 ? '사업승인' : '허가', d: 대허 },
                            { k: '착공', d: 대착, 예: 대장날 && 대장날.착공예정 }, { k: 주택 ? '사용검사' : '사용승인', d: 대승, 예: 대장날 && 대장날.승인예정 }]);
-  const 대장줄 = 대장칸 ? `<div class="prow"><div class="pa"><b>${대장날 && 대장날.가상 ? '이 사업' : '지금 건물'}</b></div>${대장칸}</div>` : '';
+  const 대장줄 = 대장칸 ? `<div class="prow"><div class="pa"><b>${주택 ? '주택 사업계획승인' : 대장날 && 대장날.가상 ? '이 사업' : '지금 건물'}</b></div>${대장칸}</div>` : '';
   /* ★ 허가 안의 **동 내역** (2026-10-21). 55,214건을 받아만 두고 안 쓰고 있었다.
      허가 줄에는 **구조·지붕·건축면적이 없다** - 그건 동 행에만 있다.
      ★ 접어 둔다. 허가당 동이 평균 1.11개라 늘 펴 두면 줄만 는다.
@@ -4117,6 +4117,18 @@ function permitBlock(rows, scope, dongs, 단지번호, 대장날) {
        (건축HUB 동별개요 29칸 실측: '건물_명' 하나뿐이고, 거기엔 동 이름 아니면 사업명이 들어 있다).
      → 건물명이 허가의 사업명과 같으면 동 이름이 아니므로 머리에 쓰지 않고 '#순번 · 주/부속 · 용도 · 세대' 로 가른다.
        주건축물 · 세대 많은 순으로 세운다. 대장 동과 면적으로 맞춰 '몇 동' 이라고 짐작하지 않는다(허가는 짓기 전 설계값). */
+  /* 11-02 사장님 (900002528 — 같은 땅에 가설 · 신축 두 건) "구분이 안 돼" → 머리줄 = **구분 · 용도 · 규모**(원문 값), 건물 이름은 그 옆으로.
+     용도 원문이 비면 동별 원문의 주용도가 하나일 때 그것(가설건축물 등). 어느 허가가 지금 유효한지는 원문에 잇는 칸이 없어 짐작하지 않는다. */
+  const 동용도 = pk => { const u = [...new Set((동묶음.get(pk) || []).map(d => d.main_purps_nm).filter(Boolean))]; return u.length === 1 ? u[0] : ''; };
+  const 가설 = a => /가설/.test(a.main_purps_nm || 동용도(a.mgm_pmsrgst_pk));
+  const 허가제목 = a => {
+    const 용도 = a.main_purps_nm || 동용도(a.mgm_pmsrgst_pk);
+    const 동수 = (동묶음.get(a.mgm_pmsrgst_pk) || []).length ? Number(동묶음.get(a.mgm_pmsrgst_pk)[0].동총수) || 동묶음.get(a.mgm_pmsrgst_pk).length : 0;
+    const 앞 = [a.arch_gb_nm, 용도].filter(Boolean).join(' ');
+    const 규모 = [Number(a.hhld_cnt) > 0 ? `${fmt(a.hhld_cnt)}세대` : 가설(a) && 동수 ? `${fmt(동수)}개` : '',
+                 Number(a.tot_area) > 0 ? `${fmt(Math.round(a.tot_area))}㎡` : ''].filter(Boolean);
+    return [앞 && 가설(a) && 규모[0] && !Number(a.hhld_cnt) ? `${앞} ${규모.shift()}` : 앞, ...규모].filter(Boolean).join(' · ') || a.bld_nm || '—';
+  };
   const 동블록 = (pk, 사업명) => {
     const 목 = [...(동묶음.get(pk) || [])];
     if (!목.length) return '';
@@ -4208,10 +4220,12 @@ function permitBlock(rows, scope, dongs, 단지번호, 대장날) {
       const tags = [];
       /* 11-01 사장님 "저 정보가 필요해 보여?" → 허가 설계값(세대 · 연면적)은 대장이 없거나 대장 값과 다를 때만 · 지목 · 용도지역(허가 당시 값)은 뺀다(지금 값은 토지 탭).
          09:42 "추정이란 건 다 빼고 전부 정책으로" — '추정' 칩도 뺀다(세대수로 이은 규칙은 정책 '건축인허가'). */
-      const 대세 = Number(대장날 && 대장날.세대) || 0, 대면 = Number(대장날 && 대장날.연면적) || 0;
-      if (a.hhld_cnt && (!대세 || Number(a.hhld_cnt) !== 대세)) tags.push(대세 ? `허가 ${fmt(a.hhld_cnt)}세대 · 지금 대장 ${fmt(대세)}세대` : `허가 ${fmt(a.hhld_cnt)}세대`);
-      if (a.tot_area && (!대면 || Math.abs(Number(a.tot_area) - 대면) / 대면 > 0.01))
-        tags.push(대면 ? `허가 연면적 ${fmt(Math.round(a.tot_area))}㎡ · 지금 대장 ${fmt(Math.round(대면))}㎡` : `허가 연면적 ${fmt(Math.round(a.tot_area))}㎡`);
+      /* 11-02 사장님 (900002528) "건축인허가가 여러 개인데 구분이 안 돼" → 허가 세대 · 연면적은 머리줄(제목)로 올렸다. 여기는 **지금 대장 값이 다를 때만** 그 대장 값.
+         대장 없는 가단지(대장날 값은 사업승인 · 허가 원문이라 '지금 대장' 이 아니다) · 가설건축물(아파트 대장과 견줄 것이 아님)은 견주지 않는다. */
+      const 견줌 = !(대장날 && 대장날.가상) && !가설(a);
+      const 대세 = 견줌 ? Number(대장날 && 대장날.세대) || 0 : 0, 대면 = 견줌 ? Number(대장날 && 대장날.연면적) || 0 : 0;
+      if (a.hhld_cnt && 대세 && Number(a.hhld_cnt) !== 대세) tags.push(`지금 대장 ${fmt(대세)}세대`);
+      if (a.tot_area && 대면 && Math.abs(Number(a.tot_area) - 대면) / 대면 > 0.01) tags.push(`지금 대장 연면적 ${fmt(Math.round(대면))}㎡`);
       if (a.tot_pkng_cnt) tags.push(`주차 ${fmt(a.tot_pkng_cnt)}`);
       /* ★ stcns_delay_day 는 날짜(착공기한)다. 일수가 아니다.
          여기서 `${fmt(날짜)}일` 을 찍어 '착공지연 20,170,910일' 이 화면에 나갔다.
@@ -4224,8 +4238,7 @@ function permitBlock(rows, scope, dongs, 단지번호, 대장날) {
       else if (a.지연일수 < 0) tags.push(`<span class="muted">예정보다 ${fmt(-a.지연일수)}일 일찍 착공</span>`);
       if (a.기한초과 > 0) tags.push(`<span class="warnx">기한 ${fmt(a.기한초과)}일 넘겨 착공</span>`);
       return `<div class="prow">
-        <div class="pa"><b>${esc(a.bld_nm || a.main_purps_nm || '—')}</b>
-          <span>${esc(a.arch_gb_nm || '')}</span></div>
+        <div class="pa"><b>${esc(허가제목(a))}</b>${a.bld_nm ? `<span>${esc(a.bld_nm)}</span>` : ''}</div>
         ${허가단계칸(단계(a)) || `<div class="pb"><span>${steps.map(([k, v]) => `${k} ${v}`).join(' → ') || '—'}</span></div>`}
         ${tags.length ? `<div class="pm">${tags.join('<em>·</em>')}</div>` : ''}
         ${동블록(a.mgm_pmsrgst_pk, a.bld_nm)}
@@ -6238,6 +6251,7 @@ const 정책 = [
   ] },
   { 키: 'permit', 제목: '건축인허가 (국토교통부 세움터)', 글: [
     '허가 건수는 건물 수가 아닙니다 — 설계변경·취소로 한 지번에 여러 건이 쌓입니다.',
+    '<b>줄 머리</b>(2026-11-02): 허가마다 <b>구분 · 용도 · 규모</b>(원문 세대 · 연면적, 가설건축물은 개수)를 머리에 쓰고 건물 이름은 그 옆에 둡니다. 용도 원문이 비면 동별 원문의 주용도가 하나일 때 그것을 씁니다. 같은 땅에 비슷한 신축 허가가 여럿이어도 원문에 서로 잇는 칸이 없어 어느 것이 지금 유효한지는 정하지 않습니다. <b>지금 대장</b> 값은 허가 값과 다를 때만 붙이고, 대장이 없는 단지(사업승인 · 공사 중)와 가설건축물에는 붙이지 않습니다. 대장 전 주택 사업 단지는 맨 위 줄이 <b>주택 사업계획승인</b>(주택인허가 원문)입니다.',
     '재개발·재건축은 주택법 사업계획승인 대상이라 이 자료에 들어오지 않습니다.',
     '재개발 단지는 준공 때 본번이 바뀌어 지번으로 안 붙는 경우가 있어, <b>신축 · 150세대 이상 · 그 법정동에서 세대수가 유일</b>할 때만 법정동 + 세대수로 이었습니다 — 지번이 아닌 세대수로 이은 것이라 지번으로 이은 허가보다 확실성이 낮습니다(화면에 따로 표시하지 않음). 허가 줄의 세대 · 연면적은 <b>허가 설계값</b>이라, 대장이 없거나 대장 값과 다를 때만 \'허가 … · 지금 대장 …\' 으로 적습니다. 허가 당시 지목 · 용도지역은 적지 않습니다(지금 값은 토지 탭).',
     '착공지연은 착공예정일과 실제 착공일의 차이만 씁니다. 착공기한은 날짜이지 일수가 아닙니다.',
