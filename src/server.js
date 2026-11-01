@@ -2200,7 +2200,8 @@ app.get('/api/suggest', async (req, res) => {
         SELECT TOP 4 z.present_sn, z.zone_nm, z.biz_nm, z.propel_nm, z.centroid_lat, z.centroid_lng,
                minx = z.bbox_minx, miny = z.bbox_miny, maxx = z.bbox_maxx, maxy = z.bbox_maxy, 전체 = COUNT(*) OVER (),
                main_complex_id = CASE WHEN z.biz_lclas_nm = N'역세권사업' THEN
-                 (SELECT MIN(h.complex_id) FROM gold.complex_redev_hit h WHERE h.present_sn = z.present_sn AND h.xarea >= 0.5 * h.parea HAVING COUNT(*) = 1) END
+                 (SELECT TOP 1 h.complex_id FROM gold.complex_redev_hit h WHERE h.present_sn = z.present_sn AND h.xarea >= 0.5 * h.parea
+                     AND h.xarea >= 0.9 * (SELECT SUM(h2.xarea) FROM gold.complex_redev_hit h2 WHERE h2.present_sn = z.present_sn) ORDER BY h.xarea DESC) END
           FROM silver.redev_zone z
          WHERE z.is_current = 1 AND (REPLACE(z.zone_nm, ' ', '') LIKE @q0 OR REPLACE(z.biz_nm, ' ', '') LIKE @q0)
          ORDER BY CASE WHEN z.zone_nm LIKE @p THEN 0 ELSE 1 END, z.zone_nm, z.present_sn;
