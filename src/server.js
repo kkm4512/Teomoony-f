@@ -8343,9 +8343,13 @@ app.get('/api/complexes/:id/history', async (req, res) => {
         LEFT JOIN gold.redev_plan_link l ON l.present_sn = h.present_sn
         LEFT JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
        WHERE h.complex_id = @id AND h.xarea >= 0.01 * h.parea ORDER BY h.xarea DESC;
-      SELECT TOP 10 a.arch_gb_nm, a.main_purps_nm, bld_nm = gold.fn_name_mask(a.bld_nm), a.hhld_cnt, a.tot_area, a.arch_pms_day, a.real_stcns_day, a.use_apr_day
-        FROM silver.arch_permit a WHERE a.is_current = 1 AND a.pnu IN (SELECT pnu FROM #p)
-       ORDER BY ISNULL(a.tot_area, 0) DESC;
+      /* 11-01 사장님 (DMC 롯데캐슬 "건축인허가들도 토지처럼 나오게"): 전에는 지번(PNU)이 같은 허가만 봐서, 단지정보 탭 '건축인허가' 칸에
+         보이는 허가(재개발 — 옛 지번이라 세대수로 이은 것)가 여기엔 없었다. → 단지정보 칸과 **같은 묶음 · 같은 20건**(gold.v_complex_permit).
+         이은 방법(match_by)을 같이 내려 화면이 '추정 연결' 을 적는다(단지정보 칸과 같은 말). */
+      SELECT TOP 20 a.arch_gb_nm, a.main_purps_nm, bld_nm = gold.fn_name_mask(a.bld_nm), a.hhld_cnt, a.tot_area, a.arch_pms_day, a.real_stcns_day, a.use_apr_day, v.match_by
+        FROM gold.v_complex_permit v JOIN silver.arch_permit a ON a.mgm_pmsrgst_pk = v.mgm_pmsrgst_pk AND a.is_current = 1
+       WHERE v.complex_id = @id
+       ORDER BY a.arch_pms_day DESC, a.mgm_pmsrgst_pk;
       SELECT TOP 10 p.house_nm, p.공고종류, p.rcrit_pblanc_de, p.tot_suply, p.mvn_prearnge_ym
         FROM (SELECT DISTINCT house_manage_no, pblanc_no FROM gold.applyhome_link WHERE complex_id = @id) l
         JOIN silver.applyhome_pblanc p ON p.house_manage_no = l.house_manage_no AND p.pblanc_no = l.pblanc_no
@@ -8367,10 +8371,14 @@ app.get('/api/complexes/:id/history', async (req, res) => {
       SELECT TOP 40 h.이동일, h.이동사유, 필지 = COUNT(DISTINCT h.pnu)
         FROM silver.land_move_hist h WHERE h.pnu IN (SELECT pnu FROM #p) AND h.이동일 IS NOT NULL
        GROUP BY h.이동일, h.이동사유
-       ORDER BY h.이동일 DESC;`);
+       ORDER BY h.이동일 DESC;
+      /* 11-01 주택 사업계획승인(주택인허가 · 384 gold.house_plan) — 이 단지 필지(PNU 코드)와 같은 것만. 승인일 · 실제 착공일(원문) */
+      IF OBJECT_ID('gold.house_plan') IS NOT NULL
+        SELECT TOP 10 이름 = gold.fn_name_mask(h.이름), h.승인일, h.착공일 FROM gold.house_plan h WHERE h.pnu IN (SELECT pnu FROM #p) ORDER BY h.승인일;
+      ELSE SELECT TOP 0 이름 = N'';`);
     const R = r.recordsets;
     res.json({ 단지: R[0][0] || null, 옛대장: { 전체: Number((R[1][0] || {}).전체 || 0), 줄: R[2] }, 정비: R[3], 인허가: R[4],
-               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null, 토지바뀜: R[8] || [], 토지이동: R[9] || [] });
+               청약: R[5], 분양권: R[6][0] || null, 실거래: R[7][0] || null, 토지바뀜: R[8] || [], 토지이동: R[9] || [], 주택승인: R[10] || [] });
   } catch (e) { fail(res, e, 'complex-history'); }
 });
 

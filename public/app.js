@@ -7472,12 +7472,20 @@ async function 역사채우기() {
     if (z.추진일) 넣(z.추진일, `${z.추진단계 || z.propel_nm || '추진 단계'} — ${z.zone_nm || ''}`, ['land', '정비사업 구역'], '서울 정비사업');
   }
   /* 구분 · 용도가 둘 다 빈 인허가는 첫 허가일 한 줄로만(같은 말 '인허가' 줄이 일곱 번 이어지면 목차가 아니다) */
-  const 빈 = (d.인허가 || []).filter(a => !a.arch_gb_nm && !a.main_purps_nm).map(a => 숫(a.arch_pms_day)).filter(Boolean).sort();
-  if (빈.length) 넣(빈[0], '건축 허가 — 구분 원문 없음(첫 허가)', ['info', '건축인허가'], '건축인허가');
+  /* 11-01: 단지정보 탭 '건축인허가' 칸과 같은 묶음(지번 · 세대수). 세대수로 이은 것(옛 지번 — 재개발)은 단지정보 칸처럼 '추정' 을 적는다.
+     착공은 **실제 착공일**만(착공 예정일은 계획이라 역사에 안 넣는다 — 단지정보 칸에는 있다) */
+  const 허가출처 = a => a.match_by && a.match_by !== 'PNU' ? '건축인허가 · 세대수로 이은 추정' : '건축인허가';
+  const 빈 = (d.인허가 || []).filter(a => !a.arch_gb_nm && !a.main_purps_nm && 숫(a.arch_pms_day)).sort((x, y) => 숫(x.arch_pms_day).localeCompare(숫(y.arch_pms_day)));
+  if (빈.length) 넣(빈[0].arch_pms_day, '건축 허가 — 구분 원문 없음(첫 허가)', ['info', '건축인허가'], 허가출처(빈[0]));
   for (const a of (d.인허가 || []).filter(a => a.arch_gb_nm || a.main_purps_nm)) {
-    const 무엇 = a.arch_gb_nm || a.main_purps_nm;
-    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, ['info', '건축인허가'], '건축인허가');
-    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, ['info', '건축인허가'], '건축인허가');
+    const 무엇 = [a.arch_gb_nm, a.bld_nm || a.main_purps_nm].filter(Boolean).join(' · ');
+    if (a.arch_pms_day) 넣(a.arch_pms_day, `건축 허가 — ${무엇}`, ['info', '건축인허가'], 허가출처(a));
+    if (a.real_stcns_day) 넣(a.real_stcns_day, `착공 — ${무엇}`, ['info', '건축인허가'], 허가출처(a));
+  }
+  /* 11-01 주택 사업계획승인(주택인허가) — 이 단지 필지와 같은 지번만. 상세에 따로 칸이 없어 누르는 줄이 아니다 */
+  for (const h of (d.주택승인 || [])) {
+    if (h.승인일) 넣(h.승인일, `주택 사업계획승인 — ${h.이름 || '이름 없음'}`, null, '주택인허가');
+    if (h.착공일) 넣(h.착공일, `착공(주택) — ${h.이름 || '이름 없음'}`, null, '주택인허가');
   }
   for (const p of (d.청약 || [])) 넣(p.rcrit_pblanc_de, `청약 공고 — ${p.house_nm || ''}`, ['sale', '분양'], '청약홈');
   /* 10-30 사장님 "ㄱㄱ+": 철거 · 멸실 신고(건축인허가 철거멸실관리대장 원문 · 이 단지 필지) — 날짜가 있는 것만 · 칸은 건축인허가 아래 묶음 */
@@ -7500,14 +7508,16 @@ async function 역사채우기() {
   if (!ev.length) { 지금.innerHTML = ''; return; }
   const c = d.단지 || {};
   if (c.oldest_use_apr) 넣(c.oldest_use_apr, '사용승인 — 지금 대장', ['info', '제원'], '건축물대장');
+  /* 11-01: 동마다 사용승인일이 다르면(나눠 지은 단지) 마지막 동도 — 같은 대장 원문 */
+  if (c.latest_use_apr && 숫(c.latest_use_apr) !== 숫(c.oldest_use_apr)) 넣(c.latest_use_apr, '사용승인 — 마지막 동', ['info', '제원'], '건축물대장');
   if ((d.실거래 || {}).처음) 넣(d.실거래.처음, '이 단지 실거래 시작', ['price', '거래 내역'], '국토부 실거래');
   ev.sort((a, b) => (a.d ? 0 : 1) - (b.d ? 0 : 1) || a.d.localeCompare(b.d));
   /* 같은 날 · 같은 일은 한 줄(인허가가 같은 날 여러 건) */
   const 줄 = ev.filter((e, i) => !ev.slice(0, i).some(x => x.d === e.d && x.무엇 === e.무엇));
   지금.innerHTML = `${sect('이 땅의 역사', 'hist')}
-    <ol class="hist">${줄.map(e => `<li data-histgo="${esc(e.간다.join('|'))}" data-histd="${esc(String(e.d || '').replace(/[^0-9]/g, '').slice(0, 8))}"${e.폐쇄 ? ` data-histcl="${esc(e.폐쇄)}"` : ''} role="button" tabindex="0" title="누르면 그 칸으로 갑니다${e.폐쇄 ? ' · 지도에 그 옛 대장 자리를 표시합니다' : ''}">
+    <ol class="hist">${줄.map(e => `<li${e.간다 ? ` data-histgo="${esc(e.간다.join('|'))}" data-histd="${esc(String(e.d || '').replace(/[^0-9]/g, '').slice(0, 8))}"${e.폐쇄 ? ` data-histcl="${esc(e.폐쇄)}"` : ''} role="button" tabindex="0" title="누르면 그 칸으로 갑니다${e.폐쇄 ? ' · 지도에 그 옛 대장 자리를 표시합니다' : ''}"` : ' class="hist-nogo"'}>
       <span class="hist-d">${esc(날(e.d) || '날짜 없음')}</span>
-      <span class="hist-w">${esc(e.무엇)}<span class="hist-s">${esc(e.출처)} · ${esc(e.간다[1])} 칸</span></span></li>`).join('')}</ol>
+      <span class="hist-w">${esc(e.무엇)}<span class="hist-s">${esc(e.출처)}${e.간다 ? ` · ${esc(e.간다[1])} 칸` : ''}</span></span></li>`).join('')}</ol>
     `;
 }
 document.addEventListener('click', async e => {
