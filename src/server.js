@@ -5224,7 +5224,7 @@ app.get('/api/redev', async (req, res) => {
         WHERE is_current = 1 AND geojson IS NOT NULL${묶음 === 'reb' ? ` AND ${재개발조건('biz_nm')}` : 묶음 === 'etc' ? ` AND NOT ${재개발조건("ISNULL(biz_nm, N'')")}` : ''}
           AND bbox_minx <= @x1 AND bbox_maxx >= @x0
           AND bbox_miny <= @y1 AND bbox_maxy >= @y0
-        ORDER BY area_m2 DESC`);
+        ORDER BY area_m2 DESC, present_sn`);   /* 11-01 같은 면적(같은 사업의 두 기록 등)은 번호순 — 서비스DB 경로와 순서를 같게 */
     res.json({ type: 'FeatureCollection', features: r.recordset.map(d => ({
       type: 'Feature', geometry: JSON.parse(d.geojson),
       properties: { present_sn: d.present_sn, zone_nm: d.zone_nm,

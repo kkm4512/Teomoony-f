@@ -826,7 +826,7 @@ const 정비층 = 층2('redev', ['bbox', 'g'], true, async (req, b) => {
   const g = ['reb', 'etc'].includes(req.query.g) ? req.query.g : '';
   const 거름 = g === 'reb' ? 'AND biz_nm = ANY($5)' : g === 'etc' ? "AND NOT (coalesce(biz_nm, '') = ANY($5))" : '';
   const r = await pg().query(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
-                                FROM svc.lyr_redev_zone WHERE ${상자} ${거름} ORDER BY area_m2 DESC NULLS LAST LIMIT 800`,
+                                FROM svc.lyr_redev_zone WHERE ${상자} ${거름} ORDER BY area_m2 DESC NULLS LAST, present_sn COLLATE "C" LIMIT 800`,
                               g ? [b[0], b[1], b[2], b[3], 재개발소분류] : b);
   return { type: 'FeatureCollection', features: r.rows.map(d => ({
     type: 'Feature', geometry: JSON.parse(d.geojson),
