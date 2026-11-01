@@ -4801,7 +4801,7 @@ function 주변판들(p) {
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 지하철 · 버스를 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${/* ★ 머리글 숫자는 **전체**다. 보여주는 수(4)를 적으면 그게 전부인 줄 안다 */''}
-    ${고르기단추('traffic', 교통칸들)}
+    ${고르기단추('traffic', [교통칸들[0], [...교통칸들[1], sub.length ? Number(sub[0].전체) || sub.length : 0], [...교통칸들[2], bus && Number(bus.r500) || 0]])}
     ${고르기칸('traffic', 'subway', `
     ${sect('지하철', 'subway', sub.length ? ` ${fmt(Number(sub[0].전체) || sub.length)}` : '')}
     ${/* 11-01: 관리사무소가 적은 역 · 도보 시간 안내 줄은 뺐다(작은 글 없음 · 정책) */''}
@@ -4887,7 +4887,11 @@ function 주변판들(p) {
         <span><b>${fmt(pTot('r1000'))}</b>1km</span>
         <span><b>${fmt((poiSum && poiSum.업종수500) || 0)}</b>업종(500m)</span>
       </div>
-      ${(() => { const 칸들 = 상권칸들(pl, pb); return 고르기단추('shop', 칸들) + 고르기칸('shop', 'brand', pb.length ? `<div class="lt2">브랜드</div><div class="brands">${pb.slice(0, 12).map(b => `
+      ${(() => { const 칸들 = 상권칸들(pl, pb);
+        /* 11-01 칩 건수 = 500m 안 점포 수(생활 묶음 · 그 밖 업종) · 브랜드 수 */
+        const 묶수 = new Map((pl.length ? 생활묶음(pl) : []).map(([g, xs]) => ['g:' + g, xs.reduce((t, x) => t + (Number(x.r500) || 0), 0)]));
+        const 수칸 = 칸들.map(([k, n]) => [k, n, k === 'all' ? null : k === 'brand' ? pb.length : k === 'many' ? pz.filter(r => Number(r.r500) > 0).length : 묶수.get(k) ?? null]);
+        return 고르기단추('shop', 수칸) + 고르기칸('shop', 'brand', pb.length ? `<div class="lt2">브랜드</div><div class="brands">${pb.slice(0, 12).map(b => `
         <span class="bchip${Number(b.r500) ? '' : ' far'}" data-pt="brand|${esc(b.브랜드)}"
           data-pt-r="${Number(b.r500) ? 500 : 1000}"
           title="가장 가까운 곳 ${fmt(b.최단m)}m">${esc(b.브랜드)}${
@@ -4920,7 +4924,7 @@ function 주변판들(p) {
     <div class="asknote scope"><span class="gap">SCOPE</span>
       이 단지는 중심좌표가 없어 병원·약국을 거리로 찾을 수 없습니다(없는 게 아님)</div>` : `
     ${(() => { const g = pl.length ? 생활묶음(pl).find(([n]) => n === '병원·약국') : null;
-      const 칸들 = [['all', '전체'], ['hosp', '병원'], ['pharm', '약국'], ...(g ? [['shop', '상가 업종']] : [])];
+      const 칸들 = [['all', '전체'], ['hosp', '병원'], ['pharm', '약국'], ...(g ? [['shop', '상가 업종', g[1].reduce((t, x) => t + (Number(x.r500) || 0), 0)]] : [])];
       return 고르기단추('med', 칸들)
         + 고르기칸('med', 'hosp', c && c.complex_id ? `<div class="hirabox" data-hira="${esc(String(c.complex_id))}"></div>` : '', 칸들)
         + 고르기칸('med', 'pharm', c && c.complex_id ? `<div class="phbox" data-ph="${esc(String(c.complex_id))}"></div>` : '', 칸들)
@@ -4993,10 +4997,27 @@ function 고른(ns, 칸들) {
 }
 function 고르기단추(ns, 칸들) {
   const v = 고른(ns, 칸들);
-  /* 10-31 20:00 사장님 "전체가 왼쪽에 · 탭 방식으로" — 위 탭 줄과 같은 모양의 작은 탭 줄(한 줄 · 넘치면 ‹ › · 끌기) */
-  return `<div class="tabs subtabs" role="tablist" data-pickns="${ns}" data-pickcur="${esc(v)}">${칸들.map(([k, 이름]) =>
-    `<button type="button" role="tab" class="tab" data-pick="${esc(k)}" aria-selected="${k === v}">${이름}</button>`).join('')}</div>`;
+  /* 10-31 20:00 사장님 "전체가 왼쪽에" — 전체가 맨 앞.
+     11-01 사장님 "교육 · 상가 · 병원도 실거래 탭처럼" — 실거래의 동그란 칩(.achip)과 같은 모양 · 이름 옆 건수 · 넘치면 다음 줄.
+     칸 = [키, 이름, 건수?]. 건수를 안 주면 그 칸의 머리(.sect) 숫자를 화면에서 읽어 채운다(고르기수채우기 — 늦게 채워지는 칸도). */
+  return `<div class="apick pick" role="tablist" data-pickns="${ns}" data-pickcur="${esc(v)}">${칸들.map(([k, 이름, n]) =>
+    `<button type="button" role="tab" class="achip" data-pick="${esc(k)}" aria-selected="${k === v}">${이름}<b${n != null ? ' data-pickfix' : ''}>${n != null && k !== 'all' ? fmt(n) : ''}</b></button>`).join('')}</div>`;
 }
+/* 칩 건수 — 건수를 안 받은 칩은 그 칸(.picksec)의 첫 머리(.sect) 끝 숫자('유치원 3' → 3)를 읽는다. 늦게 채워지는 칸(어린이집 · 병원 · 약국)도 따라가게 상세 칸을 지켜본다 */
+function 고르기수채우기(판) {
+  (판 || document).querySelectorAll('[data-pickns].pick > [data-pick]').forEach(b => {
+    const k = b.dataset.pick, 칸 = b.querySelector('b'); if (!칸 || 칸.hasAttribute('data-pickfix') || k === 'all') return;
+    const ns = b.parentElement.dataset.pickns, 판2 = b.closest('.pane') || document;
+    const sec = [...판2.querySelectorAll(`.picksec[data-pickns="${ns}"]`)].find(x => x.dataset.picksec.split(/\s+/)[0] === k && x.dataset.picksec.split(/\s+/).length === 1);
+    const h = sec && sec.querySelector('.sect'), 표 = sec && sec.querySelector('[data-pickn]');
+    let n = '';
+    if (표) n = fmt(Number(표.dataset.pickn) || 0);   /* 늦게 채우는 칸(병원 500m 수 · 약국 영업 중 500m)이 적어 둔 수 */
+    else if (h) { const 글 = [...h.childNodes].filter(x => !(x.classList && (x.classList.contains('src') || x.classList.contains('muted')))).map(x => x.textContent).join(''); const m = 글.match(/([\d,]+)\s*$/); if (m) n = m[1]; }
+    if (칸.textContent !== n) 칸.textContent = n;
+  });
+}
+{ let 대기 = null; const 봄 = new MutationObserver(() => { if (대기) return; 대기 = requestAnimationFrame(() => { 대기 = null; 고르기수채우기(document.getElementById('detail')); }); });
+  const 붙 = () => { const d = document.getElementById('detail'); if (d) 봄.observe(d, { childList: true, subtree: true }); else setTimeout(붙, 500); }; 붙(); }
 function 고르기칸(ns, 키, html, 칸들) {
   const v = 고른(ns, 칸들);
   const 보임 = v === 'all' || String(키).split(/\s+/).includes(v);
@@ -6948,7 +6969,7 @@ function 병원칸(r) {
   if (!Number(st.좌표)) return '';
   const 거리 = m => (m >= 1000 ? (m / 1000).toFixed(1) + 'km' : fmt(m) + 'm');
   const 큰 = r.큰병원 || [], 종 = r.종별 || [];
-  return `${머리}
+  return `${머리}<i hidden data-pickn="${종.reduce((t, x) => t + (Number(x.r500) || 0), 0)}"></i>
     ${큰.length ? `<ul class="lu">${큰.map(h => `<li data-pt="hira|y:${esc(h.ykiho || '')}" title="누르면 지도에 고정 · 올리면 잠깐 보기"><b>${esc(h.이름 || '')}</b><span class="muted"> ${esc(h.종별 || '')} · ${거리(Number(h.m) || 0)}${
         h.의사 != null ? ` · 의사 ${fmt(h.의사)}명` : ''}</span></li>`).join('')}</ul>`
       : `<p class="note sm">5km 안에 상급종합·종합병원이 없습니다.</p>`}
@@ -6998,9 +7019,9 @@ function 분양권칸(r) {
     ${(() => { /* 2026-10-31 사장님 "구분이나 평형별로 고를 수 있는 탭" — 구분(원문) · 평형(전용면적 정수 ㎡) 작은 탭 줄. 단지마다 다르니 늘 '전체' 로 시작 */
       const 구분들 = [...new Set(t.map(x => x.구분 || ''))];
       const 이름 = g => g === '입' ? '입주권' : g === '분' ? '분양권' : '구분 없음';
-      const gb = [['all', '전체'], ...['분', '입', ''].filter(g => 구분들.includes(g)).map(g => [g || 'none', 이름(g)])];
+      const gb = [['all', '전체'], ...['분', '입', ''].filter(g => 구분들.includes(g)).map(g => [g || 'none', 이름(g), t.filter(x => (x.구분 || '') === g).length])];
       const 평들 = [...new Set(t.map(x => Math.floor(Number(x.전용))).filter(Number.isFinite))].sort((a, b) => a - b);
-      const py = [['all', '전체'], ...평들.map(v => [String(v), `${v}㎡`])];
+      const py = [['all', '전체'], ...평들.map(v => [String(v), `${v}㎡`, t.filter(x => Math.floor(Number(x.전용)) === v).length])];
       return (gb.length > 2 ? 고르기단추('sv-gb', gb) : '') + (py.length > 2 ? 고르기단추('sv-py', py) : ''); })()}
     <div class="tlist" data-pickrows="sv-gb sv-py|10"><div class="trow thd"><div class="td">계약일</div><div class="tm">거래가</div><div class="tx">전용면적 · 층</div></div>
     ${t.map((x, i) => {
@@ -7254,7 +7275,7 @@ function 약국칸(r) {
   if (!Number(범.좌표)) return '';
   const 날 = v => 날짜(v, '');
   const 폐비 = Number(범.폐업전체) ? Math.round(100 * Number(범.폐업좌표) / Number(범.폐업전체)) : null;
-  return `${머리}
+  return `${머리}<i hidden data-pickn="${Number(셈.영업) || 0}"></i>
     <div class="lifegrid">
       <div class="lcell"><b>${fmt(Number(셈.영업) || 0)}</b><span>영업 중 <i>500m</i></span></div>
       <div class="lcell" title="최근 5년 안에 인허가를 받은 곳(지금 영업 중)"><b>${fmt(Number(셈.개업5년) || 0)}</b><span>그중 5년 안 개업</span></div>

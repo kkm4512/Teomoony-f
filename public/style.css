@@ -2143,3 +2143,6 @@ table.pyt tr.pysub td{text-align:right;white-space:normal;font-size:11.5px;color
 .pst-s{grid-column:2/-1;font-size:11px;color:var(--ink-3)}
 .moreb[hidden]{display:none}
 .trow .tx .muted{font:inherit;color:var(--ink-3);padding:0;line-height:inherit}
+/* 11-01 탭 안 고르기 — 실거래 칩(.achip)과 같은 모양 · 건수가 없으면 숫자 칸을 안 그린다 */
+.apick.pick{margin:6px 0 8px}
+.achip b:empty{display:none}
