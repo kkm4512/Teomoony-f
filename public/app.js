@@ -3740,7 +3740,9 @@ function tradeList(rows, 거래탭, 평형, 단지id) {
   const 따로 = 따로키 ? 평형거래캐시.get(따로키) : undefined;
   if (따로키 && 따로 === undefined) 평형거래부를 = 따로키;
   const 받는중 = 따로키 && !따로;
-  const R = !고름 ? 종R : (따로 && 따로.length) ? 따로 : 종R.filter(r => {
+  /* 09:00~09:10 에 잠깐 나간 서버(평형마다 40건을 상세에 섞어 주던 판)의 응답이 캐시에 남았을 수 있다 — 그 덧붙은 줄(기본 = 0)은 '전체' 에서 뺀다 */
+  const 기본R = 종R.filter(r => r.기본 == null || Number(r.기본) === 1);
+  const R = !고름 ? 기본R : (따로 && 따로.length) ? 따로 : 종R.filter(r => {
     const k = r.평형 == null ? '' : String(r.평형) + (r.면적칸 && r.면적칸 !== '전용' ? '|' + r.면적칸 : '');
     return k === 평형;
   });
