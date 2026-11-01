@@ -5925,14 +5925,17 @@ app.get('/api/complexes/:id/poi-list', async (req, res) => {
    **평형을 고르고 · 목록이 잘린 단지일 때만** 화면이 이걸 따로 부른다.
    ★ 칸 · 거르는 기준은 _q_trades 와 글자 그대로 같다(해제는 제자리에 같이 · 분양권·입주권은 매매에만 섞음). 평형마다 최근 120건 + 그 평형 전체 수. */
 app.get('/api/complexes/:id/trade-list', async (req, res) => {
-  const id = Number(req.params.id), p = Number(req.query.p);
-  const k = String(req.query.k || ''), s = String(req.query.s || '전용');
-  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(p) || p < 0 || p > 100000
-      || !['매매', '전세', '월세'].includes(k) || !['전용', '연', '건물'].includes(s)) return res.status(400).json({ error: 'bad query' });
+  /* 11-01: p 가 '*' 면 평형 가리지 않고 그 종류 전체(최근 1000건) — '전체' 목록의 더보기(상세는 종류별 최근 120건만 준다) */
+  const 모두 = String(req.query.p) === '*';
+  const id = Number(req.params.id), p = 모두 ? null : Number(req.query.p);
+  const k = String(req.query.k || ''), s = 모두 ? null : String(req.query.s || '전용');
+  if (!Number.isInteger(id) || id <= 0 || (!모두 && (!Number.isInteger(p) || p < 0 || p > 100000 || !['전용', '연', '건물'].includes(s)))
+      || !['매매', '전세', '월세'].includes(k)) return res.status(400).json({ error: 'bad query' });
   try {
     const pool = await getPool();
     const r = await pool.request().input('id', sql.Int, id).input('p', sql.Int, p)
-      .input('rent', sql.Bit, k === '매매' ? 0 : 1).input('wol', sql.Int, k === '월세' ? 1 : 0).input('s', sql.NVarChar(4), s).query(`
+      .input('rent', sql.Bit, k === '매매' ? 0 : 1).input('wol', sql.Int, k === '월세' ? 1 : 0).input('s', sql.NVarChar(4), s)
+      .input('lim', sql.Int, 모두 ? 1000 : 120).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       WITH t AS (
         SELECT 날짜 = deal_ymd,
@@ -5962,10 +5965,10 @@ app.get('/api/complexes/:id/trade-list', async (req, res) => {
                분양권수 = SUM(CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END) OVER (),
                rn = ROW_NUMBER() OVER (PARTITION BY CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
           FROM t
-         WHERE 전월세 = @rent AND 월세냐 = @wol AND 평형 = @p AND 면적칸 = @s
+         WHERE 전월세 = @rent AND 월세냐 = @wol AND (@p IS NULL OR (평형 = @p AND 면적칸 = @s))
       )
       SELECT 평형전체, 분양권수, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거
-        FROM r WHERE rn <= 120 ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC`);
+        FROM r WHERE rn <= @lim ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC`);
     res.set('Cache-Control', 'public, max-age=600');
     res.json({ 줄: r.recordset });
   } catch (e) { fail(res, e, 'complex-trade-list'); }

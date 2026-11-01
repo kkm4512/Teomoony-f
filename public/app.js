@@ -1183,11 +1183,11 @@ async function 주변카드채우기(c) {
   const 거리 = m => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${fmt(Math.round(m / 10) * 10)}m`);
   const 월 = v => { const t = String(v || '').replace(/\D/g, ''); return t.length >= 6 ? `${t.slice(0, 4)}.${t.slice(4, 6)}` : ''; };
   const 카드 = (id, 머리, 이름, 줄) => `<a class="ncard" href="/c/${id}" data-cid="${id}">${머리 || ''}<b>${esc(이름 || '이름 없음')}</b><span>${줄}</span></a>`;
-  const 단지칸 = (r.단지 || []).length ? `${sect('주변 단지', 'bld', ` <span class="muted">1.5㎞ 안 ${fmt(r.단지수)}곳 · 가까운 순</span>`)}
+  const 단지칸 = (r.단지 || []).length ? `${sect('주변 단지', 'bld', ` ${fmt(r.단지수)}`)}
     <div class="nclist">${r.단지.map(x => 카드(x.id, '', x.이름, [`${fmt(x.세대)}세대`, x.연 ? `${x.연}년` : '', x.mx ? `최고 ${eok(x.mx)}` : '', 거리(x.m)].filter(Boolean).join(' · '))).join('')}</div>
     ${r.동 ? `<a class="ncmore" href="/r/${esc(r.동.cd)}">${esc(r.동.이름)} 단지 전체 ${fmt(r.동.수)}곳 보기 ›</a>` : ''}` : '';
   const 말 = { a: '청약 공고', h: '사업승인', p: '공사 중' };
-  const 가칸 = (r.가단지 || []).length ? `${sect('주변 분양 · 공사 중', '', ` <span class="muted">2㎞ 안 · 청약 공고 먼저</span>`)}
+  const 가칸 = (r.가단지 || []).length ? `${sect('주변 분양 · 공사 중', '')}
     <div class="nclist">${r.가단지.map(x => 카드(x.id, `<i class="ncchip k-${esc(x.종류)}">${말[x.종류] || ''}</i>`, x.이름,
       (x.종류 === 'a' ? [x.최고만원 ? `최고 ${eok(Number(x.최고만원) * 10000)}` : '', x.공급 ? `공급 ${fmt(x.공급)}세대` : '', x.입주 ? `입주 ${월(x.입주)}` : '', 거리(x.m)]
        : x.종류 === 'h' ? [x.세대 ? `${fmt(x.세대)}세대` : '', x.착공 ? `착공 ${월(x.착공)}` : (x.승인 ? `승인 ${월(x.승인)}` : ''), 거리(x.m)]
@@ -3051,7 +3051,7 @@ function jeonseBlock(rows0, area = null) {
       <td class="n"><b>${r.전세가율 == null ? '—' : Number(r.전세가율).toFixed(1) + '%'}</b></td>
       <td class="n${Number(r.개월차) >= 12 ? ' bad' : ''}">${fmt(r.개월차)}개월</td>
     </tr>`).join('')}</tbody></table>
-    ${far ? `<p class="note sm">★ ${fmt(far)}개 평형은 매매 · 전세가 1년 넘게 떨어진 거래(같은 시점 아님)</p>` : ''}`;
+    `;
 }
 
 function offsiteBlock(rows) {
@@ -3074,7 +3074,6 @@ function offsiteBlock(rows) {
   return `
     <div class="sect off">연결되지 않은 거래 ${fmt(head.거래)}
       <span class="src" title="${esc(SRC.rtms.s)}">${esc(SRC.rtms.t)} <i>단지 미매칭</i></span></div>
-    <p class="srcline">${esc(jibun)} 지번 신고 · 위 집계에 안 넣음</p>
     ${tbl(sale, '매매')}${tbl(rent, '전월세')}`;
 }
 
@@ -3717,7 +3716,7 @@ async function 평형거래채우기() {
   const 키 = 평형거래부를; 평형거래부를 = null;
   if (!키 || 평형거래캐시.has(키)) return;
   const [id, k, 평형] = 키.split('§');
-  const [n, src] = 평형.split('|');
+  const [n, src] = 평형 === '*' ? ['*', ''] : 평형.split('|');
   평형거래캐시.set(키, null);                     // 받는 중(같은 키로 두 번 안 부른다)
   let 줄 = [];
   try {
@@ -3725,7 +3724,7 @@ async function 평형거래채우기() {
     if (x.ok) 줄 = (await x.json()).줄 || [];
   } catch { /* 못 받으면 받은 것만으로 그린다 */ }
   평형거래캐시.set(키, 줄);
-  if (lastDetail && String(lastDetail.complex && lastDetail.complex.complex_id) === id && 거래탭 === k && tradeArea === 평형) renderDetail(lastDetail);
+  if (lastDetail && String(lastDetail.complex && lastDetail.complex.complex_id) === id && 거래탭 === k && (평형 === '*' ? tradeArea == null : tradeArea === 평형)) renderDetail(lastDetail);
 }
 function tradeList(rows, 거래탭, 평형, 단지id) {
   const 종 = r => r.전월세 ? (r.월세냐 ? '월세' : '전세') : '매매';
@@ -3739,13 +3738,16 @@ function tradeList(rows, 거래탭, 평형, 단지id) {
   const 고름 = !(평형 == null || 평형 === '');
   /* 11-01: 종류별 최근 120건이 잘렸고 평형을 골랐으면 그 평형만 따로 받는다(오래된 평형은 120건 안에 한 줄도 없을 수 있다) */
   const 잘린종류 = 전체종류 > 종R.filter(r => !r.분양권).length;
-  const 따로키 = 고름 && 단지id && 평형 !== '' && 잘린종류 ? `${단지id}§${거래탭}§${평형}` : null;
+  /* '전체' 도: 받은 120건을 다 펼쳤는데 더 있으면(더보기) 그 종류 전체를 따로 받는다 */
+  const 따로키 = !단지id || !잘린종류 ? null
+    : 고름 ? (평형 !== '' ? `${단지id}§${거래탭}§${평형}` : null)
+    : (거래Shown > 종R.filter(r => r.기본 == null || Number(r.기본) === 1).length || 평형거래캐시.has(`${단지id}§${거래탭}§*`)) ? `${단지id}§${거래탭}§*` : null;
   const 따로 = 따로키 ? 평형거래캐시.get(따로키) : undefined;
   if (따로키 && 따로 === undefined) 평형거래부를 = 따로키;
   const 받는중 = 따로키 && !따로;
   /* 09:00~09:10 에 잠깐 나간 서버(평형마다 40건을 상세에 섞어 주던 판)의 응답이 캐시에 남았을 수 있다 — 그 덧붙은 줄(기본 = 0)은 '전체' 에서 뺀다 */
   const 기본R = 종R.filter(r => r.기본 == null || Number(r.기본) === 1);
-  const R = !고름 ? 기본R : (따로 && 따로.length) ? 따로 : 종R.filter(r => {
+  const R = (따로 && 따로.length) ? 따로 : !고름 ? 기본R : 종R.filter(r => {
     const k = r.평형 == null ? '' : String(r.평형) + (r.면적칸 && r.면적칸 !== '전용' ? '|' + r.면적칸 : '');
     return k === 평형;
   });
@@ -3777,31 +3779,25 @@ function tradeList(rows, 거래탭, 평형, 단지id) {
     </div>`;
   }).join('');
 
-  const 더 = 보임 < 받은
+  /* 11-01 사장님 "작은 글씨 설명은 전부 정책으로" — '○건(해제 포함) 중 최근 ○건' 줄을 빼고 더보기 하나로.
+     받은 것을 다 펼쳤는데 더 있으면(종류별 최근 120건 · 평형별 120건) 더보기를 누를 때 그 나머지를 따로 받는다(/trade-list). */
+  const 받은본 = R.filter(r => !r.분양권).length;
+  const 평형전체 = Number((R.find(r => r.평형전체 != null) || {}).평형전체) || 0;
+  const 분모 = 고름 ? Math.max(평형전체, 받은본) : Math.max(전체종류, 받은본);
+  const 총 = 받은 + Math.max(0, 분모 - 받은본);
+  const 더받을 = !고름 && 단지id && 잘린종류 && !따로;
+  const 더 = (보임 < 받은 || 더받을)
     ? `<button type="button" class="moreb" data-trade-more="1">10건 더보기
-         <span class="muted">(${fmt(보임)} / ${fmt(받은)})</span></button>` : '';
-  const 받은본 = R.filter(r => !r.분양권).length;   // 316: '몇 중 몇' 은 매매만 — 섞인 분양권·입주권은 따로 적는다
-  const 잘림 = (평형 == null || 평형 === '')
-    ? (전체종류 > 받은본
-        /* ★ 2026-10-21 QA: 이 '전체' 는 **해제 포함**이다(목록은 해제도 제자리에 둔다). 바로 위 탭·평형 카드의
-           건수는 해제를 뺀 수라 '매매 1,429' 옆에 '1,443건 중' 이 떠서 어긋나 보였다 - 그 말을 적는다. */
-        ? `<p class="srcline">${esc(거래탭)} ${fmt(전체종류)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '')
-    : 받는중 ? '<p class="srcline ldw">이 평형의 이전 거래를 불러오는 중…</p>'
-    : (() => {
-        /* 11-01: 따로 받았으면 그 평형의 진짜 분모(평형전체 · 해제 포함)를 안다 — 다 받았으면 줄을 안 쓴다.
-           따로 안 받았으면(종류 전체가 120건 안) 받은 것이 그 평형의 전부다. */
-        const 평형전체 = Number((R.find(r => r.평형전체 != null) || {}).평형전체) || 0;
-        return 평형전체 > 받은본
-          ? `<p class="srcline">이 평형 ${esc(거래탭)} ${fmt(평형전체)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '';
-      })();
+         <span class="muted">(${fmt(보임)} / ${fmt(총)})</span></button>` : '';
+  const 잘림 = 받는중 ? '<p class="srcline ldw">불러오는 중…</p>' : '';
 
   /* 316: 섞인 분양권·입주권 — 몇 건인지 · 집계에는 안 넣었다는 사실만(설명은 정책 화면) */
   const 분 = 거래탭 !== '매매' ? 0 : (평형 == null || 평형 === '') ? Number(종R[0].분양권수) || 0 : R.filter(r => r.분양권).length;
-  const 분줄 = 분 ? `<p class="srcline" title="평형 요약 · 최고가에는 안 넣음">분양권·입주권 ${fmt(분)}건 포함</p>` : '';
+  const 분줄 = '';   /* 11-01 작은 안내 줄은 정책으로(분양권·입주권은 매매 목록에 섞이고 꼬리표가 붙는다) */
   /* 10-31 사장님 "필드명이 없으니까 각 숫자가 뭘 의미하는지 이해하기 힘들어 — 전세 매매 월세 전부": 칸 이름 줄(목록과 같은 열에 선다 · style.css subgrid) */
   const 금액칸 = 거래탭 === '월세' ? '보증금 / 월세' : 거래탭 === '전세' ? '보증금' : '거래가';
   const 머리 = `<div class="trow thd"><div class="td">계약일</div><div class="tm">${금액칸}</div><div class="tx">전용면적 · 층${거래탭 !== '매매' ? ' · 갱신 여부' : ''}</div></div>`;
-  return sect('거래 내역', 'rtms', ` ${fmt(받은)}`)
+  return sect('거래 내역', 'rtms', ` ${fmt(총)}`)
     + ``
     + 잘림 + 분줄 + `<div class="tlist">${머리}${줄}</div>${더}`;
 }
@@ -4344,9 +4340,8 @@ function 학원칸(a) {
       ${가까운.length ? `<div class="schrow">${가까운.map(x => `
         <div class="scell" data-pt="academynm|${esc(x.이름 || '')}"><span class="sg">${esc(x.분야 || '—')}</span><b>${esc(x.이름 || '—')}</b>
           <span class="sd">${fmt(x.거리m)}m${x.과정 ? ' · ' + esc(x.과정) : ''}</span></div>`).join('')}</div>
-        <p class="note sm">500m 안 <b>가까운 순 ${가까운.length}곳</b>${
-          Number(가까운[0].전체500) > 가까운.length ? ` (500m 안 전체 ${fmt(가까운[0].전체500)}곳)` : ''}.</p>` : ''}
-      ${덜붙임 ? `<p class="note sm">${덜붙임}</p>` : ''}`
+` : ''}
+      `
     : `<p class="note">${gapCell('', 전체 ? 'NA' : 'SCOPE',
         전체 ? '이 단지 1km 안에 위치가 붙은 학원·교습소가 없습니다' + (좌표 < 전체 ? ' — 아직 위치를 붙이는 중이라 없다고 단정할 수 없습니다' : '')
              : '학원 정보를 아직 받지 않았습니다')}</p>`}`;
@@ -4358,7 +4353,7 @@ function sect(title, srcKey, extra = '', detail = '') {
   const x = SRC[srcKey];
   /* 2026-10-22 사장님 "단지정보 안 부가 설명은 '정책' 에 전부 정리" — 배지를 누르면 그 출처의 기준·설명(정책 화면)으로 */
   const badge = x ? `<a class="src" href="#policy" data-pol="${esc(detail === '주택가격' ? '주택가격' : srcKey)}" title="${esc(x.s)} — 누르면 이 칸의 기준·출처">${esc(x.t)}${
-    detail ? ` · ${esc(detail)}` : ''}${x.note ? ` <i>${esc(x.note)}</i>` : ''}<span class="polq" aria-hidden="true">?</span></a>` : '';
+    detail ? ` · ${esc(detail)}` : ''}<span class="polq" aria-hidden="true">?</span></a>` : '';
   return `<div class="sect">${title}${extra}${badge}</div>`;
 }
 
@@ -4740,8 +4735,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
       grp('대장 표시');
       add('위반건축물', (위.length
           ? `<span class="pill r">위반건축물</span> ${위.map(d => `<span title="이 동 자료 변경일 ${esc(d.위반기준일 || '모름')}">${dongLabel(d, 동들.length)}</span>`).join(', ')}${위.length > 1 ? ` (${fmt(위.length)}개 동)` : ''}`
-          : '표시 없음') + 범위
-        + `<br><span class="muted">GIS건물통합정보(건축물대장의 위반건축물 표시 · 국가공간정보센터) — 위반 내용 · 시정 여부는 원천에 없습니다</span>`);
+          : '표시 없음') + 범위);
     }
   }
 
@@ -4813,7 +4807,7 @@ function 주변판들(p) {
           <span class="sd">${fmt(x.최단m)}m</span>
           <span class="sn">${esc(x.노선 || '')}</span>
         </div>`).join('')}</div>
-      ${ (Number(sub[0].전체) || 0) > sub.length ? `<p class="note sm">1.5km 안 ${fmt(sub[0].전체)}곳 중 가까운 ${fmt(sub.length)}곳</p>` : ''}`
+      `
       : `<p class="note">${gapCell('', 'NA',
           '단지 1.5km 안에 도시철도 역이 없습니다')}</p>`}
 
@@ -4837,7 +4831,7 @@ function 주변판들(p) {
           <span class="sd">${x.거리.map(m => fmt(m)).join(' · ')}m</span>
           ${x.ars.length ? `<span class="sn">ARS ${x.ars.map(a => esc(a)).join(' · ')}</span>` : ''}
         </div>`).join('')}</div>
-        ${(Number(bl[0].전체) || 0) > bl.length ? `<p class="note sm">정류장 ${fmt(bl[0].전체)}곳 중 가까운 ${fmt(bl.length)}곳</p>` : ''}` : ''}
+        ` : ''}
       ${(() => {
         /* ★ 거리대로 **갈라서** 보여준다(2026-10-20). 전에는 번호 칩을 한 덩어리로
            쏟아 놓고 위에 '6 / 300m · 19 / 500m · 184 가장가까움' 세 숫자만 두어서,
@@ -4867,7 +4861,6 @@ function 주변판들(p) {
         return 묶음('300m 안', r300, 가까이)
              + 묶음('300~500m', Math.max(0, r500 - r300), 멀리);
       })()}
-      ${br.length ? `<p class="note sm" title="버스 노선을 아직 전부 받지 못해 여기 없는 번호가 있을 수 있습니다">노선 일부만 받음</p>` : ''}
       <p class="note sm">가장 가까운 정류장 <b>${esc(bus.가까운곳 || '—')}</b></p>`
       : `<p class="note">${Number(bus && bus.적재)
           ? gapCell('', 'NA', '단지 500m 안에 버스정류장이 없습니다')
@@ -4931,7 +4924,7 @@ function 주변판들(p) {
         + (g ? 고르기칸('med', 'shop', 상가병원칸(g), 칸들) : ''); })()}
 `;
   function 상가병원칸(g) {
-      return `<div class="lt2">상가 업종으로 본 병원·약국 <span class="muted">(상가 데이터 — 병원 · 약국 칸(심평원 · 행안부)과 출처 다름)</span></div>
+      return `<div class="lt2">상가 업종으로 본 병원·약국</div>
         <div class="lifegrid">${g[1].map(x => `
         <div class="lcell${Number(x.r500) ? '' : ' far'}" data-pt="life|${esc(x.항목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}" title="가장 가까운 곳 ${fmt(x.최단m)}m">
           <b>${fmt(Number(x.r500) || Number(x.r1000))}</b><span>${esc(x.항목)}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>`;
@@ -4961,7 +4954,7 @@ function 주변판들(p) {
             x.공시 ? ` · <b>${esc(String(x.공시).slice(0, 4))}년 ${
               esc(String(x.공시).slice(4))}차 공시</b>` : ''}</span>
         </div>`).join('')}</div>
-      ${(Number(kin[0].전체) || 0) > kin.length ? `<p class="note sm">500m 안 ${fmt(kin[0].전체)}곳 중 가까운 ${fmt(kin.length)}곳</p>` : ''}`
+      `
       : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
           kinderLoaded
             ? '이 단지 500m 안에 유치원이 없습니다'
@@ -4971,7 +4964,7 @@ function 주변판들(p) {
     ${['초등학교', '중학교', '고등학교'].map(급 => 고르기칸('edu', ({ 초등학교: 'elem', 중학교: 'mid', 고등학교: 'high' })[급], 학교급칸(급, sch.find(x => x.학교급 === 급), (schoolList || []).filter(x => x.학교급 === 급),
         (schoolGroups || []).filter(x => x.급 === 급), schoolZoneLoaded), 교육칸들)).join('')}
     ${고르기칸('edu', 'elem mid high', `
-    ${[...(schoolList || []), ...(schoolGroups || [])].some(x => x.학생 != null) ? `<p class="note sm">학교알리미 ${esc(String(Math.max(...[...(schoolList || []), ...(schoolGroups || [])].filter(x => x.공시연도).map(x => Number(x.공시연도)))))}년 공시</p>` : ''}
+    ${''}
 
 `, 교육칸들)}
     ${고르기칸('edu', 'acad', 학원칸(academy), 교육칸들)}
@@ -5515,7 +5508,7 @@ function renderDetail(payload) {
       ${spec.용도지역 ? `<dt>대장 용도지역</dt><dd>${esc(spec.용도지역)}</dd>` : ''}
       ${spec.용도지구 ? `<dt>대장 용도지구</dt><dd>${esc(spec.용도지구)}</dd>` : ''}
       ${spec.용도구역 ? `<dt>대장 용도구역</dt><dd>${esc(spec.용도구역)}</dd>` : ''}
-    </dl><p class="srcline">위: 대장(${esc(spec.기준 || '대장')}) 값 · 아래: 지도 겹친 넓이(VWorld)</p>` : ''}
+    </dl>` : ''}
     ${zMain.length ? `<div class="zlist">${zMain.map(z => `
       <div class="zrow"><span class="zn">${esc(z.용도지역 || '')}</span>
         <span class="zbar"><i style="width:${Math.max(2, Number(z.비중) || 0).toFixed(1)}%"></i></span>
@@ -6130,6 +6123,15 @@ const 정책 = [
     '<b>종합부동산세</b>: 공시가격 12억 초과분 × 60% = 과세표준 → 세율 3억 이하 0.5% · 6억 이하 0.7% · 12억 이하 1.0% · 25억 이하 1.3% · 50억 이하 1.5% · 94억 이하 2.0% · 그 위 2.7%. 같은 집에 매긴 재산세(종부세 과세표준 × 재산세 공정시장가액비율 × 0.4%)를 뺍니다. 농어촌특별세 = 종부세 × 20%.',
     '근거: 지방세법 111조 · 111조의2 · 112조 · 151조, 지방세법 시행령 109조, 종합부동산세법 8조 · 9조, 같은 법 시행령 2조의4 · 4조의3, 농어촌특별세법 5조. 2026-08-03 정부 세제개편안(종부세 비율 · 공제 · 세율 변경)은 국회 확정 전이라 넣지 않았습니다.',
     '끝수: 세목마다 10원 미만 버림 · 화면은 만 원 단위. 예) 공시 5억 → 약 62만 원 · 15억 → 약 412만 원 · 25억 → 약 1,101만 원.',
+  ] },
+  { 키: '화면글', 제목: '단지 상세 — 화면에서 옮긴 설명 (2026-11-01)', 글: [
+    '단지 상세에는 값과 그 이름만 두고, 값 옆 · 아래에 작게 붙던 설명은 여기로 옮겼습니다(사장님 "작은 글씨 설명은 전부 정책으로"). 출처 칩을 누르면 그 출처 항목으로 옵니다. 출처 칩 안의 작은 기울임 글(\'기준일 값 · 직선거리\' · \'연 2회 공시\' · \'착공·사용승인 기준\' · \'필지와 공간교차\' · \'월 단위 공시\' 등)도 뺐습니다 — 각 출처 항목에 있습니다.',
+    '<b>단지정보</b>: 위반건축물 표시는 GIS건물통합정보(건축물대장의 위반건축물 표시 · 국가공간정보센터)이고, 위반 내용 · 시정 여부는 원천에 없습니다. \'주변 단지\' 는 1.5km 안 세대 100+ 단지를 가까운 순으로, \'주변 분양 · 공사 중\' 은 2km 안을 청약 공고 먼저 보입니다.',
+    '<b>토지</b>: 용도지역 칸은 위가 건축물대장(총괄표제부 또는 표제부 합) 값, 아래가 지도(VWorld)에서 필지와 겹친 넓이입니다.',
+    '<b>실거래</b>: 평단가는 3.3㎡당 · 전용면적 기준 · 매매 중앙값입니다. 동네 · 시군구 칸은 같은 종류 · 같은 평형대(전용 ~60 · 60~85 · 85~135 · 135~㎡)의 최근 1년 중앙값, 이 단지 칸의 \'3년\' 은 그 평형 매매가 최근 1년에 없어 3년치로 낸 값이고, 숫자에 올리면 건수 · 범위가 나옵니다. 거래 내역은 종류별 최근 120건을 먼저 보이고, 더보기로 그 앞 거래를 이어 받습니다(목록은 해제 거래도 제자리에 두므로 위 건수와 다를 수 있음). 매매 목록에는 분양권·입주권 거래가 섞여 있고(꼬리표) 평형 요약 · 최고가에는 넣지 않습니다. 전세가율에서 매매 · 전세가 1년 넘게 떨어진 평형은 같은 시점 값이 아닙니다. \'연결되지 않은 거래\' 는 대장과 다른 지번으로 신고된 거래이고 위 집계에 넣지 않습니다.',
+    '<b>교통</b>: 지하철은 1.5km 안, 버스 정류장은 가까운 순으로 몇 곳만 보입니다(칩 숫자가 전체 수). 버스 노선은 아직 전부 받지 못해 없는 번호가 있을 수 있습니다.',
+    '<b>교육</b>: 어린이집 · 유치원은 500m 안 가까운 순(칩 숫자가 500m 안 전체 수), 인원은 원문 기준일 값입니다. 학교 칸 숫자는 1km 안 수이고 학생 · 교사 수는 학교알리미 공시(가장 최근 해)입니다. 통학구역은 학구도 기준일 값이고, 중학교는 학교군 안 추첨이라 표시 학교는 후보입니다. 학원 · 교습소는 위치를 붙인 곳만 셉니다(교육청 등록 중 좌표를 못 붙인 곳은 빠짐).',
+    '<b>병원·약국</b>: 병원 규모 · 종별은 심평원(건강보험 요양기관 신고), 간판 과목은 의원·병원 500m(없으면 1km) · 요양기관 개설 현황 기준일 값입니다. 약국은 행정안전부 지방행정 인허가(영업/폐업)이고, 폐업은 원문 좌표가 있는 것만 셉니다(좌표 없는 영업 · 폐업은 거리를 잴 수 없어 빠짐). \'상가 업종\' 칸은 상가(상권)정보 업종이라 심평원 · 행안부 숫자와 출처가 다릅니다.',
   ] },
   { 키: 'rtms', 제목: '실거래가 (국토교통부)', 글: [
     '<b>분양권·입주권</b>(국토부에 권리 거래로 신고된 것 — 정비사업은 준공·입주 뒤에도 이전고시·등기 전까지 이렇게 신고됩니다 · 서울은 <b>2007년 1월부터</b> 받았습니다 — 2006년은 25개 구 모두 0건으로 왔습니다)은 매매 목록에 날짜순으로 섞고 줄마다 표시합니다. 원본 지번이 사업 전 지번이라, <b>이 단지에 이어진 청약 공고의 지번</b>이거나 <b>이 단지 필지에서 준공 전 ~ 준공 뒤 10년 안에 맺은 계약</b>(같은 필지에 그 무렵 준공된 다른 주거 단지가 없을 때)만 이 단지 것으로 봅니다. 헐린 뒤 새 대장이 아직 없는 자리의 거래는 폐쇄 대장 · 정비구역 상세에 보입니다. 새 단지의 아파트 실거래가 사업 전 지번으로 신고된 곳(이전고시 전)은 <b>K-apt 지번</b>이 같고 그 K-apt 가 이 단지 하나에만 이어져 있으며 그 아파트 번호(aptSeq)가 준공 무렵에 시작될 때만 이 단지에 붙입니다(정확한 조건은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>) — 옛 건물 거래는 옛 번호로 훨씬 일찍부터 있어 붙지 않습니다. 폐쇄 대장 상세에는 그 지번의 단지에 안 붙은 거래를 닫힌 날 앞(옛 건물) · 뒤(새 건물)로 나눠 보입니다. 권리 거래라 완공 아파트 값과 달라 <b>평형 요약·최고가·전세가율·AI 검색·지역 순위에는 넣지 않습니다.</b>',
@@ -6788,12 +6790,12 @@ function 학교급칸(급, 요, 목, 구, 학구받음) {
         <b>${esc(z.구역)}</b>${Number(z.공동) ? ' <span class="zb">공동</span>' : ''}
         <span class="muted sm">· ${esc(짧)}학교 ${fmt(구.filter(y => y.구역id === z.구역id && y.school_id).length)}곳</span>
         <span class="hzgo">지도에 보기</span>
-      </div>`).join('') + `<p class="note sm" title="${esc((급 === '초등학교' ? '배정 구역' : 급 === '중학교' ? '학교군 안 추첨 — 표시 학교는 후보' : '일반고 배정 단위(특목 · 자율 · 특성화는 따로)') + ' · 단지 중심점으로 판정')}">${급 === '중학교' ? '추첨 · 후보 학교 · ' : ''}기준일 ${esc(날짜((구[0] || {}).기준일, ''))}</p>`
+      </div>`).join('')
     : `<p class="note sm">${gapCell('', 학구받음 ? 'UNSURE' : 'SCOPE', 학구받음
         ? `단지 중심점이 어느 ${급 === '초등학교' ? '통학구역' : '학교군'}에도 안 들어갑니다 — 경계이거나 원본에 빠진 곳입니다`
         : '이 지역의 학구도를 아직 받지 않았습니다')}</p>`;
   if (!다.length) return `${sect(급, 'school')}${구역줄}<p class="note">${gapCell('', 'NA', `이 단지 2km 안에 ${짧}학교가 없습니다`)}</p>`;
-  return `${sect(급, 'school', 요 ? ` ${fmt(요.r1000)}<span class="muted">· 1km</span>` : '')}
+  return `${sect(급, 'school', 요 ? ` ${fmt(요.r1000)}` : '')}
     ${구역줄}
     <div class="schrow">${펼.map(칸).join('')}</div>
     ${접.length ? `<details class="zfold"><summary>이 ${급 === '중학교' ? '학교군' : '학군'}의 나머지 ${fmt(접.length)}곳 (1km 밖)</summary><div class="schrow">${접.map(칸).join('')}</div></details>` : ''}
@@ -6964,7 +6966,7 @@ async function 병원채우기() {
 }
 function 병원칸(r) {
   const st = r.상태 || {};
-  const 머리 = `<div class="lt2">병원 규모 · 심평원 <span class="muted">(건강보험 요양기관 신고)</span></div>`;
+  const 머리 = `<div class="lt2">병원 규모</div>`;
   if (!Number(st.적재)) return `${머리}<p class="note sm">${gapCell('', 'SCOPE', '심평원 병원·약국 목록을 아직 받지 않았습니다 — 오늘 밤 받습니다')}</p>`;
   if (!Number(st.좌표)) return '';
   const 거리 = m => (m >= 1000 ? (m / 1000).toFixed(1) + 'km' : fmt(m) + 'm');
@@ -6979,7 +6981,7 @@ function 병원칸(r) {
         <b>${fmt(Number(x.r500) || Number(x.r1000))}</b>
         <span>${esc(x.종별 || '')}${Number(x.r500) ? '' : ' <i>1km</i>'}</span></div>`).join('')}</div>` : ''}
     ${과목칸(r)}
-    ${(r.과목상태 || {}).기준일 ? `<p class="note sm">간판 과목 ${esc(날짜(r.과목상태.기준일))} 기준</p>` : ''}`;
+    `;
 }
 /* 간판 과목 칸 (298) — 아이 키우는 집이 먼저 찾는 순서로 앞에 세우고, 나머지는 많은 순 */
 const 과목순서 = ['소아청소년과', '내과', '이비인후과', '가정의학과', '치과', '한방', '정형외과', '피부과', '안과', '산부인과'];
@@ -6990,7 +6992,7 @@ function 과목칸(r) {
   if (!과.some(x => x.과목 === '소아청소년과')) 과.push({ 과목: '소아청소년과', r500: 0, r1000: 0, 최단m: null });   // 0 도 정보다 — 1km 안에 없다
   const 순 = x => { const i = 과목순서.indexOf(x.과목); return i < 0 ? 100 : i; };
   과.sort((a, b) => (순(a) - 순(b)) || (Number(b.r1000) - Number(a.r1000)));
-  return `<div class="lt2">간판 과목 <span class="muted">(의원·병원 · 500m, 없으면 1km)</span></div>
+  return `<div class="lt2">간판 과목</div>
     <div class="lifegrid">${과.slice(0, 12).map(x => {
       const n = Number(x.r500) || Number(x.r1000) || 0;
       return `<div class="lcell${Number(x.r500) ? '' : ' far'}"${n ? ` data-pt="hira|g:${esc(x.과목)}" data-pt-r="${Number(x.r500) ? 500 : 1000}"` : ''}
@@ -7270,7 +7272,7 @@ async function 약국채우기() {
 }
 function 약국칸(r) {
   const 범 = r.범위 || {}, 셈 = r.셈 || {}, 영 = r.영업 || [], 폐 = r.폐업 || [];
-  const 머리 = `<div class="lt2">약국 · 행정안전부 인허가 <span class="muted">(지방행정 인허가 · 영업/폐업)</span></div>`;
+  const 머리 = `<div class="lt2">약국</div>`;
   if (!Number(범.적재)) return `${머리}<p class="note sm">${gapCell('', 'SCOPE', '행안부 약국 인허가를 아직 받지 않았습니다')}</p>`;
   if (!Number(범.좌표)) return '';
   const 날 = v => 날짜(v, '');
@@ -7285,11 +7287,11 @@ function 약국칸(r) {
     ${영.length ? `<ul class="lu">${영.map(x => `<li><b>${esc(x.이름 || '')}</b><span class="muted"> ${fmt(Number(x.m) || 0)}m${
         x.인허가일 ? ` · ${날(x.인허가일)} 인허가` : ''}</span></li>`).join('')}</ul>`
       : `<p class="note sm">${gapCell('', 'NA', '500m 안에 영업 중인 약국 기록이 없습니다')}</p>`}
-    ${폐.length ? `<div class="lt2">최근 폐업 <span class="muted">(500m · 좌표 있는 것만)</span></div>
+    ${폐.length ? `<div class="lt2">최근 폐업</div>
       <ul class="lu">${폐.map(x => `<li><s>${esc(x.이름 || '')}</s><span class="muted"> ${fmt(Number(x.m) || 0)}m${
         x.폐업일 ? ` · ${날(x.폐업일)} ${esc(x.상세상태 || '폐업')}` : ` · ${esc(x.상세상태 || '폐업')} (폐업일 원문에 없음)`}${
         x.인허가일 ? ` · ${날(x.인허가일)} 인허가` : ''}</span></li>`).join('')}</ul>` : ''}
-    <p class="note sm">좌표 없어 못 센 곳: 영업 ${fmt(Number(범.영업좌표없음) || 0)}/${fmt(Number(범.영업전체) || 0)} · 폐업은 ${폐비 != null ? `${폐비}%만` : '일부만'} 좌표 있음${범.받은날 ? ` · ${esc(날(범.받은날))} 받음` : ''}</p>`;
+    `;
 }
 
 /* ---------------- 어린이집 (2026-10-22, 사장님 "어린이집 운영 승인 됐엉") ----------------
@@ -7319,7 +7321,7 @@ async function 평단가채우기() {
   const 칸 = g => g ? `<span title="${esc(`${g.이름 || g.지역코드} · ${g.종류} 전용 ${g.평형대}㎡ · 최근 12개월 ${fmt(g.건수)}건 · ${fmt(g.단지수)}개 단지 · 가운데 50% ${만억(g.하위25)} ~ ${만억(g.상위25)}`)}">${만억(g.중앙값)}</span>` : '<span class="muted">—</span>';
   const 종류여럿 = new Set(줄.map(x => x.종류)).size > 1;
   const 동이름 = ((r.지역 || []).find(g => g.수준 === '동') || {}).이름 || '이 동네';
-  지금.innerHTML = `<div class="lt2">${용어('평단가')} <span class="muted sm">3.3㎡당 · 전용면적 기준 · 매매 중앙값</span></div>
+  지금.innerHTML = `<div class="lt2">${용어('평단가')}</div>
     <div class="pywrap"><table class="mini pyt"><thead><tr>${종류여럿 ? '<th>종류</th>' : ''}<th>평형</th><th class="n">이 단지</th><th class="n">거래</th>
       <th class="n" title="${esc(동이름)} · 같은 종류 · 같은 평형대 · 최근 12개월">동네</th><th class="n" title="같은 시군구 · 같은 종류 · 같은 평형대 · 최근 12개월">시군구</th></tr></thead><tbody>
     ${줄.map(x => `<tr${x.기간개월 === 12 ? '' : ' class="pyhas"'}>${종류여럿 ? `<td>${esc(x.종류)}</td>` : ''}<td>${fmt(x.평형)}㎡</td>
@@ -7330,7 +7332,7 @@ async function 평단가채우기() {
            09:08 "UI 위치가 이상해": 거래 칸 안에 두 줄로 넣으니 그 칸이 넓어져 표가 화면 밖으로 밀렸다 → 그 줄 아래 따로 한 줄 */
         : `<tr class="pysub"><td colspan="${종류여럿 ? 6 : 5}">최근 1년 매매 없음 · 3년치 ${fmt(x.건수)}건 · 마지막 ${esc(날짜(x.최근계약일))}</td></tr>`}`).join('')}
     </tbody></table></div>
-    <p class="note sm">동네 · 시군구는 같은 종류 · 같은 평형대(전용 ~60 · 60~85 · 85~135 · 135~㎡)의 최근 1년 중앙값입니다. 이 단지 칸의 '3년' 은 그 평형 매매가 최근 1년에 없어 3년치 실거래로 낸 값입니다. 숫자에 올리면 건수 · 범위가 나옵니다.</p>`;
+    `;
 }
 async function 어린이집채우기() {
   const box = document.querySelector('#detail .ccbox');
@@ -7367,7 +7369,7 @@ async function 어린이집채우기() {
             x.상태 && x.상태 !== '정상' ? `<b>${esc(x.상태)}</b>` : null,
             x.제공서비스 && x.제공서비스 !== '일반' ? esc(x.제공서비스) : null].filter(Boolean).join(' · ')}</span>
         </div>`).join('')}</div>
-      <p class="note sm">500m 안 <b>${fmt(전체)}곳</b> 중 가까운 순 ${fmt(곳.length)}곳${기준 ? ` · 기준일 ${esc(날짜(기준))}` : ''}</p>`
+      `
       : `<p class="note">${gapCell('', Number(범.좌표) ? 'NA' : 'SCOPE',
           Number(범.좌표) ? '이 단지 500m 안에 어린이집이 없습니다' : '단지 좌표가 없어 주변을 잴 수 없습니다')}</p>`}`;
 }
