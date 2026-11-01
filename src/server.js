@@ -5191,7 +5191,7 @@ app.get('/api/zones', async (req, res) => {
           AND LTRIM(ISNULL(uname, '')) <> ''        -- 대분류 폴리곤 제외 (11-41)
           AND bbox_minx <= @x1 AND bbox_maxx >= @x0
           AND bbox_miny <= @y1 AND bbox_maxy >= @y0
-        ORDER BY area_m2_approx DESC`);
+        ORDER BY area_m2_approx DESC, zone_key`);   /* 11-01 같은 면적은 키순 — 서비스DB 경로와 순서를 같게 */
     res.json({ type: 'FeatureCollection', features: r.recordset.map(d => ({
       type: 'Feature', geometry: JSON.parse(d.geojson),
       properties: { uname: d.uname, grp: d.grp, dyear: d.dyear, dnum: d.dnum,

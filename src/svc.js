@@ -836,7 +836,7 @@ const 정비층 = 층2('redev', ['bbox', 'g'], true, async (req, b) => {
 /* 용도지역 — 옛 경로: Decimal(12,7) · TOP 1200 · ORDER BY area_m2_approx DESC */
 const 용도층 = 층2('zones', ['bbox'], true, async (req, b) => {
   const r = await pg().query(`SELECT uname, dyear, dnum, sigg_name, area_m2_approx, geojson, grp
-                                FROM svc.lyr_landzone WHERE ${상자} ORDER BY area_m2_approx DESC NULLS LAST LIMIT 1200`, b);
+                                FROM svc.lyr_landzone WHERE ${상자} ORDER BY area_m2_approx DESC NULLS LAST, zone_key COLLATE "C" LIMIT 1200`, b);
   return { type: 'FeatureCollection', features: r.rows.map(d => ({
     type: 'Feature', geometry: JSON.parse(d.geojson),
     properties: { uname: d.uname, grp: d.grp, dyear: d.dyear, dnum: d.dnum, sigg_name: d.sigg_name, area: d.area_m2_approx } })) };
