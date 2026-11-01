@@ -1066,6 +1066,11 @@ code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 4px;borde
 }
 .qm:hover::after,.qm:focus::after{opacity:1; transform:translateX(0) scale(1)}
 .qm:hover::before,.qm:focus::before{opacity:1}
+/* 11-01 사장님 "단지정보 탭을 손으로 오른쪽으로 밀면 옆으로 스크롤된다" — 안 보이는(투명) 말풍선 18개가 오른쪽으로 삐져나가
+   상세 칸의 가로 폭을 늘리고 있었다(336px 칸에 395px). 열릴 때만 자리를 차지하게 한다 */
+.qm:not(:hover):not(:focus)::after,.qm:not(:hover):not(:focus)::before{display:none}
+/* 그래도 상세 칸은 옆으로 밀리지 않는다(가로로 넓은 표는 각자 가로 스크롤 상자 안에 있다) */
+#detail{overflow-x:hidden}
 
 @media (prefers-reduced-motion:reduce){ .qm::after{transition:none} }
 @media (prefers-color-scheme:dark){
