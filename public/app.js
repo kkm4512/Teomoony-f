@@ -1533,6 +1533,9 @@ async function 제안고르기(it) {
       .addTo(찾은점Layer.층);
     map.setView([d.lat, d.lng], 17);
     setTimeout(() => m.openPopup(), 350);
+    /* 11-01 사장님 "장위초등학교를 치면 학교 정보가 안 나와" — 학교 · 유치원은 그 상세(학생 · 교원 · 공시)도 연다 */
+    if (d.sid) 학교상세(d.sid);
+    else if (d.kcd) 유치원상세(d.kcd);
   }
 }
 
@@ -4322,6 +4325,29 @@ function gapCell(value, why, note) {
 /* ★ 교육청 등록 학원·교습소 (2026-10-21)
    '생활 편의' 의 학원은 **상가 업종**이라 이 숫자와 다르다 - 둘 다 맞고 출처가 다르다. 그래서 적는다.
    위치를 아직 다 못 붙였으면 몇 곳 중 몇 곳 기준인지 적는다 - 덜 센 것을 '적다' 로 읽으면 안 된다. */
+/* 11-01 사장님 "더보기로" — 가까운 몇 곳만 받은 목록의 나머지를 누를 때 받는다(/near-more · /childcare?all=1). 받은 뒤 그 칸을 다시 그린다 */
+function 근처더(k, 보임, 전체) {
+  return 전체 > 보임 ? `<button type="button" class="moreb" data-nearmore="${k}">더보기 <span class="muted">(${fmt(보임)} / ${fmt(전체)})</span></button>` : '';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-nearmore]'); if (!b || !lastDetail || !lastDetail.complex) return;
+  const k = b.dataset.nearmore, id = lastDetail.complex.complex_id;
+  b.disabled = true;
+  try {
+    if (k === 'childcare') {
+      const x = await fetch(`/api/complexes/${encodeURIComponent(id)}/childcare?all=1`); if (!x.ok) throw 0;
+      어린이집캐시.set(String(id), await x.json()); 어린이집채우기(); return;
+    }
+    const x = await fetch(`/api/complexes/${encodeURIComponent(id)}/near-more?k=${k}`); if (!x.ok) throw 0;
+    const 줄 = (await x.json()).줄 || [];
+    if (!lastDetail || !lastDetail.complex || lastDetail.complex.complex_id !== id) return;
+    if (k === 'subway') lastDetail.subways = 줄;
+    else if (k === 'bus') lastDetail.busList = 줄;
+    else if (k === 'kinder') lastDetail.kinders = 줄;
+    else if (k === 'academy') lastDetail.academy = { ...(lastDetail.academy || {}), 가까운: 줄 };
+    renderDetail(lastDetail);
+  } catch { b.disabled = false; }
+});
 function 학원칸(a) {
   if (!a) return '';
   const 묶음 = (a.묶음 || []).filter(x => Number(x.r1000) > 0);
@@ -4340,7 +4366,7 @@ function 학원칸(a) {
       ${가까운.length ? `<div class="schrow">${가까운.map(x => `
         <div class="scell" data-pt="academynm|${esc(x.이름 || '')}"><span class="sg">${esc(x.분야 || '—')}</span><b>${esc(x.이름 || '—')}</b>
           <span class="sd">${fmt(x.거리m)}m${x.과정 ? ' · ' + esc(x.과정) : ''}</span></div>`).join('')}</div>
-` : ''}
+      ${근처더('academy', 가까운.length, Number(가까운[0].전체500) || 가까운.length)}` : ''}
       `
     : `<p class="note">${gapCell('', 전체 ? 'NA' : 'SCOPE',
         전체 ? '이 단지 1km 안에 위치가 붙은 학원·교습소가 없습니다' + (좌표 < 전체 ? ' — 아직 위치를 붙이는 중이라 없다고 단정할 수 없습니다' : '')
@@ -4807,7 +4833,7 @@ function 주변판들(p) {
           <span class="sd">${fmt(x.최단m)}m</span>
           <span class="sn">${esc(x.노선 || '')}</span>
         </div>`).join('')}</div>
-      `
+      ${근처더('subway', sub.length, Number(sub[0].전체) || sub.length)}`
       : `<p class="note">${gapCell('', 'NA',
           '단지 1.5km 안에 도시철도 역이 없습니다')}</p>`}
 
@@ -4831,7 +4857,7 @@ function 주변판들(p) {
           <span class="sd">${x.거리.map(m => fmt(m)).join(' · ')}m</span>
           ${x.ars.length ? `<span class="sn">ARS ${x.ars.map(a => esc(a)).join(' · ')}</span>` : ''}
         </div>`).join('')}</div>
-        ` : ''}
+        ${근처더('bus', bl.length, Number(bl[0].전체) || bl.length)}` : ''}
       ${(() => {
         /* ★ 거리대로 **갈라서** 보여준다(2026-10-20). 전에는 번호 칩을 한 덩어리로
            쏟아 놓고 위에 '6 / 300m · 19 / 500m · 184 가장가까움' 세 숫자만 두어서,
@@ -4954,7 +4980,7 @@ function 주변판들(p) {
             x.공시 ? ` · <b>${esc(String(x.공시).slice(0, 4))}년 ${
               esc(String(x.공시).slice(4))}차 공시</b>` : ''}</span>
         </div>`).join('')}</div>
-      `
+      ${근처더('kinder', kin.length, Number(kin[0].전체) || kin.length)}`
       : `<p class="note">${gapCell('', kinderLoaded ? 'NA' : 'SCOPE',
           kinderLoaded
             ? '이 단지 500m 안에 유치원이 없습니다'
@@ -4976,10 +5002,10 @@ function 주변판들(p) {
 /* 탭 안 고르기 (2026-10-31 사장님 "교육 탭이 열자마자 다 펴져 있어 보기 힘들어 — 선택해서 나오게" → "상권이나 교통도")
    고르기단추(ns, 칸들) = 단추 줄 · 고르기칸(ns, 키, html) = 그 키를 골랐을 때만 보이는 칸(키는 여럿을 띄어 쓸 수 있다 · 'all' 은 전부).
    고른 것은 이 브라우저에만 기억(편의). 고른 키가 이 단지에 없으면 첫 칸. 누르면 다시 그리지 않고 hidden 만 바꾼다. */
-const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: '', med: 'hosp' };
+const 고르기기본 = { edu: 'elem', traffic: 'subway', shop: 'all', med: 'hosp' };
 const 고르기값 = {};
 /* 기억하지 않고 늘 '전체' 로 시작하는 고르기(단지마다 값이 다른 것 — 평형 등) */
-const 고르기전체로 = new Set(['sv-gb', 'sv-py']);
+const 고르기전체로 = new Set(['sv-gb', 'sv-py', 'shop']);   /* 11-01 사장님 "상권 탭 눌렀을 때도 디폴트가 전체" — 상권은 늘 전체로 시작(기억 안 함) */
 function 고른(ns, 칸들) {
   let v = 고르기값[ns];
   if (고르기전체로.has(ns)) v = v || 'all';
@@ -5592,7 +5618,7 @@ function renderDetail(payload) {
   }
 
   $('#detail').querySelectorAll('.tab[data-tab]').forEach(b =>   /* 10-31: 탭 안 작은 탭 줄(.subtabs)은 여기서 안 받는다 */
-    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs:not(.subtabs)') || {}).scrollLeft || 0; detailTab = b.dataset.tab; renderDetail(lastDetail); }));
+    b.addEventListener('click', () => { 탭줄위치 = ($('#detail .tabs:not(.subtabs)') || {}).scrollLeft || 0; detailTab = b.dataset.tab; if (detailTab === 'shop') delete 고르기값.shop; renderDetail(lastDetail); }));
   /* ★ 2026-10-24 사장님 "상권 탭을 누르면 단지정보 탭으로 가" — 다시 그리면 탭 줄(폰에서 가로로 넘김)이 맨 왼쪽으로 돌아가
        오른쪽 끝 탭(상권 · 병원·약국)을 눌러도 '단지정보 · 동·호 …' 만 보였다. 누르기 전 위치를 되살리고, 고른 탭이 안 보이면 보이게 민다. */
   { const 줄위치 = 탭줄위치;   /* 감싸면(요소를 옮기면) 가로 위치가 0 으로 돌아간다 — 감싼 뒤에 되살린다 */
@@ -7369,7 +7395,7 @@ async function 어린이집채우기() {
             x.상태 && x.상태 !== '정상' ? `<b>${esc(x.상태)}</b>` : null,
             x.제공서비스 && x.제공서비스 !== '일반' ? esc(x.제공서비스) : null].filter(Boolean).join(' · ')}</span>
         </div>`).join('')}</div>
-      `
+      ${근처더('childcare', 곳.length, 전체)}`
       : `<p class="note">${gapCell('', Number(범.좌표) ? 'NA' : 'SCOPE',
           Number(범.좌표) ? '이 단지 500m 안에 어린이집이 없습니다' : '단지 좌표가 없어 주변을 잴 수 없습니다')}</p>`}`;
 }

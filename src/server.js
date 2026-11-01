@@ -2210,12 +2210,12 @@ app.get('/api/suggest', async (req, res) => {
          GROUP BY s.sttn_nm
          ORDER BY CASE WHEN s.sttn_nm = @raw OR s.sttn_nm = @raw + N'역' THEN 0 WHEN s.sttn_nm LIKE @p THEN 1 ELSE 2 END, s.sttn_nm;
         /* 8 학교 */
-        SELECT TOP 4 s.school_nm, s.school_se, 주소 = COALESCE(s.rdnmadr, s.lnmadr), s.lat, s.lon, 전체 = COUNT(*) OVER ()
+        SELECT TOP 4 s.school_nm, s.school_se, 주소 = COALESCE(s.rdnmadr, s.lnmadr), s.lat, s.lon, 전체 = COUNT(*) OVER (), s.school_id
           FROM silver.school s
          WHERE s.is_current = 1 AND s.lat IS NOT NULL AND s.school_nm LIKE @q
          ORDER BY CASE WHEN s.school_nm LIKE @p THEN 0 ELSE 1 END, s.school_nm, COALESCE(s.rdnmadr, s.lnmadr), s.school_se;
         /* 9 유치원 */
-        SELECT TOP 3 k.kinder_nm, 주소 = k.addr, lat = k.lat, lon = k.lng, 전체 = COUNT(*) OVER ()
+        SELECT TOP 3 k.kinder_nm, 주소 = k.addr, lat = k.lat, lon = k.lng, 전체 = COUNT(*) OVER (), k.kinder_cd
           FROM silver.kindergarten k
          WHERE k.lat IS NOT NULL AND k.kinder_nm LIKE @q
          ORDER BY CASE WHEN k.kinder_nm LIKE @p THEN 0 ELSE 1 END, k.kinder_nm, k.addr;
@@ -5924,6 +5924,39 @@ app.get('/api/complexes/:id/poi-list', async (req, res) => {
    평형을 골라도 '거래 내역' 이 비었다. 상세 몸을 키우지 않고(서비스DB 에 발행된 JSON 을 다시 만들 필요도 없게)
    **평형을 고르고 · 목록이 잘린 단지일 때만** 화면이 이걸 따로 부른다.
    ★ 칸 · 거르는 기준은 _q_trades 와 글자 그대로 같다(해제는 제자리에 같이 · 분양권·입주권은 매매에만 섞음). 평형마다 최근 120건 + 그 평형 전체 수. */
+/* 2026-11-01 사장님 "더보기로" — 상세가 가까운 몇 곳만 주는 목록(지하철 4 · 정류장 20 · 유치원 8 · 학원 8)의 나머지를 더보기 때만 받는다.
+   칸 · 거르는 기준은 상세 질의(_q_subways · _q_busList · _q_kinders · _q_aca)와 같고 자르는 수만 크다. 상세 몸 · 서비스DB 발행 JSON 은 그대로. */
+app.get('/api/complexes/:id/near-more', async (req, res) => {
+  const id = Number(req.params.id), k = String(req.query.k || '');
+  if (!Number.isInteger(id) || id <= 0 || !['subway', 'bus', 'kinder', 'academy'].includes(k)) return res.status(400).json({ error: 'bad query' });
+  try {
+    const pool = await getPool();
+    const 질의 = {
+      subway: `WITH v AS (SELECT * FROM gold.v_complex_subway WHERE complex_id = @id),
+        g AS (SELECT 역 = sttn_nm, 노선 = STRING_AGG(line_nm, N' · ') WITHIN GROUP (ORDER BY line_nm),
+                     최단m = CAST(MIN(dist_m) AS INT), 환승 = MAX(CASE WHEN transfer_se LIKE N'%환승역%' THEN 1 ELSE 0 END)
+                FROM v GROUP BY sttn_nm)
+        SELECT TOP 100 역, 노선, 최단m, 환승, 전체 = COUNT(*) OVER () FROM g ORDER BY 최단m, 역 COLLATE Latin1_General_BIN2`,
+      bus: `WITH v AS (SELECT stop_nm, ars_no, stop_no, dist_m,
+                     rn = ROW_NUMBER() OVER (ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no), 전체 = COUNT(*) OVER ()
+                FROM gold.v_complex_bus WHERE complex_id = @id)
+        SELECT 정류장 = stop_nm, ars = ars_no, 거리m = CAST(dist_m AS INT), 전체 FROM v WHERE rn <= 300
+         ORDER BY dist_m, stop_nm COLLATE Latin1_General_BIN2, stop_no`,
+      kinder: `WITH v AS (SELECT * FROM gold.v_complex_kinder WHERE complex_id = @id),
+        n AS (SELECT kinder_cd, kinder_nm, establish, cap_cnt, pupil_cnt, class_cnt, pbnt_tmng, oper_time, dist_m,
+                     rn = ROW_NUMBER() OVER (ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd) FROM v)
+        SELECT kinder_cd, 이름 = kinder_nm, 설립 = establish, 정원 = cap_cnt, 원아 = pupil_cnt, 학급 = class_cnt, 공시 = pbnt_tmng,
+               운영시간 = oper_time, 거리m = CAST(dist_m AS INT), 전체 = COUNT(*) OVER ()
+          FROM n WHERE rn <= 300 ORDER BY dist_m, kinder_nm COLLATE Latin1_General_BIN2, kinder_cd`,
+      academy: `SELECT TOP 500 이름 = aca_nm, 분야 = realm_sc_nm, 과정 = le_crse_nm, 거리m = CAST(dist_m AS INT), 전체500 = COUNT(*) OVER ()
+          FROM gold.v_complex_academy WHERE complex_id = @id AND dist_m <= 500 ORDER BY dist_m, aca_nm COLLATE Latin1_General_BIN2, academy_sk`,
+    }[k];
+    const r = await pool.request().input('id', sql.Int, id).query('SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\n' + 질의);
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 줄: r.recordset });
+  } catch (e) { fail(res, e, 'complex-near-more'); }
+});
+
 app.get('/api/complexes/:id/trade-list', async (req, res) => {
   /* 11-01: p 가 '*' 면 평형 가리지 않고 그 종류 전체(최근 1000건) — '전체' 목록의 더보기(상세는 종류별 최근 120건만 준다) */
   const 모두 = String(req.query.p) === '*';
@@ -6004,7 +6037,7 @@ app.get('/api/complexes/:id/childcare', async (req, res) => {
   try {
     const pool = await getPool();
     if (!(await 단지있나(pool, id))) return res.status(404).json({ error: 'not found' });
-    const r = await pool.request().input('id', sql.Int, id).query(`
+    const r = await pool.request().input('id', sql.Int, id).input('lim', sql.Int, req.query.all === '1' ? 300 : 10).query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       DECLARE @g GEOGRAPHY = (SELECT geography::Point(centroid_lat, centroid_lng, 4326) FROM gold.complex
                                WHERE complex_id = @id AND centroid_lat IS NOT NULL);
@@ -6014,7 +6047,7 @@ app.get('/api/complexes/:id/childcare', async (req, res) => {
         INTO #cc303
         FROM silver.childcare k
        WHERE @g IS NOT NULL AND k.is_current = 1 AND k.geog IS NOT NULL AND k.geog.STDistance(@g) <= 500;
-      SELECT TOP 10 * FROM #cc303 ORDER BY m;
+      SELECT TOP (@lim) * FROM #cc303 ORDER BY m;
       SELECT 유형, n = COUNT(*) FROM #cc303 GROUP BY 유형 ORDER BY COUNT(*) DESC;
       SELECT 받은곳 = (SELECT COUNT(*) FROM silver.childcare WHERE is_current = 1),
              이시군구 = (SELECT COUNT(*) FROM silver.childcare k JOIN gold.complex c ON c.complex_id = @id
