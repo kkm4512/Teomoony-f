@@ -2113,3 +2113,26 @@ table.pyt tr.pysub td{text-align:right;white-space:normal;font-size:11.5px;color
 /* 11-01 사장님 "로딩 중 표시는 2초 이상부터" — 화면 안 '불러오는 중…' 글자는 2초 뒤에 보인다(그 전에 끝나면 안 보인 채로 바뀐다) */
 .ldw{animation:ldw-in 0s linear 2s both}
 @keyframes ldw-in{from{visibility:hidden}to{visibility:visible}}
+/* 11-01 건축인허가 진행 단계 — 접힌 버튼(지금 단계) · 펴면 허가 → 착공 → 사용승인 */
+.prow .pstep{grid-column:1/-1;margin-top:4px}
+.pstep>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:7px;padding:3px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px}
+.pstep>summary::-webkit-details-marker{display:none}
+.pstep>summary:hover{background:var(--paper)}
+.pst-now{font-weight:600;color:var(--ink)}
+.pst-now::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mark);margin-right:6px;vertical-align:1px}
+.pst-nd{font:400 11.5px var(--mono);color:var(--ink-2)}
+.pst-more{font-size:11px;color:var(--ink-3)}
+.pst-more::after{content:' ▸';font-size:9px}
+.pstep[open] .pst-more::after{content:' ▾'}
+.pst{list-style:none;margin:8px 0 2px 4px;padding:0;border-left:2px solid var(--line-2)}
+.pst li{display:grid;grid-template-columns:64px auto 1fr;align-items:baseline;gap:4px 10px;padding:4px 0 4px 12px;position:relative;font-size:12.5px}
+.pst li::before{content:'';position:absolute;left:-6px;top:9px;width:8px;height:8px;border-radius:50%;background:var(--surface);border:2px solid var(--ink-4)}
+.pst li.done::before{background:var(--ink-3);border-color:var(--ink-3)}
+.pst li.now::before{background:var(--mark);border-color:var(--mark)}
+.pst li.now .pst-k{font-weight:700;color:var(--ink)}
+.pst li.todo,.pst li.skip{color:var(--ink-4)}
+.pst li.skip::before{border-style:dashed}
+.pst-k{color:var(--ink-2)}
+.pst-d{font:400 11.5px var(--mono);color:var(--ink-2)}
+.pst li.todo .pst-d,.pst li.skip .pst-d{color:var(--ink-4)}
+.pst-s{grid-column:2/-1;font-size:11px;color:var(--ink-3)}
