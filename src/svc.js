@@ -434,11 +434,11 @@ async function 자동완성(req, res, next) {
           ORDER BY CASE WHEN lower(sttn_nm) = lower($1) OR lower(sttn_nm) = lower($1 || '역') THEN 0 WHEN sttn_nm ILIKE $3 THEN 1 ELSE 2 END,
                    ${이름순('sttn_nm')} LIMIT 4`, [raw, q, p]),
       /* 8 학교 */
-      Q(`SELECT school_nm, school_se, "주소", lat, lon, count(*) OVER ()::int AS 전체, to_jsonb(s) ->> 'school_id' AS school_id
+      Q(`SELECT school_nm, school_se, "주소", lat, lon, count(*) OVER ()::int AS 전체, to_jsonb(s) ->> 'school_id' AS school_id, to_jsonb(s) ->> 'complex_id' AS complex_id
            FROM svc.lyr_sg_school s WHERE school_nm ILIKE $1
           ORDER BY CASE WHEN school_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('school_nm')}, ${이름순('"주소"')}, ${이름순('school_se')} LIMIT 4`, [q, p]),
       /* 9 유치원 */
-      Q(`SELECT kinder_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체, to_jsonb(k) ->> 'kinder_cd' AS kinder_cd
+      Q(`SELECT kinder_nm, "주소", lat, lon, count(*) OVER ()::int AS 전체, to_jsonb(k) ->> 'kinder_cd' AS kinder_cd, to_jsonb(k) ->> 'complex_id' AS complex_id
            FROM svc.lyr_sg_kinder k WHERE kinder_nm ILIKE $1
           ORDER BY CASE WHEN kinder_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('kinder_nm')}, ${이름순('"주소"')} LIMIT 3`, [q, p]),
       /* 10 학원 */

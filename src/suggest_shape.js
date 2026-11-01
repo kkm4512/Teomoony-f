@@ -89,8 +89,23 @@ function 묶음만들기(rs, 길이) {
       { 종류: '상가', 전체: 전체(rs[10]), 앞부분만: true, 두글자부터: 길이 < 2, 항목: rs[10].map(x => ({
           이름: x.bizes_nm + (x.brch_nm ? ` ${x.brch_nm}` : ''), 보조: [x.inds_scls_nm, x.adong_nm, x.주소].filter(Boolean).join(' · '),
           동작: { 종류: '점', lat: x.lat, lng: x.lon, ...(x.bizes_id ? { stid: x.bizes_id } : {}) } })) },
-    ].filter(g => g.항목.length);
-  return 묶음;
+    ];
+  /* 11-01 사장님 "장위초등학교가 검색에서 갈라지고 그걸 눌러야 학교 정보가 떠서 불편" — 학교 · 유치원 좌표가 든 단지(401 · 위치로만 이음)가 있으면
+     그 단지 줄 하나로 합친다: 단지 줄에 학교급을 붙이고 학교 줄은 뺀다. 단지 줄이 목록에 없으면 학교 줄이 그 단지를 연다(단지정보 탭 맨 위가 학교 칸). */
+  const 단지묶 = 묶음.find(g => g.종류 === '단지');
+  for (const [종, ri, 급] of [['학교', 7, x => x.school_se], ['유치원', 8, () => '유치원']]) {
+    const g = 묶음.find(z => z.종류 === 종); if (!g) continue;
+    const 남 = [];
+    g.항목.forEach((it, i) => {
+      const cid = Number((rs[ri][i] || {}).complex_id) || null;
+      if (!cid) { 남.push(it); return; }
+      const 같은 = 단지묶 && 단지묶.항목.find(d => d.동작 && d.동작.id === cid);
+      if (같은) { if (!같은.동작.학교) { 같은.보조 = [급(rs[ri][i]), 같은.보조].filter(Boolean).join(' · '); 같은.동작.학교 = true; } return; }
+      남.push({ ...it, 동작: { 종류: '단지', id: cid, 학교: true } });
+    });
+    g.전체 = Math.max(0, g.전체 - (g.항목.length - 남.length)); g.항목 = 남;
+  }
+  return 묶음.filter(g => g.항목.length);
 }
 
 /* 이름 끝의 건물 종류 말 — '드림아트빌라' → '드림아트빌' (이름꼬리떼기) */

@@ -1491,7 +1491,7 @@ async function 제안고르기(it) {
   if (!it) return;
   const d = it.동작 || {};
   if (찾은점Layer.층) 찾은점Layer.층.clearLayers();
-  if (d.종류 === '단지') return select(d.id, false);
+  if (d.종류 === '단지') { if (d.학교) detailTab = 'info'; return select(d.id, false); }   /* 11-01 학교가 든 단지 — 단지정보 탭(맨 위 학교 칸) */
   if (d.종류 === '승인') return 승인으로(d.hp);
   if (d.종류 === '공사') return d.id ? select(d.id, false) : selectPreBuild(d.pk);
   if (d.종류 === '신축') return selectNewbuild(d.code, false);
@@ -5450,6 +5450,7 @@ function renderDetail(payload) {
   const pl   = (poiLife || []).filter(x => Number(x.r1000) > 0);
 
   const paneI = `
+    ${!V && c.complex_id ? `<div class="scbox" data-sc="${esc(String(c.complex_id))}"></div>` : ''}
     ${specBlock(spec, c, vlrat, 전용률, 호총수, kapt, dongs)}
     ${permitBlock(permits, scope, permitDongs, c.complex_id, { 처음: c.oldest_use_apr, 마지막: c.latest_use_apr, 세대: c.hhld_cnt_sum, 연면적: c.tot_area_sum,
                                                               허가: spec && spec.허가일, 착공: spec && spec.착공일, 승인: spec && spec.사용승인 })}
@@ -5614,6 +5615,7 @@ function renderDetail(payload) {
   관리비추이채우기();      // 10-31 관리 탭 관리비 아래 '관리비 추이'(K-apt 자료실 엑셀)
   어린이집채우기();        // 어린이집 칸 — 교육 탭에 있을 때만 그릇이 있다
   평단가채우기();          // 11-01 평단가 칸 — 실거래 탭에 있을 때만 그릇이 있다
+  학교자리채우기();        // 11-01 이 건물이 학교 · 유치원이면 단지정보 탭 맨 위에 그 정보
   평형거래채우기();        // 11-01 평형 하나의 거래 내역(목록이 잘린 단지에서 평형을 골랐을 때만)
   병원채우기();            // 심평원 병원·약국 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
   약국채우기();            // 행안부 약국 인허가 칸 — 병원·약국 탭에 있을 때만 그릇이 있다
@@ -8360,6 +8362,40 @@ async function 학교상세(sid) {
       <p class="note">${esc(e.message || '불러오지 못했습니다')}</p></div>`;
     return;
   }
+  const b = d.학교 || {};
+  el.innerHTML = `<div class="hm-box sbox">
+    <div class="hm-h">${esc(b.school_nm || '학교')} <span>${esc([b.school_se, b.fond_type, b.고교종류].filter(Boolean).join(' · '))}</span>
+      <button type="button" class="hm-x" data-ho-close>닫기</button></div>
+    ${학교몸(d)}
+  </div>`;
+}
+/* 11-01 사장님 "장위초등학교 — 검색에서 한 번에" : 이 단지에 든 학교 · 유치원(401 · 좌표가 든 필지로만 이음)을 단지정보 탭 맨 위에.
+   학교는 학교 상세와 같은 몸(학교몸) · 유치원은 이름과 '자세히'(유치원 상세 모달). */
+const 학교자리캐시 = new Map();
+async function 학교자리채우기() {
+  const box = document.querySelector('#detail .scbox'); if (!box) return;
+  const 키 = box.dataset.sc;
+  let r = 학교자리캐시.get(키);
+  if (!r) {
+    try {
+      const x = await fetch(`/api/complexes/${encodeURIComponent(키)}/school-site`); if (!x.ok) return;
+      const 곳 = (await x.json()).곳 || [];
+      const 학교 = await Promise.all(곳.filter(g => g.종류 === '학교').map(g => fetch(`/api/school/${encodeURIComponent(g.키)}`).then(y => y.ok ? y.json() : null).catch(() => null)));
+      r = { 곳, 학교: 학교.filter(Boolean) }; 학교자리캐시.set(키, r);
+    } catch { return; }
+  }
+  const 지금 = document.querySelector('#detail .scbox'); if (!지금 || 지금.dataset.sc !== 키) return;
+  const 유 = r.곳.filter(g => g.종류 === '유치원');
+  지금.innerHTML = r.학교.map(d => { const b = d.학교 || {};
+      return `${sect(`${esc(b.school_nm || '학교')} <span class="muted">${esc([b.school_se, b.fond_type].filter(Boolean).join(' · '))}</span>`, 'school')}<div class="scin">${학교몸(d)}</div>`; }).join('')
+    + (유.length ? `${sect('유치원', 'kinder')}<div class="schrow">${유.map(g => `<div class="scell"><span class="sg">유치원</span><b>${esc(g.이름 || '')}</b>
+        <button type="button" class="sdet" data-kinder="${esc(g.키)}" title="유치원 상세">자세히 ›</button></div>`).join('')}</div>` : '');
+  /* 단지 상세에는 작은 설명 글을 두지 않는다(11-01 규칙) — 학교 몸의 출처 줄 · 괄호 설명 · 안내 문장은 여기선 뺀다(빈칸 사유는 둔다) */
+  지금.querySelectorAll('.scin .srcline, .scin .lt2 > .muted, .scin .hzone .muted').forEach(e => e.remove());
+  지금.querySelectorAll('.scin p.note.sm').forEach(e => { if (!e.querySelector('[class*="gap"]')) e.remove(); });
+}
+/* 11-01: 학교 상세의 몸 — 모달과 단지 상세(이 건물이 학교일 때 단지정보 탭 맨 위)가 같이 쓴다 */
+function 학교몸(d) {
   const b = d.학교 || {}, 연 = d.연도 || [], 동 = d.전출입 || [], 구 = d.구역 || [];
   const 최근 = 연[0];
   const 줄 = (k, v) => v == null || v === '' ? '' : `<div><dt>${k}</dt><dd>${v}</dd></div>`;
@@ -8368,10 +8404,7 @@ async function 학교상세(sid) {
   const 구역말 = { E: '초등 통학구역', M: '중학교 학교군', H: '고등학교 학군' };
   const 없음 = !b.schul_code
     ? `<p class="note sm">${gapCell('', 'UNSURE', '학교알리미 공시와 코드로 잇지 못했습니다 — 학생 · 교사 수가 없습니다(이름으로는 잇지 않습니다)')}</p>` : '';
-  el.innerHTML = `<div class="hm-box sbox">
-    <div class="hm-h">${esc(b.school_nm || '학교')} <span>${esc([b.school_se, b.fond_type, b.고교종류].filter(Boolean).join(' · '))}</span>
-      <button type="button" class="hm-x" data-ho-close>닫기</button></div>
-    <p class="hm-addr">${esc(b.rdnmadr || b.road_addr || '')}${b.lnmadr ? ` · ${esc(b.lnmadr)}` : ''}${b.거리m != null ? ` · 이 단지에서 ${fmt(b.거리m)}m(직선)` : ''}</p>
+  return `    <p class="hm-addr">${esc(b.rdnmadr || b.road_addr || '')}${b.lnmadr ? ` · ${esc(b.lnmadr)}` : ''}${b.거리m != null ? ` · 이 단지에서 ${fmt(b.거리m)}m(직선)` : ''}</p>
 
     ${최근 && 연.length === 1 ? `<div class="hm-s"><b>학생 ${fmt(최근.학생)}명</b><span class="muted">학급 ${fmt(최근.학급)} · 학급당 ${esc(String(최근.학급당 ?? '—'))}명 · 교사 ${fmt(최근.교사)} · 수업교원 1인당 ${esc(String(최근.교사당 ?? '—'))}명 · ${esc(String(최근.공시연도))}년 공시</span></div>` : 최근 ? '' : 없음}
     ${/* 연도별 표가 있으면 머리 요약을 안 둔다 — 첫 줄(최근 공시)과 같은 숫자를 두 번 보이지 않게 */''}
@@ -8407,8 +8440,7 @@ async function 학교상세(sid) {
       줄('교육지원청', esc(b.edc_sport_nm || '')),
       줄('홈페이지', 링크(b.hmpg)),
     ].join('')}</dl>
-    <p class="srcline">위치 · 이름: ${esc(d.출처.위치)} · 학생 · 교사: ${esc(d.출처.공시)}${b.schul_code ? `(학교 코드 규칙으로 이음 — ${esc(b.이음근거 || '')})` : ''} · 구역: ${esc(d.출처.구역)}</p>
-  </div>`;
+    <p class="srcline">위치 · 이름: ${esc(d.출처.위치)} · 학생 · 교사: ${esc(d.출처.공시)}${b.schul_code ? `(학교 코드 규칙으로 이음 — ${esc(b.이음근거 || '')})` : ''} · 구역: ${esc(d.출처.구역)}</p>`;
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-school]');

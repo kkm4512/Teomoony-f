@@ -2210,12 +2210,14 @@ app.get('/api/suggest', async (req, res) => {
          GROUP BY s.sttn_nm
          ORDER BY CASE WHEN s.sttn_nm = @raw OR s.sttn_nm = @raw + N'역' THEN 0 WHEN s.sttn_nm LIKE @p THEN 1 ELSE 2 END, s.sttn_nm;
         /* 8 학교 */
-        SELECT TOP 4 s.school_nm, s.school_se, 주소 = COALESCE(s.rdnmadr, s.lnmadr), s.lat, s.lon, 전체 = COUNT(*) OVER (), s.school_id
+        SELECT TOP 4 s.school_nm, s.school_se, 주소 = COALESCE(s.rdnmadr, s.lnmadr), s.lat, s.lon, 전체 = COUNT(*) OVER (), s.school_id,
+               complex_id = (SELECT g.complex_id FROM gold.complex_school_site g WHERE g.종류 = N'학교' AND g.키 = s.school_id)
           FROM silver.school s
          WHERE s.is_current = 1 AND s.lat IS NOT NULL AND s.school_nm LIKE @q
          ORDER BY CASE WHEN s.school_nm LIKE @p THEN 0 ELSE 1 END, s.school_nm, COALESCE(s.rdnmadr, s.lnmadr), s.school_se;
         /* 9 유치원 */
-        SELECT TOP 3 k.kinder_nm, 주소 = k.addr, lat = k.lat, lon = k.lng, 전체 = COUNT(*) OVER (), k.kinder_cd
+        SELECT TOP 3 k.kinder_nm, 주소 = k.addr, lat = k.lat, lon = k.lng, 전체 = COUNT(*) OVER (), k.kinder_cd,
+               complex_id = (SELECT g.complex_id FROM gold.complex_school_site g WHERE g.종류 = N'유치원' AND g.키 = k.kinder_cd)
           FROM silver.kindergarten k
          WHERE k.lat IS NOT NULL AND k.kinder_nm LIKE @q
          ORDER BY CASE WHEN k.kinder_nm LIKE @p THEN 0 ELSE 1 END, k.kinder_nm, k.addr;
@@ -5837,6 +5839,24 @@ const _한점 = id => `DECLARE @g geography = (SELECT geography::Point(centroid_
 /* 2026-11-01 사장님 "학원이나 상가도 (검색에서 고르면 정보가) 나오게" — 학원 · 상가 상세(원문 칸 그대로).
    학원 = 교육청 등록(NEIS 학원교습소정보 · silver.academy) · 학원지정번호(aca_asnum)로 · 지금 줄만.
    상가 = 소상공인시장진흥공단 상가(상권)정보(silver.semas_store) · 상가업소번호(bizes_id)로 · 지금 줄만. */
+/* 11-01 이 단지에 든 학교 · 유치원(401 · 좌표가 든 필지로만 이음) — 단지정보 탭 맨 위 학교 칸이 부른다 */
+app.get('/api/complexes/:id/school-site', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('id', sql.Int, id).query(`
+      SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+      IF OBJECT_ID('gold.complex_school_site') IS NULL SELECT TOP 0 종류 = N'', 키 = '', 이름 = N'', 급 = N'';
+      ELSE SELECT g.종류, g.키, 이름 = COALESCE(s.school_nm, k.kinder_nm), 급 = COALESCE(s.school_se, N'유치원')
+             FROM gold.complex_school_site g
+             LEFT JOIN silver.school s ON g.종류 = N'학교' AND s.school_id = g.키 AND s.is_current = 1
+             LEFT JOIN silver.kindergarten k ON g.종류 = N'유치원' AND k.kinder_cd = g.키
+            WHERE g.complex_id = @id ORDER BY CASE g.종류 WHEN N'학교' THEN 0 ELSE 1 END, 이름;`);
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ 곳: r.recordset });
+  } catch (e) { fail(res, e, 'complex-school-site'); }
+});
 app.get('/api/academy/:no', async (req, res) => {
   const no = String(req.params.no || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20);
   if (!no) return res.status(400).json({ error: 'bad id' });
