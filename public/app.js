@@ -3716,7 +3716,10 @@ function tradeList(rows, 거래탭, 평형) {
      그때 종류 전체를 분모로 쓰면 "매매 2,105건 중 12건" 이 되어 거짓이 된다.
      그래서 평형을 고른 경우에는 **받은 것 안에서** 센다고 적는다. */
   const 전체종류 = Number(종R[0].전체) || 종R.length;
-  const R = (평형 == null || 평형 === '') ? 종R : 종R.filter(r => {
+  /* 11-01: 서버가 종류별 최근 120건(기본 = 1) + 평형마다 최근 40건을 준다. '전체' 는 앞의 것만 —
+     뒤의 것을 섞으면 날짜가 띄엄띄엄 건너뛰어 '그 사이 거래 없음' 으로 읽힌다. 기본 칸이 없는 옛 응답은 전부 기본. */
+  const 기본R = 종R.filter(r => r.기본 == null || Number(r.기본) === 1);
+  const R = (평형 == null || 평형 === '') ? 기본R : 종R.filter(r => {
     const k = r.평형 == null ? '' : String(r.평형) + (r.면적칸 && r.면적칸 !== '전용' ? '|' + r.면적칸 : '');
     return k === 평형;
   });
@@ -3757,10 +3760,16 @@ function tradeList(rows, 거래탭, 평형) {
         /* ★ 2026-10-21 QA: 이 '전체' 는 **해제 포함**이다(목록은 해제도 제자리에 둔다). 바로 위 탭·평형 카드의
            건수는 해제를 뺀 수라 '매매 1,429' 옆에 '1,443건 중' 이 떠서 어긋나 보였다 - 그 말을 적는다. */
         ? `<p class="srcline">${esc(거래탭)} ${fmt(전체종류)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '')
-    : `<p class="srcline">최근 ${fmt(종R.length)}건 중 이 평형 ${fmt(받은)}건 · ${esc(거래탭)} 전체 ${fmt(전체종류)}건(해제 포함)</p>`;
+    : (() => {
+        /* 11-01: 평형마다 따로 받으니 그 평형의 진짜 분모(평형전체 · 해제 포함)를 안다 — 다 받았으면 줄을 안 쓴다 */
+        const 평형전체 = Number((R.find(r => !r.분양권) || {}).평형전체) || 0;
+        if (!평형전체) return '';
+        return 평형전체 > 받은본
+          ? `<p class="srcline">이 평형 ${esc(거래탭)} ${fmt(평형전체)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '';
+      })();
 
   /* 316: 섞인 분양권·입주권 — 몇 건인지 · 집계에는 안 넣었다는 사실만(설명은 정책 화면) */
-  const 분 = 거래탭 === '매매' ? Number(종R[0].분양권수) || 0 : 0;
+  const 분 = 거래탭 !== '매매' ? 0 : (평형 == null || 평형 === '') ? Number(종R[0].분양권수) || 0 : R.filter(r => r.분양권).length;
   const 분줄 = 분 ? `<p class="srcline" title="평형 요약 · 최고가에는 안 넣음">분양권·입주권 ${fmt(분)}건 포함</p>` : '';
   /* 10-31 사장님 "필드명이 없으니까 각 숫자가 뭘 의미하는지 이해하기 힘들어 — 전세 매매 월세 전부": 칸 이름 줄(목록과 같은 열에 선다 · style.css subgrid) */
   const 금액칸 = 거래탭 === '월세' ? '보증금 / 월세' : 거래탭 === '전세' ? '보증금' : '거래가';
@@ -5009,7 +5018,9 @@ function renderDetail(payload) {
   const areaPick = areaKeys.length > 1 ? `<div class="apick">
       <button type="button" class="achip" data-area="" aria-selected="${tradeArea === null}">전체</button>${
       areaKeys.map(k => {
-        const n = stats.filter(r => akey(r) === k).reduce((s, r) => s + (r.cnt || 0), 0);
+        /* 11-01 사장님: '매매' 를 골랐는데 칩 숫자가 매매+전세+월세 합(114㎡ 23 = 5+16+2)이라 헷갈렸다 → 고른 종류의 건수만 */
+        const 이종류 = r => 거래탭 === '매매' ? !r.is_rent : (r.is_rent && (거래탭 === '월세') === !!Number(r.is_wolse));
+        const n = stats.filter(r => akey(r) === k && 이종류(r)).reduce((s, r) => s + (r.cnt || 0), 0);
         return `<button type="button" class="achip" data-area="${esc(k)}"
                  aria-selected="${tradeArea === k}">${
                  esc(alabelKey(k))}<b>${fmt(n)}</b></button>`;
@@ -7202,10 +7213,12 @@ async function 평단가채우기() {
       <th class="n" title="${esc(동이름)} · 같은 종류 · 같은 평형대 · 최근 12개월">동네</th><th class="n" title="같은 시군구 · 같은 종류 · 같은 평형대 · 최근 12개월">시군구</th></tr></thead><tbody>
     ${줄.map(x => `<tr>${종류여럿 ? `<td>${esc(x.종류)}</td>` : ''}<td>${fmt(x.평형)}㎡</td>
       <td class="n" title="가운데 50% ${만억(x.하위25)} ~ ${만억(x.상위25)} · 최근 ${날짜(x.최근계약일)} ${만억(x.최근평단가)}"><b>${만억(x.중앙값)}</b></td>
-      <td class="n">${fmt(x.건수)}건 <span class="muted sm">${x.기간개월 === 12 ? '1년' : '3년'}</span></td>
+      <td class="n">${fmt(x.건수)}건 <span class="muted sm">${x.기간개월 === 12 ? '1년' : '3년'}</span>${x.기간개월 === 12 ? ''
+        /* 11-01 사장님 "실거래가 있는 거야 없는 거야?": 3년 값은 최근 1년에 거래가 없다는 뜻 — 그걸 말로 적는다 */
+        : `<br><span class="muted sm">1년간 없음 · 마지막 ${esc(날짜(x.최근계약일).slice(0, 7))}</span>`}</td>
       <td class="n">${칸(지역('동', x.종류, 평형대(x.평형)))}</td><td class="n">${칸(지역('시군구', x.종류, 평형대(x.평형)))}</td></tr>`).join('')}
     </tbody></table>
-    <p class="note sm">동네 · 시군구는 같은 종류 · 같은 평형대(전용 ~60 · 60~85 · 85~135 · 135~㎡)의 최근 1년 중앙값입니다. 숫자에 올리면 건수 · 범위가 나옵니다.</p>`;
+    <p class="note sm">동네 · 시군구는 같은 종류 · 같은 평형대(전용 ~60 · 60~85 · 85~135 · 135~㎡)의 최근 1년 중앙값입니다. 이 단지 칸의 '3년' 은 그 평형 매매가 최근 1년에 없어 3년치 실거래로 낸 값입니다. 숫자에 올리면 건수 · 범위가 나옵니다.</p>`;
 }
 async function 어린이집채우기() {
   const box = document.querySelector('#detail .ccbox');

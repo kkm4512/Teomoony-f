@@ -6110,7 +6110,8 @@ app.get('/api/closed/site/:key', async (req, res) => {
                       WHERE a.pnu = e.pnu AND a.mgm_shtreg_pk = e.mgm_shtreg_pk AND a.expos_pubuse_gb_nm = N'전유') ea
        WHERE s.site_key = @k ORDER BY e.dong_nm, 층 DESC, e.ho_nm;
       /* 실거래 탭 — 단지 상세와 같은 칸(tradeList 가 읽는 모양). 옛 건물(닫히기 전) 것만 · 종류마다 120 */
-      SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수 = 0
+      SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세, 면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수 = 0,
+             평형전체, 기본 = CASE WHEN rn <= 120 THEN 1 ELSE 0 END
         FROM (SELECT 날짜 = deal_ymd, 취소 = CAST(ISNULL(is_canceled, 0) AS INT), 전월세 = CAST(is_rent AS BIT),
                      월세냐 = CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
                      금액 = deal_amount, 보증금 = deposit, 월세 = monthly_rent,
@@ -6121,9 +6122,17 @@ app.get('/api/closed/site/:key', async (req, res) => {
                      분양권 = CAST(NULL AS NVARCHAR(10)), 근거 = CAST(NULL AS NVARCHAR(30)),
                      전체 = COUNT(*) OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END),
                      rn = ROW_NUMBER() OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END
-                                             ORDER BY deal_ymd DESC, trade_sk DESC)
+                                             ORDER BY deal_ymd DESC, trade_sk DESC),
+                     /* 11-01: 평형마다 최근 40건 보장(단지 상세와 같은 규칙) */
+                     평형전체 = COUNT(*) OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
+                                               FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)),
+                                               CASE WHEN exclu_use_ar IS NOT NULL THEN 1 WHEN total_floor_ar IS NOT NULL THEN 2 WHEN building_ar IS NOT NULL THEN 3 END),
+                     rnp = ROW_NUMBER() OVER (PARTITION BY is_rent, CASE WHEN is_rent = 1 AND ISNULL(monthly_rent, 0) > 0 THEN 1 ELSE 0 END,
+                                              FLOOR(COALESCE(exclu_use_ar, total_floor_ar, building_ar)),
+                                              CASE WHEN exclu_use_ar IS NOT NULL THEN 1 WHEN total_floor_ar IS NOT NULL THEN 2 WHEN building_ar IS NOT NULL THEN 3 END
+                                              ORDER BY deal_ymd DESC, trade_sk DESC)
                 FROM #ot WHERE 때 = N'전') x
-       WHERE rn <= 120 ORDER BY 전월세, 월세냐, 날짜 DESC;
+       WHERE rn <= 120 OR rnp <= 40 ORDER BY 전월세, 월세냐, 날짜 DESC;
       SELECT op, 건수, 받은때 FROM silver.bld_closed_detail_done d JOIN gold.closed_site s ON s.pnu = d.pnu WHERE s.site_key = @k;
       /* 2026-10-23 사장님 "123 너가 ㄱㄱ" — 이 지번의 공동주택가격(VWorld NED, 국토부 공시) 연도별: 공시된 호 수 · 원문 값의 최저~최고(평균·중위는 안 낸다).
          ★ NED 는 **지번** 단위라 같은 지번의 지금 건물 값도 온다(국화연립 2002 폐쇄 자리 → 2006~ '국화아파트') — **대장이 닫힌 해까지만** 이 옛 건물 것으로 본다. */
@@ -7790,12 +7799,19 @@ app.get('/api/complexes/:id', async (req, res) => {
         SELECT *, 전체 = SUM(CASE WHEN 분양권 IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐),
                분양권수 = SUM(CASE WHEN 분양권 IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐),
                rn = ROW_NUMBER() OVER (PARTITION BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END
-                                       ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
+                                       ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC),
+               /* 2026-11-01 사장님 (DMC 롯데캐슬 114㎡ "실거래가 있는데 왜 저렇게?"): 종류별 최근 120건만 주니
+                  마지막 매매가 오래된 평형(114㎡ · 2025.03)은 목록에 한 줄도 안 와서 평형을 골라도 '거래 내역' 이 비었다.
+                  → 평형마다 최근 40건은 **따로 보장**한다. '전체' 화면은 예전처럼 종류별 최근 120건(기본 = 1)만 쓴다. */
+               평형전체 = SUM(CASE WHEN 분양권 IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY 전월세, 월세냐, 평형, 면적칸),
+               rnp = ROW_NUMBER() OVER (PARTITION BY 전월세, 월세냐, CASE WHEN 분양권 IS NULL THEN 0 ELSE 1 END, 평형, 면적칸
+                                        ORDER BY 날짜 DESC, ISNULL(금액, 보증금) DESC)
           FROM t
       )
       SELECT 전체, 날짜, 취소, 전월세, 월세냐, 금액, 보증금, 월세,
-             면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수
-        FROM r WHERE rn <= 120
+             면적, 면적칸, 평형, 층, 직거래, 갱신, 분양권, 근거, 분양권수,
+             평형전체, 기본 = CASE WHEN rn <= 120 THEN 1 ELSE 0 END
+        FROM r WHERE rn <= 120 OR rnp <= 40
        ORDER BY 전월세, 월세냐, 날짜 DESC, ISNULL(금액, 보증금) DESC`);   /* 2026-10-23: 날짜순으로 섞는다 — 준공 뒤(등기 전) 입주권도 붙어서 */
 
     /* 전세가율 (2026-10-19)
