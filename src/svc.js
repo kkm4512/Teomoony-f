@@ -425,8 +425,8 @@ async function 자동완성(req, res, next) {
            FROM svc.lyr_sg_newbuild WHERE name_ns ILIKE $1
           ORDER BY CASE WHEN kapt_name ILIKE $2 THEN 0 ELSE 1 END, "세대" DESC NULLS LAST, kapt_code LIMIT 3`, [q0, p]),
       /* 6 재개발 · 정비 */
-      Q(`SELECT present_sn, zone_nm, biz_nm, propel_nm, centroid_lat, centroid_lng, minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체
-           FROM svc.lyr_sg_redev WHERE zone_ns ILIKE $1 OR biz_ns ILIKE $1
+      Q(`SELECT present_sn, zone_nm, biz_nm, propel_nm, centroid_lat, centroid_lng, minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체, to_jsonb(r0) ->> 'main_complex_id' AS main_complex_id
+           FROM svc.lyr_sg_redev r0 WHERE zone_ns ILIKE $1 OR biz_ns ILIKE $1
           ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('zone_nm')}, present_sn LIMIT 4`, [q0, p]),
       /* 7 지하철역 */
       Q(`SELECT sttn_nm, "노선", lat, lon, count(*) OVER ()::int AS 전체
