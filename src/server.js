@@ -4384,7 +4384,7 @@ async function 가상구역경계(pool, pnu) {
         FROM (SELECT v.present_sn, x = SUM(v.xarea), p = SUM(v.parea) FROM gold.fn_pnu_redev(@pnu, 0) v GROUP BY v.present_sn) h
         JOIN silver.redev_zone z ON z.present_sn = h.present_sn AND z.is_current = 1
        WHERE z.geojson IS NOT NULL AND h.x >= 0.5 * h.p
-         AND z.biz_lclas_nm IN (N'정비사업', N'재정비촉진사업', N'소규모 정비사업') AND z.biz_nm NOT LIKE N'%지구%'
+         AND ${재개발조건('z.biz_nm')}
        ORDER BY z.area_m2, z.present_sn;`);
     const z = r.recordset[0];
     if (!z) return null;
@@ -5199,10 +5199,17 @@ app.get('/api/zones', async (req, res) => {
 /* 정비사업 구역. 색은 **추진단계 진행도**(propel_pct)로 칠한다 - 순서가 있는 값이다.
    ★ 큰 것(촉진지구)이 작은 것(구역)을 덮지 않도록 **면적 큰 것부터** 내린다.
      Leaflet 은 먼저 추가된 것이 아래에 깔린다. */
+/* 2026-11-01 사장님 "정비와 재개발을 분리" — 원본 사업 소분류(biz_nm)로만 가른다(이름 · 위치로 고치지 않는다).
+   재개발 = **다시 짓는 사업**만 적은 목록(화이트리스트). 목록에 없는 새 소분류는 '정비'(그 밖의 구역)로 간다 — 모르는 걸 재개발이라 하지 않는다.
+   ★ 모아타운(여러 모아주택을 묶는 관리지역) · 주거환경개선(관리형, 다시 짓지 않음) · 지구 · 존치 구역은 '정비'. 가단지 지도 경계(가상구역경계)도 같은 목록. */
+const 재개발소분류 = ['신속통합기획', '재건축(공동)', '재건축(단독)', '재개발(주택정비형)', '재개발(도시정비형)', '주거환경개선(정비형)',
+  '재정비촉진구역', '가로주택정비사업', '소규모재건축사업', '소규모재개발사업', '자율주택정비사업'];
+const 재개발조건 = (열) => `${열} IN (${재개발소분류.map(x => `N'${x}'`).join(', ')})`;
 app.get('/api/redev', async (req, res) => {
   const bbox = String(req.query.bbox || '').split(',').map(Number);
   if (bbox.length !== 4 || bbox.some(n => !Number.isFinite(n)))
     return res.status(400).json({ error: 'bbox 가 필요합니다 (minLng,minLat,maxLng,maxLat)' });
+  const 묶음 = ['reb', 'etc'].includes(req.query.g) ? req.query.g : '';   /* 재개발(reb) · 그 밖의 정비(etc) · 없으면 전부 */
   try {
     const pool = await getPool();
     const r = await pool.request()
@@ -5212,7 +5219,7 @@ app.get('/api/redev', async (req, res) => {
         SELECT TOP 800 present_sn, zone_nm, biz_lclas_nm, biz_nm,
                propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
         FROM silver.redev_zone
-        WHERE is_current = 1 AND geojson IS NOT NULL
+        WHERE is_current = 1 AND geojson IS NOT NULL${묶음 === 'reb' ? ` AND ${재개발조건('biz_nm')}` : 묶음 === 'etc' ? ` AND NOT ${재개발조건("ISNULL(biz_nm, N'')")}` : ''}
           AND bbox_minx <= @x1 AND bbox_maxx >= @x0
           AND bbox_miny <= @y1 AND bbox_maxy >= @y0
         ORDER BY area_m2 DESC`);

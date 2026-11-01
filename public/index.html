@@ -35,7 +35,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="/style.css?v=20261101x">
+<link rel="stylesheet" href="/style.css?v=20261101y">
 <!-- ★ 스타일 바로 뒤, 그림 그리기 전에 입힌다. app.js 에서 하면 밝은 화면이
      한 번 번쩍인다. localStorage 는 사생활 모드에서 던질 수 있어 try 로 감싼다. -->
 <script>try{var t=localStorage.getItem('teomoony.theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}</script>
@@ -177,14 +177,20 @@
       <select id="overlay" class="vh" tabindex="-1" aria-hidden="true">
         <option value="">없음</option>
         <option value="zone">용도지역</option>
-        <option value="redev">정비사업 구역</option>
+        <option value="reb">재개발 · 재건축 구역</option>
+        <option value="redev">그 밖의 정비 · 개발 구역</option>
       </select>
       <button type="button" class="mc ov" data-ov="zone" aria-pressed="false" title="용도지역 겹쳐 보기">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.8 5.6 7.4 3.2l5.2 2.4 4.6-2.4v11.2l-4.6 2.4-5.2-2.4-4.6 2.4V5.6Z"/><path d="M7.4 3.2v11.2"/><path d="M12.6 5.6v11.2"/></svg>
         <span>용도</span>
       </button>
-      <button type="button" class="mc ov" data-ov="redev" aria-pressed="false" title="정비사업 구역 겹쳐 보기">
+      <!-- 2026-11-01 사장님 "정비와 재개발을 분리" — 다시 짓는 사업(재개발 · 재건축 · 촉진구역 · 소규모 정비)과 그 밖의 구역(지구 · 모아타운 · 도시재생 · 역세권 · 공공주택 …) -->
+      <button type="button" class="mc ov" data-ov="reb" aria-pressed="false" title="재개발 · 재건축 구역 겹쳐 보기">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.4 16.6V8.4l5-3.2v11.4"/><path d="M8.4 16.6V9.8l5.4 2v4.8"/><path d="M13.8 16.6V7.2l2.8-1.4v10.8"/><path d="M2.4 16.6h15.2"/></svg>
+        <span>재개발</span>
+      </button>
+      <button type="button" class="mc ov" data-ov="redev" aria-pressed="false" title="그 밖의 정비 · 개발 구역 겹쳐 보기 (지구 · 모아타운 · 도시재생 · 역세권 · 공공주택 등)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.6" y="3.4" width="14.8" height="13.2" rx="1.4" stroke-dasharray="2.6 2"/><rect x="6.2" y="7" width="7.6" height="6" rx="1"/></svg>
         <span>정비</span>
       </button>
       <!-- 2026-10-22 12:32 사장님 "버튼 빼고 검색 제안에서 찾게" — [분양]·[폐쇄] 버튼을 뺐다(검색 제안 '청약 공고'·'폐쇄·말소 대장' 묶음으로). -->
@@ -363,7 +369,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>   <!-- 2026-10-23 지도 360° 회전 -->
-<script src="/app.js?v=20261101x"></script>
+<script src="/app.js?v=20261101y"></script>
   <!-- 호 하나의 상세. 격자 칸을 누르면 채워진다 (app.js openHo) -->
   <div id="homodal" aria-live="polite"></div>
 </body>

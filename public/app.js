@@ -506,11 +506,13 @@ const colorOf = d => css('--s' + stepOf(d));
 let map, parcelLayer, buildingLayer, focusLayer, focusBldLayer, markerLayer, lawdLayer, lawdMarkerLayer, lawdFocusLayer, CFG = {};
 let showBuildings = true;
 let showPolys = false;          // 필지/건물 폴리곤은 기본으로 숨긴다. 단지 마커가 먼저다
-/* 겹쳐보기 (2026-10-19). '' | 'zone' | 'redev'
+/* 겹쳐보기 (2026-10-19). '' | 'zone' | 'reb'(재개발 · 재건축, 11-01) | 'redev'(그 밖의 정비 · 개발 구역)
    ★ **한 번에 하나만** 켠다. 필지·건물·단지 마커가 이미 깔린 위에 면을 두 겹
      더 얹으면 아무것도 안 읽힌다. 체크박스가 아니라 고르는 상자인 이유다. */
 let overlay = '';
 let zoneLayer, redevLayer;
+/* 11-01: 재개발(reb)과 정비(redev)는 같은 판(redevLayer) · 같은 색 규칙을 쓰고, 서버에서 원본 사업 소분류로 갈라 받는다(?g=reb|etc) */
+const 정비류 = v => v === 'reb' || v === 'redev';
 let markerOf = new Map();       // complex_id -> L.marker (선택 표시용)
 const LAWD_ZOOM = 15;           // 이 줌 미만이면 법정동, 이상이면 단지
 let selected = null, items = [], lawdItems = [], selectedLawd = null, fetchSeq = 0;
@@ -1518,8 +1520,8 @@ async function 제안고르기(it) {
   if (d.종류 === '공고') return 공고상세(d.house, d.lat, d.lng);   // 12:32 단지에 안 이어진 청약 공고
   if (d.종류 === '정비' && d.sn) return selectRedevZone(d.sn);   // 2026-10-22 사장님: 누르면 바로 구역 상세로
   if (d.종류 === '정비') {
-    if ($('#overlay').value !== 'redev') {            /* 정비사업 겹쳐보기를 켠다 — 구역이 보여야 고른 의미가 있다 */
-      $('#overlay').value = 'redev';
+    if (!정비류($('#overlay').value)) {               /* 정비사업 겹쳐보기를 켠다 — 구역이 보여야 고른 의미가 있다(어느 쪽인지 모르면 재개발 판) */
+      $('#overlay').value = 'reb';
       $('#overlay').dispatchEvent(new Event('change', { bubbles: true }));
     }
     if (!상자로(d.bbox) && d.lat) map.setView([d.lat, d.lng], 16);
@@ -1787,7 +1789,7 @@ const REDEV_라벨줌 = 16;
 
 function 재개발이름표() {
   if (!redevLayer) return;
-  const 켤까 = overlay === 'redev' && map.getZoom() >= REDEV_라벨줌;
+  const 켤까 = 정비류(overlay) && map.getZoom() >= REDEV_라벨줌;
 
   /* 먼저 달 것을 모은다. 넓은 것부터 — 지구(큰 폴리곤)가 제자리를 잡고,
      그 안의 구역이 비켜 앉게 한다. */
@@ -1840,7 +1842,7 @@ async function loadOverlay() {
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(n => n.toFixed(7)).join(',');
   const seq = ++ovlSeq;
   try {
-    const fc = await fetch(`/api/${overlay === 'zone' ? 'zones' : 'redev'}?bbox=${bbox}`).then(r => r.json());
+    const fc = await fetch(`/api/${overlay === 'zone' ? 'zones' : 'redev'}?bbox=${bbox}${overlay === 'reb' ? '&g=reb' : overlay === 'redev' ? '&g=etc' : ''}`).then(r => r.json());
     if (seq !== ovlSeq) return;                 // 늦게 온 응답은 버린다
     if (fc.error) return 오류토스트('겹쳐보기', fc);
     const lyr = overlay === 'zone' ? zoneLayer : redevLayer;
@@ -1852,11 +1854,11 @@ async function loadOverlay() {
       const c = map.getCenter(), 서울안 = c.lat > 37.42 && c.lat < 37.72 && c.lng > 126.76 && c.lng < 127.19;
       toast(overlay === 'zone'
         ? (서울안 ? '이 영역에는 적재된 용도지역이 없습니다' : '용도지역 지도는 아직 서울 위주로만 받았습니다 — 이 지역은 안 받음(없는 게 아님)')
-        : (서울안 ? '이 영역에는 정비사업 구역이 없습니다' : '정비사업 구역은 아직 서울만 받았습니다 — 이 지역은 안 받음(없는 게 아님)'), 3200);
+        : (서울안 ? `이 영역에는 ${overlay === 'reb' ? '재개발 · 재건축' : '그 밖의 정비 · 개발'} 구역이 없습니다` : '정비사업 구역은 아직 서울만 받았습니다 — 이 지역은 안 받음(없는 게 아님)'), 3200);
     }
     재개발이름표();
     /* 확대하면 이름이 뜬다는 걸 **한 번은** 알려 준다 — 안 그러면 기능이 있는 줄 모른다. */
-    if (overlay === 'redev' && fc.features.length && map.getZoom() < REDEV_라벨줌 && !redev안내했나) {
+    if (정비류(overlay) && fc.features.length && map.getZoom() < REDEV_라벨줌 && !redev안내했나) {
       redev안내했나 = true;
       toast('구역을 <b>누르면</b> 이름·사업·추진단계가 나옵니다. '
           + `조금 더 확대하면(줌 ${REDEV_라벨줌}) 이름이 지도에 바로 표시됩니다.`, 7000);
@@ -1878,10 +1880,12 @@ function overlayLegend() {
       + `<div class="lrow"><span class="sw dash"></span>분류 못 함</div>`
       + `<div class="lnote">겹친 곳은 위(작은 것)의 색만 보입니다 — 누르면 그 자리의 것이 전부 나옵니다</div>`;
   } else {
-    el.innerHTML = `<div class="lt">사업 종류</div>`
-      + Object.entries(RK).map(([k, v]) =>
+    /* 재개발 판에는 그 세 대분류만 나온다 — 안 나오는 색을 범례에 두지 않는다 */
+    const 쓰는 = overlay === 'reb' ? Object.entries(RK).filter(([k]) => ['정비사업', '재정비촉진사업', '소규모 정비사업'].includes(k)) : Object.entries(RK);
+    el.innerHTML = `<div class="lt">${overlay === 'reb' ? '재개발 · 재건축 — 사업 종류' : '그 밖의 정비 · 개발 — 사업 종류'}</div>`
+      + 쓰는.map(([k, v]) =>
           `<div class="lrow"><span class="sw rk" style="background:var(${v});opacity:${OV_투명.redev}"></span>${k}</div>`).join('')
-      + `<div class="lrow"><span class="sw dash na"></span>분류 못 함</div>`
+      + (overlay === 'reb' ? '' : `<div class="lrow"><span class="sw dash na"></span>분류 못 함</div>`)
       + `<div class="lt" style="margin-top:6px">추진 정도 (테두리)</div>`
       + `<div class="lrow"><span class="sw rk st1"></span>초기 (구역지정·추진위)</div>`
       + `<div class="lrow"><span class="sw rk st2"></span>인가 이후</div>`
@@ -5801,8 +5805,9 @@ async function boot() {
   $('#overlay').addEventListener('change', e => {
     overlay = e.target.value;
     [['zone', zoneLayer], ['redev', redevLayer]].forEach(([k, lyr]) => {
-      if (overlay === k) lyr.addTo(map);
-      else { if (map.hasLayer(lyr)) map.removeLayer(lyr); lyr.clearLayers(); }
+      lyr.clearLayers();                                    /* 재개발 ↔ 정비로 바꿀 때도 같은 판을 비우고 새로 받는다 */
+      if (k === 'zone' ? overlay === 'zone' : 정비류(overlay)) lyr.addTo(map);
+      else if (map.hasLayer(lyr)) map.removeLayer(lyr);
     });
     overlayLegend();
     loadOverlay();
@@ -6234,7 +6239,7 @@ const 정책 = [
     '<b>공사 중 건물</b>(지도 \'공사 중\' 핀 · 2026-10-30): 건축허가 신축 중 <b>2022년 이후 착공 · 사용승인 전 · 그 필지에 새 대장이 아직 없는</b> 공동주택 · 오피스텔(10세대 · 호 이상)입니다. 대장 단지와 같은 탭으로 보이지만 값은 전부 허가(설계) 원문이고, 평형 · 실거래 · 공시가격은 사용승인 · 대장 뒤에 생겨 비어 있습니다. 2019~2021년에 착공했는데 승인 기록이 없는 건은 공사 중인지 멈췄는지 알 수 없어 넣지 않습니다.',
   ] },
   { 키: 'precomplex', 제목: '건축물대장 전 단지 — 공사 중 · 사업승인 · 청약 공고', 글: [
-    '<b>지도 경계</b>(2026-11-01): 원문(주택 사업계획승인 · 건축허가)에는 대표 지번 하나뿐이라, 대표 필지가 절반 넘게 들어간 <b>정비구역</b>(재개발 · 재건축 · 재정비촉진구역 · 소규모 정비 — 촉진지구 같은 넓은 지구 · 역세권 공급 · 도시재생은 빼고)이 있으면 그 구역 경계를 이 단지의 경계로 그립니다(여럿이면 가장 작은 구역 · 위치로만 이음). 없으면 대표 필지만 그립니다.',
+    '<b>지도 경계</b>(2026-11-01): 원문(주택 사업계획승인 · 건축허가)에는 대표 지번 하나뿐이라, 대표 필지가 절반 넘게 들어간 <b>재개발 · 재건축 구역</b>(지도 [재개발] 단추와 같은 묶음 — <a href="#policy" data-pol-go="redev">정비사업 구역</a>)이 있으면 그 구역 경계를 이 단지의 경계로 그립니다(여럿이면 가장 작은 구역 · 위치로만 이음). 없으면 대표 필지만 그립니다.',
     '건축물대장은 사용승인(아파트는 사용검사) 뒤에 생깁니다. 그 전 건물도 단지처럼 볼 수 있게 <b>9억번대 번호</b>(900000001~)를 따로 붙였습니다. 일반 단지 수 · 지역별 개수 · 가격 마커 · 통계 · AI 검색에는 <b>섞지 않습니다</b> — 지도에는 \'공사 중\' · \'승인\' 핀으로만 보입니다.',
     '<b>사업승인 아파트</b>(건축HUB 주택인허가): 총세대 20 이상 · 사용검사일이 비어 있음 · 사업계획승인 2016년 이후 · 같은 필지에 승인일 뒤 사용승인된 건축물대장이 없음.',
     '<b>공사 중 건물</b>(건축HUB 건축인허가): 신축 · 2022년 이후 실제 착공 · 사용승인일이 비어 있음 · 같은 필지에 허가일 뒤 사용승인된 대장이 없음 · 공동주택이거나 오피스텔(층별 용도) · 세대 + 호 10 이상 · 한 필지에 여럿이면 가장 최근 허가 한 건.',
@@ -6296,6 +6301,7 @@ const 정책 = [
     '구역에 <b>걸친 단지</b>는 단지 필지와 구역 경계의 겹친 넓이로 셉니다. 경계에 겨우 닿은(1% 미만) 단지는 뺍니다.',
     '<b>정비계획</b>(계획 용적률·건폐율·층수·공급 세대)은 서울시 도시계획사업(서울플랜+) 자료입니다. 구역 자료와 번호가 달라 <b>자치구 코드 · 사업 소분류 코드 · 사업 면적(소수점까지)</b>이 모두 같은 후보가 하나일 때, 또는 사업 위치 지번이 구역 안이고 면적이 5% 안일 때만 이었습니다. 원문에 0으로 적힌 칸은 \'안 적음\' 이라 비웁니다.',
     '지도 색은 사업 종류, 테두리는 추진 정도(점선 초기 · 실선 인가 이후 · 굵은 실선 착공·준공)입니다. 지구 안에 구역이 겹친 곳은 위(작은 것)의 색만 보입니다.',
+    '<b>[재개발] · [정비] 두 단추</b>(2026-11-01): 원본의 사업 소분류로만 가릅니다. <b>재개발</b>은 다시 짓는 사업 — 재개발(주택정비형 · 도시정비형) · 재건축(공동 · 단독) · 신속통합기획 · 주거환경개선(정비형) · 재정비촉진구역 · 가로주택정비 · 소규모재건축 · 소규모재개발 · 자율주택정비. <b>정비</b>는 그 밖의 구역 — 재정비촉진지구 · 존치관리 · 존치정비 · 모아타운(여러 모아주택을 묶는 관리지역) · 주거환경개선(관리형, 다시 짓지 않음) · 도시재생활성화지역 · 리모델링활성화 · 사전협상 · 시장정비 · 도시개발 · 역세권(청년안심주택 · 장기전세 · 미리내집 · 역세권 활성화) · 공공주택지구 · 도심 공공주택 복합사업. 목록에 없는 새 소분류와 소분류가 빈 구역은 정비 쪽에 둡니다(모르는 것을 재개발이라 하지 않음). 서울 2,776곳 중 재개발 1,874 · 정비 902(2026-11-01).',
   ] },
   { 키: 'houseplan', 제목: '주택인허가 — 사업승인 · 사용검사 전 아파트 (건축HUB)', 글: [
     '30세대 이상 아파트는 건축허가가 아니라 <b>주택법 사업계획승인</b>을 받습니다. 건축HUB 주택인허가(대용량 월 파일)의 원문 그대로입니다 — 기본개요 · 동별개요 · 호별개요(평형) · 행위개요 · 주차장 · 부대시설 · 복리분양시설.',
