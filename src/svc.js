@@ -847,20 +847,53 @@ function 공개키(req) {
     .map(([k, v]) => [k, Array.isArray(v) ? v[v.length - 1] : String(v)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   return req.path + (q.length ? '?' + q.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '');
 }
-const 공개길 = /^\/api\/(areas\/(sido|sgg|dongs|ris)|coverage|redev\/[A-Za-z0-9]{10,40}(\/detail)?)$/;
+const 공개길 = new RegExp('^/api/(' + [
+  'areas/(sido|sgg|dongs|ris)', 'coverage', 'redev/[A-Za-z0-9]{10,40}(/detail)?',
+  /* 2묶음(11-01) */
+  'applyhome', 'applyhome/dong/\\d{10}', 'applyhome/\\d{6,20}/where', 'precomplex-ah/\\d{5,20}',
+  'lawds/\\d{10}/geo', 'adms/\\d{2,10}/geo', 'academy/[0-9A-Za-z]{1,20}',
+  'school/[0-9A-Za-z]{1,20}', 'kinder/[0-9A-Za-z-]{1,64}', 'childcare/[0-9A-Za-z]{1,20}',
+  'prebuilds/[0-9A-Za-z_-]{1,40}', 'houseplans/[0-9A-Za-z_-]{1,40}', 'precomplex/[a-z]/[0-9A-Za-z_-]{1,40}', 'newbuilds/[0-9A-Za-z]{1,20}',
+].join('|') + ')$');
+/* 학교 · 유치원 · 어린이집 상세의 ?cid= 는 **거리만** 바꾼다(옛 경로: 단지 중심 geography 와 STDistance → INT 로 버림).
+   담은 몸(물음표 없음 = 거리 null)에 같은 계산을 붙인다 — 단지 중심은 svc.lyr_near(gold.complex 중심 그대로) */
+const 거리붙일길 = /^\/api\/(school|kinder|childcare)\//;
+async function 거리붙이기(raw, cid) {
+  const j = JSON.parse(raw.toString('utf8'));
+  for (const v of Object.values(j)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v) || !('거리m' in v)) continue;
+    const lat = Number(v.lat), lng = Number(v.lng != null ? v.lng : v.lon);
+    v.거리m = null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || v.lat == null) continue;
+    const r = await pg().query(`SELECT trunc(ST_Distance(geography(ST_SetSRID(ST_MakePoint($2, $1), 4326)),
+                                                         geography(ST_SetSRID(ST_MakePoint(centroid_lng, centroid_lat), 4326))))::int AS m
+                                  FROM svc.lyr_near WHERE complex_id = $3 AND centroid_lat IS NOT NULL AND centroid_lng IS NOT NULL`, [lat, lng, cid]);
+    v.거리m = r.rows.length ? r.rows[0].m : null;
+  }
+  return Buffer.from(JSON.stringify(j), 'utf8');
+}
 async function 공개응답(req, res, next) {
   if (req.method !== 'GET' || !공개길.test(req.path)) return next();
   const 강제 = req.query._svc === '1';
   if (req.query._svcbuild || req.query._t) return next();   // 발행기가 받는 길 — 늘 적재DB 경로
   if (!지금설정().read || !(지금설정().pub || 강제) || Date.now() < 쉬는끝) return next();
+  /* 학교 · 유치원 · 어린이집: ?cid= 만 붙은 것은 물음표 없는 몸 + 거리 */
+  const 칸 = Object.keys(req.query).filter(k => !k.startsWith('_svc'));
+  const cid = 거리붙일길.test(req.path) && 칸.length === 1 && 칸[0] === 'cid' ? Number(req.query.cid) || 0 : null;
   try {
-    const r = await pg().query('SELECT status, body_gz FROM svc.resp_pub WHERE url = $1', [공개키(req)]);
+    const 키 = cid != null ? req.path : 공개키(req);
+    let r = await pg().query('SELECT status, body_gz FROM svc.resp_pub WHERE url = $1', [키]);
+    /* 빈 응답 본보기 — 물음표 칸이 하나인 주소(분양·청약 complex_id · kapt_code)는 목록 밖이면 '*' 줄(발행기가 목록을 다 담았을 때만 둔다) */
+    if (!r.rows.length && cid == null && 칸.length === 1) r = await pg().query('SELECT status, body_gz FROM svc.resp_pub WHERE url = $1', [`${req.path}?${칸[0]}=*`]);
     실패 = 0;
     if (!r.rows.length) { 세기('pub', 'miss'); res.set('X-Svc', 'miss'); return next(); }
     세기('pub', 'hit');
-    res.status(r.rows[0].status).set({ 'Content-Type': 'application/json; charset=utf-8', 'X-Svc': 'hit', 'Cache-Control': 'no-store', 'Vary': 'Accept-Encoding' });
-    if (/\bgzip\b/.test(req.get('accept-encoding') || '')) return res.set('Content-Encoding', 'gzip').end(r.rows[0].body_gz);
-    return res.end(zlib.gunzipSync(r.rows[0].body_gz));
+    const { status } = r.rows[0];
+    let gz = r.rows[0].body_gz;
+    if (cid != null && status === 200) gz = zlib.gzipSync(await 거리붙이기(zlib.gunzipSync(gz), cid));
+    res.status(status).set({ 'Content-Type': 'application/json; charset=utf-8', 'X-Svc': 'hit', 'Cache-Control': 'no-store', 'Vary': 'Accept-Encoding' });
+    if (/\bgzip\b/.test(req.get('accept-encoding') || '')) return res.set('Content-Encoding', 'gzip').end(gz);
+    return res.end(zlib.gunzipSync(gz));
   } catch (e) {
     if (++실패 >= 5) { 쉬는끝 = Date.now() + 30000; 실패 = 0; }
     세기('pub', 'fallback'); return next();
