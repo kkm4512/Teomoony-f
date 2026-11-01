@@ -1328,7 +1328,7 @@ function renderNewbuild(data) {
   const tradeBlocks = 탭 + (갈림 > 1 ? `<p class="note sm" title="한 지번 · 신고 단지 일련번호로 구분">실거래 ${갈림}개 단지로 나뉨</p>` : '') + 요약 + 거래표;
 
   $('#detail').innerHTML = `
-    <span class="pill nb" title="건축물대장이 아직 없는 신축 — K-apt 정보만(동 · 필지 · 공시지가 없음)">대장 없는 신축</span>
+    <span class="pill nb" title="건축물대장이 아직 없는 신축 — 동 · 필지 · 공시지가 없음">대장 없는 신축</span>
     <h2>${esc(n.kapt_name || '(이름 없음)')}</h2>
     <p class="sub">${esc(n.kapt_addr || '')}${n.doro_juso ? '<br>' + esc(n.doro_juso) : ''}</p>
 
@@ -1344,7 +1344,6 @@ function renderNewbuild(data) {
       ${row('법정동', esc(n.lawd_nm || n.bjd_code || '—'))}
       ${row('대표지번 PNU', esc(n.pnu))}
       ${row('건축인허가', n.인허가 ? fmt(n.인허가) + '건' : '없음')}
-      ${row('K-apt 코드', esc(n.kapt_code))}
     </dl>
     ${tradeBlocks}
     ${목록.length ? '' : '<p class="muted" style="padding:6px 2px">이 지번에 매칭된 실거래가 없습니다.</p>'}
@@ -3872,8 +3871,8 @@ function costBlock0(co, ctx) {
     const inLawd = Number((ctx && ctx.kapt) || 0);
     /* 2026-10-23: K-apt 가 **이어져 있는데** 관리비만 없으면 '연결이 확정되지 않았다' 는 틀린 말이다(관악드림타운) — 그 경우를 가른다 */
     if (ctx && ctx.이음) return sect('관리비', 'cost') + `<p class="note costnone">${Number(ctx.관리비구)
-      ? gapCell('', 'UNSURE', '이 K-apt 단지의 관리비가 없습니다(공시 안 함인지 못 받음인지 모름)')
-      : gapCell('', 'SCOPE', '이 구의 K-apt 관리비를 아직 받지 않았습니다')}</p>`;
+      ? gapCell('', 'UNSURE', '이 단지의 관리비가 없습니다(공시 안 함인지 못 받음인지 모름)')
+      : gapCell('', 'SCOPE', '이 구의 관리비를 아직 받지 않았습니다')}</p>`;
     return sect('관리비', 'cost') + `<p class="note">${
       inLawd
         ? gapCell('', 'UNSURE',
@@ -3951,7 +3950,7 @@ async function 관리비추이채우기() {
   if (지금.dataset.api !== '1') {
     /* API 관리비가 없는 단지 — 엑셀 마지막 달로 대신(출처 적음) */
     document.querySelectorAll('#detail .costnone').forEach(e => { e.hidden = true; });
-    머리 = `<dl><dt>세대당 공용관리비</dt><dd><b>${won(끝.세대당)}</b> <span class="muted">/ 월 · ${esc(ym(끝.ym))} · K-apt 자료실 엑셀</span></dd>${
+    머리 = `<dl><dt>세대당 공용관리비</dt><dd><b>${won(끝.세대당)}</b> <span class="muted">/ 월 · ${esc(ym(끝.ym))}</span></dd>${
       끝.장충월세대당 ? `<dt>장기수선충당금</dt><dd>월 부과 세대당 ${won(끝.장충월세대당)}${끝.장충총 ? ` <span class="muted">· 적립 ${won(끝.장충총)}</span>` : ''}</dd>` : ''}${
       r.분양임대 ? `<dt>분양 / 임대</dt><dd>${esc(r.분양임대)}</dd>` : ''}</dl>`;
   }
@@ -3990,7 +3989,7 @@ async function 관리비추이채우기() {
     <div class="chtip" hidden></div>
     </div>
     <p class="srcline">최근 12달 평균 <b>${won(평균)}</b>${변화 == null ? '' : ` · 1년 전 같은 달보다 <b>${변화 > 0 ? '+' : ''}${변화}%</b>`} · 최저 ${won(lo)} · 최고 ${won(hi)}
-      · 출처: K-apt 자료실 관리비정보(연도별 엑셀 · 주 1회) '공용관리비(합계)' ÷ 지금 세대수${r.세대 ? `(${fmt(r.세대)})` : ''} · 엑셀은 K-apt 가 '참고자료' 로 내는 것이라 위 항목별 값(OpenAPI)과 조금 다를 수 있습니다</p>
+</p>
     ${표}`;
   /* 가장 가까운 달을 따라가는 표시 */
   const svg = 지금.querySelector('svg.chist'), tip = 지금.querySelector('.chtip'), hv = svg.querySelector('.hv');
@@ -4246,11 +4245,11 @@ const SRC = {
              note: '교육청 등록 · 직선거리' },
   subway: { t: '도시철도 역사정보', s: '국가철도공단', note: '연 1회 · 직선거리' },
   bus:    { t: '전국 버스정류장 위치', s: '국토교통부', note: '연 1회 · 직선거리' },
-  kapt:   { t: 'K-apt', s: '공동주택관리정보' },
+  kapt:   { t: '공동주택관리정보', s: '국토교통부 공동주택관리정보시스템' },
   /* ★ 뱃지는 **어디서 왔는지**를 말해야 한다(2026-10-19). 섹션 제목과 같은 말을
      반복하면 ('건축인허가' 옆에 '건축인허가') 정보가 0 이다. 실제로 그랬다. */
   permit: { t: '건축행정시스템', s: '국토교통부 세움터 (건축인허가)', note: '착공·사용승인 기준' },
-  cost:   { t: 'K-apt', s: '공동주택관리정보 (관리비)', note: '월 단위 공시' },
+  cost:   { t: '공동주택관리정보', s: '국토교통부 공동주택관리정보시스템 (관리비)', note: '월 단위 공시' },
 };
 
 /* ================= 빈칸의 사유 =================
@@ -4584,7 +4583,7 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
     const kh = k && Number(k.kapt_세대) ? Number(k.kapt_세대) : null;
     /* 2026-10-24 22:05 사장님: '· K-apt 같음' 같은 덧말을 뺀다. 출처가 서로 **다를 때만** 짧게 그 값을 적는다(무엇이 왜 다른지는 정책). */
     const 다른값 = [spec.세대 && Number(spec.세대) !== Number(대장) ? `총괄표제부 ${fmt(spec.세대)}` : '',
-                   kh && kh !== Number(대장) && !(spec.세대 && kh === Number(spec.세대)) ? `K-apt ${fmt(kh)}` : ''].filter(Boolean);
+                   kh && kh !== Number(대장) && !(spec.세대 && kh === Number(spec.세대)) ? `관리사무소 신고 ${fmt(kh)}` : ''].filter(Boolean);
     /* 10-30 QA: 대장 전(가상) 오피스텔은 허가 원문에 세대가 없고 호만 있다 — '값 없음' 대신 호를 적는다(세대로 바꿔 부르지 않는다) */
     const 호만 = Number(spec.호) || 0, 공급 = Number(spec.공급세대) || 0;
     if (!대장 && 공급) add('세대', `공급 ${fmt(공급)}세대 <span class="muted">· 청약 공고 — 조합원 · 보류분은 빠질 수 있어 총 세대가 아닙니다</span>`); else
@@ -4698,11 +4697,12 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
     const gap = (spec.주차_내역합 && spec.주차_내역합 !== spec.주차)
       ? ` <span class="muted">· 내역 합 ${fmt(spec.주차_내역합)}대로 ${
           fmt(Math.abs(spec.주차 - spec.주차_내역합))}대 차이</span>` : '';
-    const kp = k && Number(k.주차) ? `<br><span class="muted">K-apt ${fmt(k.주차)}대${(k.주차_지상 || k.주차_지하) ? ` (지상 ${fmt(k.주차_지상 || 0)}·지하 ${fmt(k.주차_지하 || 0)})` : ''}</span>` : '';
-    add('주차', (spec.주차 || kp) ? `${spec.주차 ? `${fmt(spec.주차)}대${mix}${per}${gap}` : '<span class="muted">대장에 없음</span>'}${kp}` : '');
+    /* 11-01 사장님 "K-apt 란 말 빼자" — 대장 주차가 있으면 대장 값만. 대장에 없을 때만 관리사무소 신고 값을 주 값으로(출처는 정책) */
+    const kp = k && Number(k.주차) ? `${fmt(k.주차)}대${(k.주차_지상 || k.주차_지하) ? ` (지상 ${fmt(k.주차_지상 || 0)}·지하 ${fmt(k.주차_지하 || 0)})` : ''}` : '';
+    add('주차', spec.주차 ? `${fmt(spec.주차)}대${mix}${per}${gap}` : kp);
     const ev = k ? (k.전기차_지상 || 0) + (k.전기차_지하 || 0) : 0;
-    if (ev) add('전기차 충전기', `${fmt(ev)}기 <span class="muted">(K-apt${(k.전기차_지상 && k.전기차_지하) ? ` · 지상 ${fmt(k.전기차_지상)}·지하 ${fmt(k.전기차_지하)}` : ''})</span>`);
-    if (k && k.CCTV) add('CCTV', `${fmt(k.CCTV)}대 <span class="muted">(K-apt)</span>`);
+    if (ev) add('전기차 충전기', `${fmt(ev)}기${(k.전기차_지상 && k.전기차_지하) ? ` (지상 ${fmt(k.전기차_지상)}·지하 ${fmt(k.전기차_지하)})` : ''}`);
+    if (k && k.CCTV) add('CCTV', `${fmt(k.CCTV)}대`);
   }
   /* ★ 승용 0 + 비상용 N 은 **모순이다.** 비상용 승강기가 있는 건물에 승용이
      0 대일 수 없다(보통 겸용으로 잡힌다). 0 을 살리기로 했다고 해서 모순까지
@@ -4724,8 +4724,8 @@ function specBlock(spec, c, 분위들, 전용률, 호총수, kapt, dongs) {
   grp('구조');
   add('구조', spec.구조 ? esc(spec.구조) : '', dongOnly, dongNote);
   add('지붕', spec.지붕 ? esc(spec.지붕) : '', dongOnly, dongNote);
-  if (k && k.복도) add('복도 유형', `${esc(k.복도)} <span class="muted">(K-apt)</span>`);
-  if (k && k.난방) add('난방', `${esc(k.난방)} <span class="muted">(K-apt)</span>`);
+  if (k && k.복도) add('복도 유형', esc(k.복도));
+  if (k && k.난방) add('난방', esc(k.난방));
 
   /* 11-01 사장님 "공사랑 건축인허가가 겹친다" — 대장의 허가 · 착공 · 사용승인은 건축인허가 칸의 진행 단계로 옮겼다(permitBlock) */
 
@@ -4804,7 +4804,7 @@ function 주변판들(p) {
     ${고르기단추('traffic', 교통칸들)}
     ${고르기칸('traffic', 'subway', `
     ${sect('지하철', 'subway', sub.length ? ` ${fmt(Number(sub[0].전체) || sub.length)}` : '')}
-    ${kapt && (kapt.지하철 || kapt.지하철도보) ? `<p class="note sm">K-apt 신고: ${esc(kapt.지하철 || '')}${kapt.지하철노선 ? ` <span class="muted">${esc(kapt.지하철노선)}</span>` : ''}${kapt.지하철도보 ? ` · 도보 ${esc(kapt.지하철도보)}` : ''}</p>` : ''}
+    ${/* 11-01: 관리사무소가 적은 역 · 도보 시간 안내 줄은 뺐다(작은 글 없음 · 정책) */''}
     ${sub.length ? `
       <div class="schrow">${sub.map(x => `
         <div class="scell" data-pt="subway|${esc(x.역)}">
@@ -4820,7 +4820,7 @@ function 주변판들(p) {
     `, 교통칸들)}
     ${고르기칸('traffic', 'bus', `
     ${sect('버스', 'bus', bus && Number(bus.r500) ? ` ${fmt(bus.r500)}` : '')}
-    ${kapt && kapt.버스도보 ? `<p class="note sm">K-apt 신고: 정류장까지 도보 ${esc(kapt.버스도보)}</p>` : ''}
+
     ${bus && Number(bus.r500) ? `
       ${/* ★ 20:05 사장님: 여기 올리면 **가장 가까운 정류장 한 점만**(전엔 500m 안 전부). data-pt-n=1 = 가까운 순 첫 점만 */''}
       <div class="zrow2" data-pt="bus|${esc(bus.가까운곳 || '')}" data-pt-n="1">
@@ -5014,16 +5014,27 @@ document.addEventListener('click', e => {
 });
 /* 표 줄 거르기 — [data-pickrows="ns1 ns2 · 보일 수"] 표의 tr 은 data-p-<ns> 값이 고른 값과 같을 때만(여러 줄을 함께 · 'all' 은 다 통과).
    보일 수를 넘는 줄은 숨기고, [data-pickcount] 칸에 'N건 중 M건' 을 적는다. */
+/* 11-01 '10건 더보기'(data-pickmore) — 같은 부모의 [data-pickrows] 한도를 10 늘리고 다시 거른다 */
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-pickmore]'); if (!b) return;
+  const 판 = b.parentElement, 표 = 판 && 판.querySelector('[data-pickrows]'); if (!표) return;
+  const [nss, 한도s] = 표.dataset.pickrows.split('|');
+  표.dataset.pickrows = `${nss}|${(Number(한도s) || 10) + 10}`;
+  고르기줄거르기(판);
+});
 function 고르기줄거르기(판) {
   판.querySelectorAll('[data-pickrows]').forEach(표 => {
     const [nss, 한도s] = 표.dataset.pickrows.split('|'); const 한도 = Number(한도s) || Infinity;
     const 값 = nss.split(/\s+/).map(ns => [ns, 고른(ns)]);
     let 맞음 = 0, 보임 = 0;
-    표.querySelectorAll('tbody tr').forEach(tr => {
+    표.querySelectorAll('tbody tr, [data-prow]').forEach(tr => {
       const ok = 값.every(([ns, v]) => v === 'all' || tr.getAttribute('data-p-' + ns) === v);
       if (ok) 맞음++;
       tr.hidden = !(ok && 보임 < 한도); if (!tr.hidden) 보임++;
     });
+    /* 11-01: 실거래처럼 '10건 더보기' 단추(data-pickmore) — 누르면 한도를 10 늘린다 */
+    const 더 = 표.parentElement && 표.parentElement.querySelector('[data-pickmore]');
+    if (더) { 더.hidden = 보임 >= 맞음; 더.innerHTML = `10건 더보기 <span class="muted">(${fmt(보임)} / ${fmt(맞음)})</span>`; }
     const 셈 = 표.parentElement && 표.parentElement.querySelector('[data-pickcount]');
     if (셈) 셈.textContent = 맞음 > 보임 ? `${fmt(맞음)}건 중 최근 ${fmt(보임)}건` : 맞음 ? `${fmt(맞음)}건` : '고른 조건에 맞는 거래가 없습니다';
   });
@@ -5430,7 +5441,7 @@ function renderDetail(payload) {
     ${costBlock(cost, { hhld: (spec && spec.세대) || c.hhld_cnt_sum, ...(scope || {}), 이음: Boolean(kapt), kapt코드: kapt && kapt.kapt_code })}`;
   /* ★ 2026-10-21 QA: 150세대 미만이면 두 칸이 **둘 다 일부러 비어** 탭이 통째로 빈 화면이었다
      (리얼파크2차 16세대). 칸마다 안내를 띄우면 잡음이지만, 탭 전체가 비면 '왜 비었나' 를 한 줄 적는다. */
-  const paneM = V ? 대장전말(V, '관리비 · K-apt') : _관리.trim() ? _관리 : `<p class="note">${gapCell('', 'NA',
+  const paneM = V ? 대장전말(V, '관리비') : _관리.trim() ? _관리 : `<p class="note">${gapCell('', 'NA',
     'K-apt(공동주택관리정보) 대상이 아닙니다 — 의무관리 공동주택(150세대 이상 등)만 관리비를 공개합니다. '
     + `이 단지는 대장 기준 ${fmt((spec && spec.세대) || c.hhld_cnt_sum || 0)}세대입니다.`)}</p>`;
 
@@ -6139,6 +6150,7 @@ const 정책 = [
     '<b>이 평형 실거래</b> = 이 호의 전용면적 묶음(㎡ 정수 — 실거래 탭 평형 칩과 같은 키)으로 걸러진 실거래 탭. 실거래에는 동·호가 없어 <b>이 호의 거래</b>가 아니라 같은 단지 · 같은 평형의 거래입니다. 그 평형 거래가 없으면 길도 안 보입니다. <b>정비구역</b> = 단지가 걸친 정비사업 구역 칸(토지 탭).',
   ] },
   { 키: 'kapt', 제목: 'K-apt 공동주택관리정보', 글: [
+    '<b>화면 표시</b>(2026-11-01): 화면에는 \'K-apt\' 라는 출처 이름을 적지 않습니다(출처 칩은 \'공동주택관리정보\'). 단지정보 제원의 <b>복도 유형 · 난방 · 전기차 충전기 · CCTV</b>는 K-apt 값이고, <b>주차</b>는 건축물대장 값이 있으면 대장 값만 · 대장에 없을 때만 K-apt 값입니다. 세대 줄의 \'관리사무소 신고 N\' 은 K-apt 세대수가 대장과 다를 때입니다. 교통 탭에 있던 관리사무소 신고 역 · 도보 시간 안내는 뺐습니다(거리는 단지 중심에서 잰 직선거리). 관리 탭 <b>관리비 추이</b>는 K-apt 자료실 연도별 관리비 엑셀(주 1회)의 \'공용관리비(합계)\' ÷ 지금 세대수이고, 엑셀은 K-apt 가 참고자료로 내는 것이라 위 항목별 값(OpenAPI)과 조금 다를 수 있습니다.',
     'K-apt 는 단지 코드를 대장과 공유하지 않아 <b>법정동 + 사용승인일</b>, 또는 <b>공식 도로명코드+건물번호 · 공식 지번 + 세대 5% 안</b>으로 잇습니다(양쪽 하나씩일 때만). 자세한 규칙은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',
     'K-apt는 주거동만, 대장은 상가·부속동까지 세므로 동 수·세대수가 다를 수 있습니다.',
     '관리비가 비어 있는 까닭을 가릅니다 — <b>이 구의 관리비를 아직 안 받음</b>(SCOPE) · <b>K-apt 에 이어져 있는데 그 단지 관리비가 없음</b>(같은 구는 받았으니 그 단지가 공시하지 않았거나 그 단지만 못 받은 것 — 둘을 가를 기록은 아직 없음) · <b>K-apt 연결이 확정되지 않음</b>(같은 날 승인된 단지가 여럿이라 버림 — 추측으로 붙이면 다른 단지의 관리비가 사실처럼 보입니다).',
@@ -6228,6 +6240,7 @@ const 정책 = [
   { 키: 'houseplanah', 제목: '청약홈 분양정보 — 승인 단지에 붙이는 법', 글: [
     '승인 단지의 대표 지번(시군구 · 법정동 · 산 · 본번 · 부번)이 청약 공고 주소에서 풀어낸 지번과 <b>똑같을 때만</b> 붙입니다. 블록 주소(택지지구 ○○BL)는 지번이 없어 붙이지 않습니다.'] },
   { 키: 'applyhome', 제목: '청약홈 분양정보 (한국부동산원)', 글: [
+    '<b>분양권·입주권 거래 화면</b>(2026-11-01): 실거래 탭 \'거래 내역\' 과 같은 줄(계약일 · 거래가 · 전용면적 · 층)로 10건씩 보입니다. 꼬리표 \'분양가 ±…\' 는 같은 전용면적의 최고 분양가와의 차이입니다. 첫 공고 전 입주권(조합원 권리) · 공고 자료 없이 이 단지 필지에서 맺은 계약으로 이은 것도 같은 목록에 있고, 따로 안내하지 않습니다. 닫힌 대장 자리 · 정비구역 화면의 분양권 목록은 그 지번(구역은 겹치는 지금 필지)으로 신고된 계약이고, 신고 이름으로 잇지 않습니다.',
     '공고는 지번·입주월·세대·거리로 단지에 잇습니다(코드가 아닌 단서로 이은 것 · 이름으로 잇지 않음 · 화면에 따로 표시하지 않음). 다섯 길과 막는 조건은 <a href="#policy" data-pol-go="매칭">데이터 잇기 규칙</a>.',
     '공고 지번이 지금 지적도에 없으면 같은 본번 필지들의 가운데에 <b>근처</b>로 놓습니다(정확한 자리 아님). 그것도 없으면 <b>자리 모름</b>으로 법정동에 모읍니다.',
     '경쟁률은 <b>1순위 · 해당지역</b> 기준(없으면 그 다음 순위)입니다. \'미달 n\' 은 접수가 공급보다 n세대 적었다는 원문 표기입니다. 오피스텔·도시형은 군 단위로 청약을 받아 같은 군의 타입은 같은 경쟁률입니다.',
@@ -6977,29 +6990,32 @@ function 분양권칸(r) {
   const 억 = v => { const a = Math.floor(v / 1e8), b = Math.round((v % 1e8) / 1e4);
     return a ? `${a}억${b ? ' ' + fmt(b) : ''}` : `${fmt(b)}만`; };
   const 날 = d => 날짜(d);
-  /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '취소' 표시 · 해제일(원문). 분양가와 차이는 취소 줄엔 안 적는다 */
-  return `<div class="lt2">분양권·입주권 거래 <b>${fmt((Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length)}</b>건${Number(n.취소) ? ` <span class="muted">(그중 해제 ${fmt(n.취소)}건)</span>` : ''}</div>
-    ${Number(n.공고전) ? `<p class="note sm">${fmt(n.공고전)}건은 첫 공고 전 입주권(조합원 권리)</p>` : ''}
-    ${r.분양권말 ? `<p class="note sm">${r.분양권말}</p>` : ''}
-    ${Number(n.필지로) ? `<p class="note sm" title="공고 자료 없이 이 단지 필지에서 맺은 계약으로 이음">공고 없이 이은 계약 ${fmt(n.필지로)}건</p>` : ''}
+  /* 2026-10-22 사장님 "취소 빼지마" — 취소 거래도 줄로 보이고 '해제' 표시. 분양가와 차이는 취소 줄엔 안 적는다.
+     11-01 사장님 "분양 청약 탭도 일반 실거래 탭처럼" — 실거래 탭 '거래 내역' 과 같은 줄(계약일 · 거래가 · 전용면적 · 층 + 꼬리표) · 10건씩 더보기.
+     작은 안내(첫 공고 전 입주권 · 공고 없이 이은 계약)는 화면에서 빼고 정책 '청약홈' 에. */
+  const 전 = (Number(n.건수) || 0) + (Number(n.취소) || 0) || t.length;
+  return `${sect('분양권·입주권 거래', 'applyhome', ` ${fmt(전)}`)}
     ${(() => { /* 2026-10-31 사장님 "구분이나 평형별로 고를 수 있는 탭" — 구분(원문) · 평형(전용면적 정수 ㎡) 작은 탭 줄. 단지마다 다르니 늘 '전체' 로 시작 */
       const 구분들 = [...new Set(t.map(x => x.구분 || ''))];
-      const 이름 = g => g === '입' ? '입주권' : g === '분' ? '분양권' : '빈칸';
+      const 이름 = g => g === '입' ? '입주권' : g === '분' ? '분양권' : '구분 없음';
       const gb = [['all', '전체'], ...['분', '입', ''].filter(g => 구분들.includes(g)).map(g => [g || 'none', 이름(g)])];
       const 평들 = [...new Set(t.map(x => Math.floor(Number(x.전용))).filter(Number.isFinite))].sort((a, b) => a - b);
       const py = [['all', '전체'], ...평들.map(v => [String(v), `${v}㎡`])];
       return (gb.length > 2 ? 고르기단추('sv-gb', gb) : '') + (py.length > 2 ? 고르기단추('sv-py', py) : ''); })()}
-    <table class="mini" data-pickrows="sv-gb sv-py|15"><thead><tr><th>계약</th><th class="n">전용</th><th class="n">층</th><th class="n">거래가</th><th>구분</th><th class="n">분양가와 차이</th></tr></thead><tbody>
+    <div class="tlist" data-pickrows="sv-gb sv-py|10"><div class="trow thd"><div class="td">계약일</div><div class="tm">거래가</div><div class="tx">전용면적 · 층</div></div>
     ${t.map((x, i) => {
       const 기준 = x.구분 === '입' || Number(x.취소) ? null : 최고(x.전용);
       const 차 = 기준 != null && x.거래원 ? Number(x.거래원) - 기준 : null;
-      /* 2026-10-22 사장님 "실거래 취소처럼 동일하게" — 실거래 탭(.trow.canc)과 같은 세 가지: 취소선 금액 · 연한 색 · '해제' 꼬리표(용어 풀이) */
       const 취 = Number(x.취소);
-      return `<tr${취 ? ' class="canc"' : ''} data-p-sv-gb="${esc(x.구분 || 'none')}" data-p-sv-py="${Math.floor(Number(x.전용))}"${i >= 15 ? ' hidden' : ''}><td>${날(x.계약일)}${취 ? ` <span class="tcx"${x.해제일 ? ` title="해제일 ${esc(x.해제일)} (원문)"` : ''}>${용어('해제')}</span>` : ''}</td><td class="n">${Number(x.전용).toFixed(2)}</td><td class="n">${x.층 ?? '—'}</td>
-        <td class="n">${x.거래원 ? (취 ? `<s>${억(Number(x.거래원))}</s>` : 억(Number(x.거래원))) : '—'}</td><td>${x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '<span class="muted">빈칸</span>'}</td>
-        <td class="n">${차 == null ? '—' : (차 >= 0 ? '+' : '−') + 억(Math.abs(차))}</td></tr>`; }).join('')}
-    </tbody></table>
-    <p class="note sm" data-pickcount>${t.length > 15 ? `${fmt(t.length)}건 중 최근 15건` : `${fmt(t.length)}건`}</p>`;
+      const 꼬 = [x.구분 === '입' ? '입주권' : x.구분 === '분' ? '분양권' : '',
+                 차 == null ? '' : `분양가 ${(차 >= 0 ? '+' : '−') + 억(Math.abs(차))}`].filter(Boolean);
+      return `<div class="trow${취 ? ' canc' : ''}" data-prow data-p-sv-gb="${esc(x.구분 || 'none')}" data-p-sv-py="${Math.floor(Number(x.전용))}"${i >= 10 ? ' hidden' : ''}>
+        <div class="td">${esc(날(x.계약일))}</div>
+        <div class="tm">${x.거래원 ? (취 ? `<s>${억(Number(x.거래원))}</s>` : 억(Number(x.거래원))) : '—'}</div>
+        <div class="tx">${Math.floor(Number(x.전용))}㎡${x.층 != null ? ` · ${x.층}층` : ''}${꼬.length ? ` <span class="muted">· ${esc(꼬.join(' · '))}</span>` : ''}${취 ? ` <span class="tcx">${용어('해제')}</span>` : ''}</div>
+      </div>`; }).join('')}
+    </div>
+    <button type="button" class="moreb" data-pickmore${t.length > 10 ? '' : ' hidden'}>10건 더보기 <span class="muted">(${fmt(Math.min(10, t.length))} / ${fmt(t.length)})</span></button>`;
 }
 
 /* ================= 폰 바텀시트 (2026-10-22, 사장님 "너 생각대로 ㄱㄱ") =================
@@ -7843,7 +7859,7 @@ async function 공고상세(house, lat, lng) {
     <h2>${esc((공고들[공고들.length - 1] || {}).house_nm || '청약 공고')}</h2>
     ${집수 > 1 ? `<p class="note sm">같은 공고 지번의 공고 ${fmt(공고들.length)}건을 한데 보임</p>` : ''}
     ${이어짐.length ? `<p class="note sm">같은 공고 지번의 다른 공고는 이미 ${이어짐.map(c => c.complex_id ? `<a href="/c/${c.complex_id}" data-goc="${c.complex_id}">${esc(c.이름 || '단지')}</a>`
-        : `<a href="#" data-gonew="${esc(c.kapt_code)}">${esc(c.이름 || 'K-apt 단지')}</a> <span class="muted">(대장 없는 신축 · K-apt)</span>`).join(' · ')}
+        : `<a href="#" data-gonew="${esc(c.kapt_code)}">${esc(c.이름 || '이름 없는 신축')}</a> <span class="muted">(대장 없는 신축)</span>`).join(' · ')}
       에 이어져 있음(그 단지의 분양 칸)</p>` : ''}
     <p class="note sm">단지에 아직 안 이어짐 · ${lat == null ? '지도 자리 없음(공고 지번 필지를 못 찾음)'
         : 근처 ? `지도 표는 '근처'(공고 지번 필지가 지금 없어 같은 본번 필지 ${fmt(w.근처필지)}개 가운데)` : '지도 표 = 공고 지번 자리'}</p>

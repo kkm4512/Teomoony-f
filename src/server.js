@@ -3908,7 +3908,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         .query(`SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
                 SELECT TOP 3 kapt_name, lawd_nm, 세대 FROM gold.v_newbuild WHERE REPLACE(kapt_name, ' ', '') LIKE @n0 ORDER BY 세대 DESC`);
       if (nb.recordset.length) {
-        알림.push({ 종류: 'HINT', 말: `'${단지이름}' 은 건축물대장이 아직 없는 **신축**(K-apt)입니다 — ${nb.recordset.map(x => `${x.kapt_name}(${x.lawd_nm || ''} · ${Number(x.세대 || 0).toLocaleString()}세대)`).join(', ')}. 지도의 신축 핀과 검색 제안에서 볼 수 있고, 대장이 없어 조건(평형 · 사용승인 등)으로는 아직 찾을 수 없습니다` });
+        알림.push({ 종류: 'HINT', 말: `'${단지이름}' 은 건축물대장이 아직 없는 **신축**입니다 — ${nb.recordset.map(x => `${x.kapt_name}(${x.lawd_nm || ''} · ${Number(x.세대 || 0).toLocaleString()}세대)`).join(', ')}. 지도의 신축 핀과 검색 제안에서 볼 수 있고, 대장이 없어 조건(평형 · 사용승인 등)으로는 아직 찾을 수 없습니다` });
       } else {
       /* 2026-10-23 QA(200문항): 지금 단지엔 없고 **폐쇄·말소 대장**에 있는 이름('둔촌주공' · '잠실주공5단지' 처럼 철거·재건축된 곳) — 그쪽을 알려 준다 */
       const cs = await pool.request().input('n0', sql.NVarChar(400), '%' + 글자그대로(String(단지이름)).replace(/\s+/g, '') + '%')
