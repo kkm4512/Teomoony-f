@@ -5291,7 +5291,8 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       /* 11-01 사장님 "재개발 지역에 왜 특정 단지?" — 이 구역 사업으로 짓는 **대장 전 단지**(사업승인 · 건축허가 · 공사 중).
          가단지 지도 경계와 같은 규칙(가상구역경계): 대표 필지가 절반 넘게 든 재개발 구역 중 가장 작은 것이 이 구역일 때만. 위치로만 · 이름 안 봄 */
       IF OBJECT_ID('gold.fn_pnu_redev') IS NULL OR OBJECT_ID('gold.pre_complex') IS NULL SELECT TOP 0 complex_id = 0, 이름 = N'';
-      ELSE SELECT g.complex_id, g.이름
+      ELSE SELECT g.complex_id, g.이름,
+             공고들 = CASE WHEN OBJECT_ID('gold.pre_applyhome') IS NOT NULL THEN (SELECT STRING_AGG(x.house_manage_no, ',') FROM gold.pre_applyhome x WHERE x.complex_id = g.complex_id) END
         FROM silver.redev_zone z0
         JOIN silver.cadastral_parcel cp ON cp.is_current = 1 AND cp.geom IS NOT NULL
          AND cp.bbox_minx <= z0.bbox_maxx AND cp.bbox_maxx >= z0.bbox_minx AND cp.bbox_miny <= z0.bbox_maxy AND cp.bbox_maxy >= z0.bbox_miny

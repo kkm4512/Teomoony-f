@@ -8686,7 +8686,8 @@ function 구역상세(d) {
       ${(() => { const 본 = 공.filter(p => p.공고종류 !== 'REMNDR'), 쓸 = 본.length ? 본 : 공, 본것 = new Map();
           쓸.forEach(p => { const k = p.house_nm || ''; if (k && !본것.has(k)) 본것.set(k, p); });
           const 가 = d.짓는단지 || [], 가번 = new Set(가.map(x => String(x.complex_id)));
-          [...본것].forEach(([k, p]) => { if (p.이은단지 && 가번.has(String(p.이은단지))) 본것.delete(k); });   /* 그 가단지에 이미 이어진 공고는 가단지 한 번만 */
+          const 가공고 = new Set(가.flatMap(x => String(x.공고들 || '').split(',').filter(Boolean)));
+          [...본것].forEach(([k, p]) => { if ((p.이은단지 && 가번.has(String(p.이은단지))) || 가공고.has(String(p.house_manage_no))) 본것.delete(k); });   /* 그 가단지에 이미 이어진 공고는 가단지 한 번만 */
           if (!본것.size && !가.length) return '';
           return row('짓는 단지', 가.map(x => `<span class="zbuild" role="button" tabindex="0" style="cursor:pointer;text-decoration:underline;text-underline-offset:3px" data-goto="${x.complex_id}"><b>${esc(x.이름 || '')}</b></span>`).concat([...본것.values()].map(p => `<span class="zbuild" role="button" tabindex="0" style="cursor:pointer;text-decoration:underline;text-underline-offset:3px"${p.이은단지 ? ` data-goto="${p.이은단지}"` : ` data-ahhouse="${esc(p.house_manage_no)}" data-lat="${p.lat}" data-lng="${p.lng}"`}><b>${esc(p.house_nm)}</b></span>`)).join(' · ')); })()}
       ${row('추진단계', z.stage ? esc(z.stage) + (z.pct != null ? ` <span class="muted">· 진행 ${z.pct}%</span>` : '')
