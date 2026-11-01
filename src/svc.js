@@ -24,8 +24,8 @@ let pool = null;
 function pg() {
   if (!pool) {
     pool = new Pool({ host: '127.0.0.1', port: 15432, database: 'teomoony', user: 'teomoony',
-                      password: process.env.SVC_DB_PASSWORD || '', max: 10, idleTimeoutMillis: 30000,
-                      connectionTimeoutMillis: 2000, statement_timeout: 3000 });
+                      password: process.env.SVC_DB_PASSWORD || '', max: 20, idleTimeoutMillis: 30000,
+                      connectionTimeoutMillis: 2000, statement_timeout: 3000 });   /* 11-01 10 → 20: 두 글자 목록 검색이 연결 여섯을 한꺼번에 쓴다 */
     pool.on('error', () => {});   // 끊긴 연결은 버린다 — 다음 요청이 새로 붙는다
   }
   return pool;
@@ -533,6 +533,7 @@ async function 목록검색(req, res, next) {
        두 글자 이하는 좁은 표(svc.lyr_sg_cmap_s: 번호 · 정렬 칸 · s_all — **정렬 순서대로 담김**)를 정렬 색인 순으로 읽다가 상한에서 멈추고(차례 읽기),
        그 번호만 큰 표에서 칸을 꺼낸다. 세 글자 이상 · 빈 검색은 예전 그대로. 좁은 표가 아직 없으면 예전 길. */
     const 좁은표 = q && [...q].length < 3 && await 좁은표있나();
+    const QQ = 좁은표 ? 오래Q : Q;   /* 두 글자는 덤 질의(법정동 · 신축 · 이름 · 정비 · 공고)도 흔한 말이라 3초를 넘길 수 있다 — 10초까지 */
     const 본 = 좁은표 ? 오래Q(`
       WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id),
            t AS MATERIALIZED (SELECT s.complex_id FROM svc.lyr_sg_cmap_s s
@@ -560,22 +561,22 @@ async function 목록검색(req, res, next) {
          AND ($3::boolean = false OR v.has_recap)
        ORDER BY v.dong_cnt DESC NULLS LAST, v.pnu_cnt DESC NULLS LAST, v.complex_id
        LIMIT $4`, [qq, qid, onlyRecap, limit + 1]);
-    const 법정동들 = q ? Q(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
+    const 법정동들 = q ? QQ(`SELECT lawd_cd, emd_nm, full_nm, centroid_lat, centroid_lng, minx AS bbox_minx, miny AS bbox_miny, maxx AS bbox_maxx, maxy AS bbox_maxy,
                                  complex_cnt, trade_cnt, max_amount
                             FROM svc.lyr_lawd_stat WHERE emd_nm ILIKE $1 OR full_nm ILIKE $1 OR lawd_cd ILIKE $1
                            ORDER BY complex_cnt DESC NULLS LAST, ${이름순('emd_nm')}, lawd_cd LIMIT 8`, [qq]) : [];
-    const 신축들 = q ? Q(`SELECT kapt_code, kapt_name, lawd_nm, pnu, "세대", "동수", "사용승인", "거래", centroid_lat, centroid_lng, kapt_addr
+    const 신축들 = q ? QQ(`SELECT kapt_code, kapt_name, lawd_nm, pnu, "세대", "동수", "사용승인", "거래", centroid_lat, centroid_lng, kapt_addr
                            FROM svc.lyr_sg_newbuild WHERE name_ns ILIKE $1 OR kapt_addr ILIKE $2 OR doro_juso ILIKE $2
                           ORDER BY "거래" DESC NULLS LAST, "세대" DESC NULLS LAST, kapt_code LIMIT 8`, [q0, qq]) : [];
-    const 이름들 = q ? Q(`SELECT complex_id, min(name ${K}) AS 걸린이름 FROM (
+    const 이름들 = q ? QQ(`SELECT complex_id, min(name ${K}) AS 걸린이름 FROM (
                              SELECT complex_id, name FROM svc.lyr_sg_complex_name WHERE src IN ('kapt', 'kaptpnu') AND name_ns ILIKE $1
                              UNION ALL SELECT complex_id, NULL FROM svc.lyr_sg_complex_name WHERE src = 'alias' AND name_ns ILIKE $1
                              UNION ALL SELECT complex_id, NULL FROM svc.lyr_sg_complex WHERE nm_ns ILIKE $1) x
                           GROUP BY complex_id ORDER BY complex_id`, [q0]) : [];
-    const 정비들 = q ? Q(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2, to_jsonb(r0) ->> '기록말' AS 기록말
+    const 정비들 = q ? QQ(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2, to_jsonb(r0) ->> '기록말' AS 기록말
                            FROM svc.lyr_sg_redev r0 WHERE has_geo = 1 AND (zone_ns ILIKE $1 OR biz_ns ILIKE $1) AND coalesce((to_jsonb(r0) ->> '대표')::int, 1) = 1
                           ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, area_m2 DESC NULLS LAST, present_sn LIMIT 8`, [q0, qq]) : [];
-    const 공고들 = q ? Q(`SELECT house_manage_no, house_nm, "공고종류", rcrit_pblanc_de, hssply_adres, tot_suply, lat, lng FROM (
+    const 공고들 = q ? QQ(`SELECT house_manage_no, house_nm, "공고종류", rcrit_pblanc_de, hssply_adres, tot_suply, lat, lng FROM (
                              SELECT a.*, row_number() OVER (PARTITION BY house_manage_no ORDER BY ${날내림('rcrit_pblanc_de')}, pblanc_no DESC NULLS LAST) AS rn
                                FROM svc.lyr_sg_applyhome a WHERE a.name_ns ILIKE $1) x
                           WHERE x.rn = 1 ORDER BY ${날내림('x.rcrit_pblanc_de')}, x.house_manage_no LIMIT 8`, [q0]) : [];
