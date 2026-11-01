@@ -425,8 +425,9 @@ async function 자동완성(req, res, next) {
            FROM svc.lyr_sg_newbuild WHERE name_ns ILIKE $1
           ORDER BY CASE WHEN kapt_name ILIKE $2 THEN 0 ELSE 1 END, "세대" DESC NULLS LAST, kapt_code LIMIT 3`, [q0, p]),
       /* 6 재개발 · 정비 */
-      Q(`SELECT present_sn, zone_nm, biz_nm, propel_nm, centroid_lat, centroid_lng, minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체, to_jsonb(r0) ->> 'main_complex_id' AS main_complex_id
-           FROM svc.lyr_sg_redev r0 WHERE zone_ns ILIKE $1 OR biz_ns ILIKE $1
+      Q(`SELECT present_sn, zone_nm, biz_nm, propel_nm, centroid_lat, centroid_lng, minx, miny, maxx, maxy, count(*) OVER ()::int AS 전체, to_jsonb(r0) ->> 'main_complex_id' AS main_complex_id,
+                to_jsonb(r0) ->> '기록말' AS 기록말
+           FROM svc.lyr_sg_redev r0 WHERE (zone_ns ILIKE $1 OR biz_ns ILIKE $1) AND coalesce((to_jsonb(r0) ->> '대표')::int, 1) = 1
           ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, ${이름순('zone_nm')}, present_sn LIMIT 4`, [q0, p]),
       /* 7 지하철역 */
       Q(`SELECT sttn_nm, "노선", lat, lon, count(*) OVER ()::int AS 전체
@@ -540,8 +541,8 @@ async function 목록검색(req, res, next) {
                              UNION ALL SELECT complex_id, NULL FROM svc.lyr_sg_complex_name WHERE src = 'alias' AND name_ns ILIKE $1
                              UNION ALL SELECT complex_id, NULL FROM svc.lyr_sg_complex WHERE nm_ns ILIKE $1) x
                           GROUP BY complex_id ORDER BY complex_id`, [q0]) : [];
-    const 정비들 = q ? Q(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2
-                           FROM svc.lyr_sg_redev WHERE has_geo = 1 AND (zone_ns ILIKE $1 OR biz_ns ILIKE $1)
+    const 정비들 = q ? Q(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2, to_jsonb(r0) ->> '기록말' AS 기록말
+                           FROM svc.lyr_sg_redev r0 WHERE has_geo = 1 AND (zone_ns ILIKE $1 OR biz_ns ILIKE $1) AND coalesce((to_jsonb(r0) ->> '대표')::int, 1) = 1
                           ORDER BY CASE WHEN zone_nm ILIKE $2 THEN 0 ELSE 1 END, area_m2 DESC NULLS LAST, present_sn LIMIT 8`, [q0, qq]) : [];
     const 공고들 = q ? Q(`SELECT house_manage_no, house_nm, "공고종류", rcrit_pblanc_de, hssply_adres, tot_suply, lat, lng FROM (
                              SELECT a.*, row_number() OVER (PARTITION BY house_manage_no ORDER BY ${날내림('rcrit_pblanc_de')}, pblanc_no DESC NULLS LAST) AS rn
@@ -828,10 +829,10 @@ const 정비층 = 층2('redev', ['bbox', 'g'], true, async (req, b) => {
   const r = await pg().query(`SELECT present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_cd, propel_nm, propel_pct, propel_fam, area_m2, geojson
                                 FROM svc.lyr_redev_zone WHERE ${상자} ${거름} ORDER BY area_m2 DESC NULLS LAST, present_sn COLLATE "C" LIMIT 800`,
                               g ? [b[0], b[1], b[2], b[3], 재개발소분류] : b);
-  return { type: 'FeatureCollection', features: r.rows.map(d => ({
+  return require('./redev_groups').같은경계합치기({ type: 'FeatureCollection', features: r.rows.map(d => ({
     type: 'Feature', geometry: JSON.parse(d.geojson),
     properties: { present_sn: d.present_sn, zone_nm: d.zone_nm, lclas: d.biz_lclas_nm, biz: d.biz_nm,
-                  cd: d.propel_cd, stage: d.propel_nm, pct: d.propel_pct, fam: d.propel_fam, area: d.area_m2 } })) };
+                  cd: d.propel_cd, stage: d.propel_nm, pct: d.propel_pct, fam: d.propel_fam, area: d.area_m2 } })) });
 });
 /* 용도지역 — 옛 경로: Decimal(12,7) · TOP 1200 · ORDER BY area_m2_approx DESC */
 const 용도층 = 층2('zones', ['bbox'], true, async (req, b) => {

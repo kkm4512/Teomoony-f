@@ -1989,10 +1989,10 @@ app.get('/api/complexes', 검색캐시, async (req, res) => {
     if (q) {
       const rz = await pool.request().input('q', sql.NVarChar(1000), `%${글자그대로(q)}%`).input('q0', sql.NVarChar(1000), q0).query(`
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-        SELECT TOP 8 present_sn, zone_nm, biz_lclas_nm, biz_nm, propel_nm, propel_pct, area_m2
-          FROM silver.redev_zone
-         WHERE is_current = 1 AND geojson IS NOT NULL AND (REPLACE(zone_nm, ' ', '') LIKE @q0 OR REPLACE(biz_nm, ' ', '') LIKE @q0)
-         ORDER BY CASE WHEN zone_nm LIKE @q THEN 0 ELSE 1 END, area_m2 DESC, present_sn`);
+        SELECT TOP 8 z.present_sn, z.zone_nm, z.biz_lclas_nm, z.biz_nm, z.propel_nm, z.propel_pct, z.area_m2, rs.기록말
+          FROM silver.redev_zone z LEFT JOIN gold.redev_same rs ON rs.present_sn = z.present_sn   /* 11-01 경계가 똑같은 기록은 대표 한 줄(405) */
+         WHERE z.is_current = 1 AND z.geojson IS NOT NULL AND ISNULL(rs.대표, 1) = 1 AND (REPLACE(z.zone_nm, ' ', '') LIKE @q0 OR REPLACE(z.biz_nm, ' ', '') LIKE @q0)
+         ORDER BY CASE WHEN z.zone_nm LIKE @q THEN 0 ELSE 1 END, z.area_m2 DESC, z.present_sn`);
       redevs = rz.recordset;
     }
     /* 2026-10-23 사장님 "청약 공고 Enter 목록에도" — 단지에 **아직 안 이어진** 공고(이어진 것은 단지로 나온다). 자동완성 13 과 같은 기준 · 주택마다 최근 공고 1줄 */
@@ -2215,12 +2215,12 @@ app.get('/api/suggest', async (req, res) => {
          ORDER BY CASE WHEN n.kapt_name LIKE @p THEN 0 ELSE 1 END, n.세대 DESC, n.kapt_code;
         /* 6 재개발·정비사업 구역 */
         SELECT TOP 4 z.present_sn, z.zone_nm, z.biz_nm, z.propel_nm, z.centroid_lat, z.centroid_lng,
-               minx = z.bbox_minx, miny = z.bbox_miny, maxx = z.bbox_maxx, maxy = z.bbox_maxy, 전체 = COUNT(*) OVER (),
+               minx = z.bbox_minx, miny = z.bbox_miny, maxx = z.bbox_maxx, maxy = z.bbox_maxy, 전체 = COUNT(*) OVER (), rs.기록말,
                main_complex_id = CASE WHEN z.biz_lclas_nm = N'역세권사업' THEN
                  (SELECT TOP 1 h.complex_id FROM gold.complex_redev_hit h WHERE h.present_sn = z.present_sn AND h.xarea >= 0.5 * h.parea
                      AND h.xarea >= 0.9 * (SELECT SUM(h2.xarea) FROM gold.complex_redev_hit h2 WHERE h2.present_sn = z.present_sn) ORDER BY h.xarea DESC) END
-          FROM silver.redev_zone z
-         WHERE z.is_current = 1 AND (REPLACE(z.zone_nm, ' ', '') LIKE @q0 OR REPLACE(z.biz_nm, ' ', '') LIKE @q0)
+          FROM silver.redev_zone z LEFT JOIN gold.redev_same rs ON rs.present_sn = z.present_sn   /* 11-01 경계가 똑같은 기록은 대표 한 줄(405) */
+         WHERE z.is_current = 1 AND ISNULL(rs.대표, 1) = 1 AND (REPLACE(z.zone_nm, ' ', '') LIKE @q0 OR REPLACE(z.biz_nm, ' ', '') LIKE @q0)
          ORDER BY CASE WHEN z.zone_nm LIKE @p THEN 0 ELSE 1 END, z.zone_nm, z.present_sn;
         /* 7 지하철역 — 한 역에 노선이 여럿이면 한 줄로 */
         SELECT TOP 4 s.sttn_nm, 노선 = STRING_AGG(s.line_nm, N' · ') WITHIN GROUP (ORDER BY s.line_nm), lat = AVG(s.lat), lon = AVG(s.lon),
@@ -5245,12 +5245,13 @@ app.get('/api/redev', async (req, res) => {
           AND bbox_minx <= @x1 AND bbox_maxx >= @x0
           AND bbox_miny <= @y1 AND bbox_maxy >= @y0
         ORDER BY area_m2 DESC, present_sn`);   /* 11-01 같은 면적(같은 사업의 두 기록 등)은 번호순 — 서비스DB 경로와 순서를 같게 */
-    res.json({ type: 'FeatureCollection', features: r.recordset.map(d => ({
+    /* 11-01 경계가 똑같은 기록(같은 땅 · 사업 종류별 등록)은 한 면으로(redev_groups.js) */
+    res.json(require('./redev_groups').같은경계합치기({ type: 'FeatureCollection', features: r.recordset.map(d => ({
       type: 'Feature', geometry: JSON.parse(d.geojson),
       properties: { present_sn: d.present_sn, zone_nm: d.zone_nm,
                     lclas: d.biz_lclas_nm, biz: d.biz_nm,
                     cd: d.propel_cd, stage: d.propel_nm, pct: d.propel_pct,
-                    fam: d.propel_fam, area: d.area_m2 } })) });
+                    fam: d.propel_fam, area: d.area_m2 } })) }));
   } catch (e) { fail(res, e, 'redev'); }
 });
 
@@ -5295,6 +5296,14 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
              l.근거, l.면적차pct
         FROM gold.redev_plan_link l JOIN silver.seoul_redev_plan p ON p.basic_info_seq = l.basic_info_seq
        WHERE l.present_sn = @sn;
+      /* 11-01 경계가 글자 하나 다르지 않은 다른 기록(같은 땅을 사업 종류별로 따로 올린 것 — 촉진구역 · 재개발 등). 단계는 고르지 않고 다 보인다 */
+      SELECT z2.present_sn, z2.zone_nm, z2.biz_lclas_nm, z2.biz_nm, z2.propel_cd, z2.propel_nm, z2.propel_pct, z2.propel_fam, z2.area_m2
+        FROM silver.redev_zone z
+        JOIN silver.redev_zone z2 ON z2.is_current = 1 AND z2.present_sn <> z.present_sn
+         AND z2.bbox_minx = z.bbox_minx AND z2.bbox_miny = z.bbox_miny AND z2.bbox_maxx = z.bbox_maxx AND z2.bbox_maxy = z.bbox_maxy
+         AND z2.geojson = z.geojson
+       WHERE z.is_current = 1 AND z.present_sn = @sn AND z.geojson IS NOT NULL
+       ORDER BY z2.present_sn;
       `);
     const z = r.recordsets[0][0];
     if (!z) return res.status(404).json({ error: 'not found' });
@@ -5305,6 +5314,8 @@ app.get('/api/redev/:sn/detail', async (req, res) => {
       /* 경계에 겨우 닿은(겹친 비율 1% 미만) 단지는 뺀다 — 필지·구역 경계가 미세하게 어긋나 생기는 조각이다(용도지역 칸과 같은 이유). 몇 개 뺐는지 준다 */
       단지: r.recordsets[1].filter(x => Number(x.포함률) >= 1), 뺀단지: r.recordsets[1].filter(x => !(Number(x.포함률) >= 1)).length,
       공고: r.recordsets[2], 계획: (r.recordsets[3] || [])[0] || null,
+      같은경계: (r.recordsets[4] || []).map(x => ({ sn: x.present_sn, zone_nm: x.zone_nm, lclas: x.biz_lclas_nm, biz: x.biz_nm,
+                                                cd: x.propel_cd, stage: x.propel_nm, pct: x.propel_pct, fam: x.propel_fam, area: x.area_m2 })),
       });
   } catch (e) { fail(res, e, 'redev-detail'); }
 });

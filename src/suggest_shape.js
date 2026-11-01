@@ -76,7 +76,7 @@ function 묶음만들기(rs, 길이) {
           이름: x.kapt_name, 보조: [x.lawd_nm, x.세대 ? `${x.세대}세대` : null].filter(Boolean).join(' · '),
           동작: { 종류: '신축', code: x.kapt_code } })) },
       { 종류: '재개발·정비', 전체: 전체(rs[5]), 항목: rs[5].map(x => ({
-          이름: x.zone_nm, 보조: [x.biz_nm, x.propel_nm].filter(Boolean).join(' · '),
+          이름: x.zone_nm, 보조: x.기록말 || [x.biz_nm, x.propel_nm].filter(Boolean).join(' · '),   /* 11-01 경계가 똑같은 기록이 여럿이면 기록마다 분류 · 단계(405) */
           동작: { 종류: '정비', sn: x.present_sn, bbox: 상자(x), lat: x.centroid_lat, lng: x.centroid_lng } })) },
       { 종류: '지하철역', 전체: 전체(rs[6]), 항목: rs[6].map(x => ({
           이름: x.sttn_nm, 보조: x.노선, 동작: { 종류: '점', lat: x.lat, lng: x.lon } })) },
