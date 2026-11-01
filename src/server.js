@@ -5387,7 +5387,9 @@ app.get('/api/school/:sid', async (req, res) => {
       IF OBJECT_ID('tempdb..#zz') IS NOT NULL DROP TABLE #zz;
       SELECT 종류 = CASE WHEN z.hakgudo_id IS NOT NULL THEN 'E' ELSE g.kind END, k.hakgudo_id,
              이름 = COALESCE(z.hakgudo_nm, g.hakgudo_nm), 공동 = CASE WHEN COALESCE(z.hakgudo_gb, g.hakgudo_gb) = '1' THEN 1 ELSE 0 END,
-             geom = COALESCE(z.geom, g.geom), 기준일 = k.base_dt
+             geom = COALESCE(z.geom, g.geom), 기준일 = k.base_dt,
+             셈출처 = CASE WHEN z.geom IS NOT NULL THEN 'Z' ELSE 'G' END,
+             셈종류 = CASE WHEN z.geom IS NOT NULL THEN '' ELSE ISNULL(g.kind, '') END
         INTO #zz
         FROM silver.school_zone_link k
         LEFT JOIN silver.school_zone z ON z.hakgudo_id = k.hakgudo_id
@@ -5395,10 +5397,15 @@ app.get('/api/school/:sid', async (req, res) => {
        WHERE k.school_id = @s AND (z.hakgudo_id IS NOT NULL OR g.hakgudo_id IS NOT NULL);
       SELECT z.종류, z.hakgudo_id, z.이름, z.공동, z.기준일,
              학교수 = (SELECT COUNT(*) FROM silver.school_zone_link k2 WHERE k2.hakgudo_id = z.hakgudo_id),
-             단지 = cc.n, 세대 = cc.hh
+             단지 = CASE WHEN t.hakgudo_id IS NOT NULL THEN t.n ELSE cc.n END,
+             세대 = CASE WHEN t.hakgudo_id IS NOT NULL THEN t.hh ELSE cc.hh END
         FROM #zz z
+        /* ★ 2026-11-01(406) 구역 안 단지 · 세대는 미리 센 표(gold.school_zone_cnt, 매일 07:45 · 같은 조건)를 읽는다 —
+           그 자리에서 세면 넓은 학군 하나에 수억 페이지를 읽어 60초를 넘겼다. 표에 아직 없는 구역만 아래에서 그 자리 셈. */
+        LEFT JOIN gold.school_zone_cnt t ON t.출처 = z.셈출처 AND t.hakgudo_id = z.hakgudo_id AND t.종류 = z.셈종류
         OUTER APPLY (SELECT n = COUNT(*), hh = SUM(CAST(c.hhld_cnt_sum AS BIGINT)) FROM gold.complex c
-                      WHERE c.is_active = 1 AND c.merged_into IS NULL AND c.centroid_lat IS NOT NULL AND c.hhld_cnt_sum > 0
+                      WHERE t.hakgudo_id IS NULL
+                        AND c.is_active = 1 AND c.merged_into IS NULL AND c.centroid_lat IS NOT NULL AND c.hhld_cnt_sum > 0
                         AND c.centroid_lng BETWEEN z.geom.STEnvelope().STPointN(1).STX AND z.geom.STEnvelope().STPointN(3).STX
                         AND c.centroid_lat BETWEEN z.geom.STEnvelope().STPointN(1).STY AND z.geom.STEnvelope().STPointN(3).STY
                         AND z.geom.STContains(geometry::Point(c.centroid_lng, c.centroid_lat, 4326)) = 1) cc
