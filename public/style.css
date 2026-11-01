@@ -2110,3 +2110,6 @@ table.pyt th:first-child,table.pyt td:first-child{padding-left:0}
 table.pyt th:last-child,table.pyt td:last-child{padding-right:0}
 table.pyt tr.pyhas td{border-bottom:0;padding-bottom:0}
 table.pyt tr.pysub td{text-align:right;white-space:normal;font-size:11.5px;color:var(--ink-3);padding-top:0}
+/* 11-01 사장님 "로딩 중 표시는 2초 이상부터" — 화면 안 '불러오는 중…' 글자는 2초 뒤에 보인다(그 전에 끝나면 안 보인 채로 바뀐다) */
+.ldw{animation:ldw-in 0s linear 2s both}
+@keyframes ldw-in{from{visibility:hidden}to{visibility:visible}}

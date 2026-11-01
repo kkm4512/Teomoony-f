@@ -8,7 +8,9 @@ const $ = s => document.querySelector(s);
    ★ fetch 가 21군데에 흩어져 있다. 한 곳씩 달면 언젠가 빠뜨린다(작업방식 10장) -
      그래서 **fetch 자체를 한 번 감싼다.** /api/ 로 가는 것은 전부 저절로 잡힌다.
    ★ 300ms 안에 끝나면 아무것도 안 띄운다. 마커(0.2초)처럼 빠른 것까지 깜박이면
-     오히려 시끄럽다. 그보다 오래 걸리면 위쪽 띠 + 아래쪽 칩이 뜬다.
+     오히려 시끄럽다. 그보다 오래 걸리면 위쪽 띠가 뜬다.
+   ★ 2026-11-01 사장님 "로딩 중 표시는 2초 이상부터 뜨게": 아래쪽 칩(글자)은 **2초가 넘은 것이 있을 때만** 보인다.
+     화면 안의 '불러오는 중…' 글자(class ldw)도 CSS 로 2초 뒤에 보인다(style.css .ldw).
    ★ 칩에 **몇 초째인지** 적는다. "도는 건지 멈춘 건지" 는 숫자가 올라가는지로 안다.
    ★ 실패해도(네트워크 끊김 · 예외) finally 로 반드시 내린다 - 안 그러면 영원히 돈다. */
 const 로딩 = (() => {
@@ -52,15 +54,17 @@ const 로딩 = (() => {
     if (!진행.size) return;
     let 가장오래 = null;
     for (const v of 진행.values()) if (!가장오래 || v.시작 < 가장오래.시작) 가장오래 = v;
-    const 초 = Math.floor((Date.now() - 가장오래.시작) / 1000);
+    const ms = Date.now() - 가장오래.시작, 초 = Math.floor(ms / 1000);
+    칩.hidden = ms < 2000;
+    if (칩.hidden) return;
     const 더 = 진행.size > 1 ? ` 외 ${진행.size - 1}건` : '';
     const 늦음 = 초 >= 10 ? '<span class="ld-late">오래 걸리고 있습니다 — 아직 기다리는 중</span>' : '';
     칩.innerHTML = `<span class="ld-dot"></span><span>${esc(가장오래.이름)}${더} 불러오는 중…</span>`
                  + `<b class="ld-sec">${초}초</b>${늦음}`;
   }
   function 켜기() {
-    만들기(); 보임 = true; 띠.hidden = false; 칩.hidden = false; 그리기();
-    if (!타이머) 타이머 = setInterval(그리기, 1000);
+    만들기(); 보임 = true; 띠.hidden = false; 그리기();
+    if (!타이머) 타이머 = setInterval(그리기, 250);
   }
   function 끄기() {
     보임 = false; clearTimeout(지연); 지연 = null;
@@ -1247,7 +1251,7 @@ async function selectNewbuild(code, fromList) {
     b.setAttribute('aria-current', String(b.dataset.kapt === code)));
   const box = $('#detail');
   box.hidden = false;
-  box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  box.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
   try {
     const d = await fetch(`/api/newbuilds/${encodeURIComponent(code)}`).then(r => r.json());
     if (d.error) {
@@ -2785,7 +2789,7 @@ async function select(id, fromList) {
 
   const box = $('#detail');
   box.hidden = false;
-  box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  box.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
 
   try {
     /* ★ 건물 외곽선(/buildings)을 **같이 기다리지 않는다** (2026-10-21).
@@ -3496,7 +3500,7 @@ function structureBlock(dongs, floors, hos, scope, hoTotal) {
      5라인짜리에서 5배 틀린 숫자를 사실처럼 보여주게 된다. */
 async function openHo(pk) {
   const el = $('#homodal');
-  el.innerHTML = `<div class="hm-box"><div class="hm-h">불러오는 중…</div></div>`;
+  el.innerHTML = `<div class="hm-box"><div class="hm-h ldw">불러오는 중…</div></div>`;
   el.classList.add('on');
   let d;
   try {
@@ -3746,7 +3750,7 @@ function tradeList(rows, 거래탭, 평형, 단지id) {
     const k = r.평형 == null ? '' : String(r.평형) + (r.면적칸 && r.면적칸 !== '전용' ? '|' + r.면적칸 : '');
     return k === 평형;
   });
-  if (!R.length) return 받는중 ? sect('거래 내역', 'rtms', '') + '<p class="srcline">이 평형 거래를 불러오는 중…</p>' : '';
+  if (!R.length) return 받는중 ? sect('거래 내역', 'rtms', '') + '<p class="srcline ldw">이 평형 거래를 불러오는 중…</p>' : '';
   const 받은 = R.length;
   const 보임 = Math.max(1, Math.min(거래Shown, 받은));
   const 돈 = r => r.전월세
@@ -3783,7 +3787,7 @@ function tradeList(rows, 거래탭, 평형, 단지id) {
         /* ★ 2026-10-21 QA: 이 '전체' 는 **해제 포함**이다(목록은 해제도 제자리에 둔다). 바로 위 탭·평형 카드의
            건수는 해제를 뺀 수라 '매매 1,429' 옆에 '1,443건 중' 이 떠서 어긋나 보였다 - 그 말을 적는다. */
         ? `<p class="srcline">${esc(거래탭)} ${fmt(전체종류)}건(해제 포함) 중 최근 ${fmt(받은본)}건</p>` : '')
-    : 받는중 ? '<p class="srcline">이 평형의 이전 거래를 불러오는 중…</p>'
+    : 받는중 ? '<p class="srcline ldw">이 평형의 이전 거래를 불러오는 중…</p>'
     : (() => {
         /* 11-01: 따로 받았으면 그 평형의 진짜 분모(평형전체 · 해제 포함)를 안다 — 다 받았으면 줄을 안 쓴다.
            따로 안 받았으면(종류 전체가 120건 안) 받은 것이 그 평형의 전부다. */
@@ -5304,7 +5308,7 @@ function renderDetail(payload) {
                 aria-selected="${거래탭 === 이름}">${이름}<b>${fmt(n)}</b></button>`;
     }).join('')}</div>` : '';
 
-  const paneS = V ? 가상분양칸(V) : `<div class="ahbox" data-ah="c|${c.complex_id}"><p class="note muted">불러오는 중…</p></div>`;
+  const paneS = V ? 가상분양칸(V) : `<div class="ahbox" data-ah="c|${c.complex_id}"><p class="note muted ldw">불러오는 중…</p></div>`;
   const paneP = `
     ${stats.length ? `` : ''}
     ${c && c.complex_id && stats.length ? `<div class="pybox" data-py="${esc(String(c.complex_id))}"></div>` : ''}
@@ -6245,7 +6249,7 @@ async function 문의탭그리기(쪽 = 1) {
         <div class="ec-btns"><button type="button" class="ec-b ec-pri" data-q-send>남기기</button><span class="qmsg muted"></span></div></div>`
     : `<p class="ec-help">문의를 남기려면 로그인하세요. <button type="button" class="ec-b" data-q-login>로그인하러 가기</button></p>`;
   const L = $('#qlist');
-  L.innerHTML = '<p class="muted">불러오는 중…</p>';
+  L.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
   try {
     const d = await fetch('/api/inquiries?page=' + 쪽).then(r => r.json());
     if (d.error) throw new Error(d.error);
@@ -6802,7 +6806,7 @@ async function 토지이용채우기() {
   const box = document.querySelector('#detail .lubox');
   if (!box) return;
   const 키 = box.dataset.lu;
-  box.innerHTML = `${sect('토지이용계획', 'landuse')}<p class="note muted">불러오는 중…</p>`;
+  box.innerHTML = `${sect('토지이용계획', 'landuse')}<p class="note muted ldw">불러오는 중…</p>`;
   let r = 토지이용캐시.get(키), 실패 = null;
   if (!r) {
     try {
@@ -7108,7 +7112,7 @@ async function 가단지찾기(house) {
 async function 분양핀열기(house, ll) {
   { const g = await 가단지찾기(house); if (g) { map.closePopup(); return select(g, false); } }
   const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
-    .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
+    .setLatLng(ll).setContent('<p class="muted ldw">불러오는 중…</p>').openOn(map);
   try {
     const r = await fetch(`/api/applyhome?house=${encodeURIComponent(house)}`).then(x => x.json());   // 같은 공고 지번의 안 이어진 공고까지
     if (r.error) throw new Error(r.error);
@@ -7638,7 +7642,7 @@ function 지금자리줄(s, r) {
 }
 async function 폐쇄핀열기(key, ll) {
   const pop = L.popup({ maxWidth: 360, minWidth: 260, className: 'ahpop', autoPanPadding: [20, 60] })
-    .setLatLng(ll).setContent('<p class="muted">불러오는 중…</p>').openOn(map);
+    .setLatLng(ll).setContent('<p class="muted ldw">불러오는 중…</p>').openOn(map);
   try {
     const r = await fetch(`/api/closed/site/${encodeURIComponent(key)}`).then(x => x.json());
     if (r.error) throw new Error(r.error);
@@ -7748,7 +7752,7 @@ function 보조상세열기(표) {
   if (selected !== null || selectedKapt !== null || selectedRedev !== null) closeDetail();
   selectedRedev = 표;
   목록자동(true);
-  const box = $('#detail'); box.hidden = false; box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  const box = $('#detail'); box.hidden = false; box.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
   시트('half');
   return box;
 }
@@ -8084,7 +8088,7 @@ const 모달표 = (머리, 줄들) => !줄들.length ? '' : `<table class="hm-t"
 const 모달줄 = (k, v) => v == null || v === '' ? '' : `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
 const 모달링크 = u => { const t = String(u || '').trim(); return /^https?:\/\//.test(t) ? `<a href="${esc(t)}" target="_blank" rel="noopener">${esc(t.replace(/^https?:\/\//, ''))}</a>` : (t ? esc(t) : ''); };
 async function 모달받기(url, 무엇) {
-  모달열기(`<div class="hm-h">불러오는 중…</div>`);
+  모달열기(`<div class="hm-h ldw">불러오는 중…</div>`);
   try { const r = await fetch(url); const d = await r.json(); if (!r.ok || d.error) throw new Error(d.error || '불러오지 못했습니다'); return d; }
   catch (e) { 모달열기(`${모달머리(무엇)}<p class="note">${esc(e.message || '불러오지 못했습니다')}</p>`); return null; }
 }
@@ -8195,7 +8199,7 @@ document.addEventListener('click', e => {
    위치표준 · 학교알리미 · 학구도 세 출처를 칸마다 밝힌다. 값은 원문 그대로(나눗셈 없음 — 학급당 · 1인당도 공시값). */
 async function 학교상세(sid) {
   const el = $('#homodal');
-  el.innerHTML = `<div class="hm-box sbox"><div class="hm-h">불러오는 중…</div></div>`;
+  el.innerHTML = `<div class="hm-box sbox"><div class="hm-h ldw">불러오는 중…</div></div>`;
   el.classList.add('on');
   let d;
   try {
@@ -8386,7 +8390,7 @@ async function selectRedevZone(sn) {
   목록자동(true);
   const box = $('#detail');
   box.hidden = false;
-  box.innerHTML = '<p class="muted">불러오는 중…</p>';
+  box.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
   시트('half');
   let d;
   try {
@@ -8509,7 +8513,7 @@ async function 내정보그리기() {
         <div class="ec-btns"><button type="button" class="ec-b ec-pri" id="mlgo">로그인</button><span class="lerr" id="mlerr"></span></div></div>`;
     return;
   }
-  box.innerHTML = '<h2 class="vtitle">내 정보</h2><p class="muted">불러오는 중…</p>';
+  box.innerHTML = '<h2 class="vtitle">내 정보</h2><p class="muted ldw">불러오는 중…</p>';
   let d;
   try {
     const r = await fetch('/api/my', { headers: { Authorization: 'Bearer ' + t } });
@@ -8620,7 +8624,7 @@ document.addEventListener('click', async e => {
   }
   /* 2026-10-28 수집 현황(root) — 상태 색: 성공 초록 · 실패/못돎 빨강 · 건너뜀 노랑 · 놓음/도는중 회색 */
   if (e.target.closest('[data-my-collect]')) {
-    const box = $('#mycollect'); box.innerHTML = '<p class="muted">불러오는 중…</p>';
+    const box = $('#mycollect'); box.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
     const 때 = v => v ? esc(String(v).slice(5, 16).replace('T', ' ')) : '—';
     const 색 = st => ({ 성공: 'ok', 실패: 'bad', 못돎: 'bad', 건너뜀: 'warn' })[st] || 'mid';
     try {
@@ -8641,7 +8645,7 @@ document.addEventListener('click', async e => {
     return;
   }
   if (e.target.closest('[data-my-ips]')) {
-    const box = $('#myips'); box.innerHTML = '<p class="muted">불러오는 중…</p>';
+    const box = $('#myips'); box.innerHTML = '<p class="muted ldw">불러오는 중…</p>';
     try {
       const r = await fetch('/api/admin/ips', { headers: { Authorization: 'Bearer ' + 토큰() } });
       const d = await r.json(); if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
