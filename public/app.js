@@ -7234,15 +7234,16 @@ async function 평단가채우기() {
   const 종류여럿 = new Set(줄.map(x => x.종류)).size > 1;
   const 동이름 = ((r.지역 || []).find(g => g.수준 === '동') || {}).이름 || '이 동네';
   지금.innerHTML = `<div class="lt2">${용어('평단가')} <span class="muted sm">3.3㎡당 · 전용면적 기준 · 매매 중앙값</span></div>
-    <table class="mini pyt"><thead><tr>${종류여럿 ? '<th>종류</th>' : ''}<th>평형</th><th class="n">이 단지</th><th class="n">거래</th>
+    <div class="pywrap"><table class="mini pyt"><thead><tr>${종류여럿 ? '<th>종류</th>' : ''}<th>평형</th><th class="n">이 단지</th><th class="n">거래</th>
       <th class="n" title="${esc(동이름)} · 같은 종류 · 같은 평형대 · 최근 12개월">동네</th><th class="n" title="같은 시군구 · 같은 종류 · 같은 평형대 · 최근 12개월">시군구</th></tr></thead><tbody>
-    ${줄.map(x => `<tr>${종류여럿 ? `<td>${esc(x.종류)}</td>` : ''}<td>${fmt(x.평형)}㎡</td>
+    ${줄.map(x => `<tr${x.기간개월 === 12 ? '' : ' class="pyhas"'}>${종류여럿 ? `<td>${esc(x.종류)}</td>` : ''}<td>${fmt(x.평형)}㎡</td>
       <td class="n" title="가운데 50% ${만억(x.하위25)} ~ ${만억(x.상위25)} · 최근 ${날짜(x.최근계약일)} ${만억(x.최근평단가)}"><b>${만억(x.중앙값)}</b></td>
-      <td class="n">${fmt(x.건수)}건 <span class="muted sm">${x.기간개월 === 12 ? '1년' : '3년'}</span>${x.기간개월 === 12 ? ''
-        /* 11-01 사장님 "실거래가 있는 거야 없는 거야?": 3년 값은 최근 1년에 거래가 없다는 뜻 — 그걸 말로 적는다 */
-        : `<br><span class="muted sm">1년간 없음 · 마지막 ${esc(날짜(x.최근계약일).slice(0, 7))}</span>`}</td>
-      <td class="n">${칸(지역('동', x.종류, 평형대(x.평형)))}</td><td class="n">${칸(지역('시군구', x.종류, 평형대(x.평형)))}</td></tr>`).join('')}
-    </tbody></table>
+      <td class="n">${fmt(x.건수)}건 <span class="muted sm">${x.기간개월 === 12 ? '1년' : '3년'}</span></td>
+      <td class="n">${칸(지역('동', x.종류, 평형대(x.평형)))}</td><td class="n">${칸(지역('시군구', x.종류, 평형대(x.평형)))}</td></tr>${x.기간개월 === 12 ? ''
+        /* 11-01 사장님 "실거래가 있는 거야 없는 거야?": 3년 값은 최근 1년에 거래가 없다는 뜻 — 그걸 말로 적는다.
+           09:08 "UI 위치가 이상해": 거래 칸 안에 두 줄로 넣으니 그 칸이 넓어져 표가 화면 밖으로 밀렸다 → 그 줄 아래 따로 한 줄 */
+        : `<tr class="pysub"><td colspan="${종류여럿 ? 6 : 5}">최근 1년 매매 없음 · 3년치 ${fmt(x.건수)}건 · 마지막 ${esc(날짜(x.최근계약일))}</td></tr>`}`).join('')}
+    </tbody></table></div>
     <p class="note sm">동네 · 시군구는 같은 종류 · 같은 평형대(전용 ~60 · 60~85 · 85~135 · 135~㎡)의 최근 1년 중앙값입니다. 이 단지 칸의 '3년' 은 그 평형 매매가 최근 1년에 없어 3년치 실거래로 낸 값입니다. 숫자에 올리면 건수 · 범위가 나옵니다.</p>`;
 }
 async function 어린이집채우기() {

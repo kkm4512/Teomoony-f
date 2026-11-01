@@ -2102,3 +2102,11 @@ table.cned td.sm { line-height: 1.6; }
 .tabwrap:has(> .subtabs){margin:2px 0 10px}
 .subtabs .tab{font-size:12px;padding:5px 9px 6px}
 .picksec[hidden]{display:none}
+/* 11-01 평단가 표 — 휴대폰 폭에서 칸이 밀리지 않게(사장님 "UI 위치가 이상해") */
+.pywrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.pyt th,table.pyt td{padding:5px 4px;white-space:nowrap}
+table.pyt td.n{font-size:12px}
+table.pyt th:first-child,table.pyt td:first-child{padding-left:0}
+table.pyt th:last-child,table.pyt td:last-child{padding-right:0}
+table.pyt tr.pyhas td{border-bottom:0;padding-bottom:0}
+table.pyt tr.pysub td{text-align:right;white-space:normal;font-size:11.5px;color:var(--ink-3);padding-top:0}
