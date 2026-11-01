@@ -530,15 +530,15 @@ async function 목록검색(req, res, next) {
     /* 10-25: 이름 · 지번 · 도로명 세 칸 ILIKE 대신 s_all(소문자 한 칸) LIKE — 두 글자 검색(trigram 못 씀)이 2.6초 → 아래.
        부속지번 맞음(am)은 해시 반조인으로 · 보여 줄 줄의 부속지번만 따로 꺼낸다(정렬 색인 순으로 읽다가 상한에서 멈출 수 있게) */
     /* 11-01 QA: 단지 656만 곳 — 두 글자 검색이 큰 표를 정렬 색인 순으로 훑다 55초(3초 제한 → 적재DB 경로 1분+).
-       두 글자 이하는 좁은 표(svc.lyr_sg_cmap_s: 번호 · 정렬 칸 · s_all)를 **통째로 걸러** 맞는 번호를 모으고(MATERIALIZED — 정렬 색인을 따라가지 않게),
-       그 안에서 같은 순서로 세운 뒤 상한만큼 큰 표에서 칸을 꺼낸다. 세 글자 이상 · 빈 검색은 예전 그대로. 좁은 표가 아직 없으면 예전 길. */
+       두 글자 이하는 좁은 표(svc.lyr_sg_cmap_s: 번호 · 정렬 칸 · s_all — **정렬 순서대로 담김**)를 정렬 색인 순으로 읽다가 상한에서 멈추고(차례 읽기),
+       그 번호만 큰 표에서 칸을 꺼낸다. 세 글자 이상 · 빈 검색은 예전 그대로. 좁은 표가 아직 없으면 예전 길. */
     const 좁은표 = q && [...q].length < 3 && await 좁은표있나();
     const 본 = 좁은표 ? 오래Q(`
       WITH am AS MATERIALIZED (SELECT complex_id, min(plat_plc ${K}) AS 부속지번 FROM svc.lyr_sg_atch WHERE $1::text IS NOT NULL AND plat_plc ILIKE $1 GROUP BY complex_id),
-           m AS MATERIALIZED (SELECT s.complex_id, s.dong_cnt, s.pnu_cnt FROM svc.lyr_sg_cmap_s s
+           t AS MATERIALIZED (SELECT s.complex_id FROM svc.lyr_sg_cmap_s s
                                WHERE (s.s_all LIKE lower($1) OR s.complex_id IN (SELECT complex_id FROM am) OR s.complex_id = $2::int)
-                                 AND ($3::boolean = false OR s.has_recap)),
-           t AS (SELECT complex_id FROM m ORDER BY dong_cnt DESC NULLS LAST, pnu_cnt DESC NULLS LAST, complex_id LIMIT $4)
+                                 AND ($3::boolean = false OR s.has_recap)
+                               ORDER BY s.dong_cnt DESC NULLS LAST, s.pnu_cnt DESC NULLS LAST, s.complex_id LIMIT $4)
       SELECT ${목록칸},
              CASE WHEN $1::text IS NOT NULL AND NOT (v.complex_nm ILIKE $1 OR v.rep_plat_plc ILIKE $1 OR v.rep_road_addr ILIKE $1)
                   THEN (SELECT am.부속지번 FROM am WHERE am.complex_id = v.complex_id) END AS 부속지번,
