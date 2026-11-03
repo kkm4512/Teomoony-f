@@ -644,8 +644,26 @@ app.get('/api/usage', async (req, res) => {
 app.get('/api/_usage_rebuild', async (req, res) => {
   if (!집안에서(req)) return res.status(404).json({ error: 'not found' });
   try {
-    const pool = await (require('./db').getLongPool());
     await 운영자IP읽기();
+    /* 11-03: 가르는 규칙 한 곳 — 적재DB 옛 경로 · 서비스DB(app) 경로가 같이 쓴다 */
+    const 가르기 = (줄들) => {
+      const 모음 = new Map(); let 뺀 = 0;
+      for (const x of 줄들) {
+        if (운영자인가(x.ip) || /teomoony-sbx-test/.test(x.ua || '')) { 뺀 += x.n; continue; }
+        const 가짜 = { method: 'GET', path: x.경로, query: Object.fromEntries(new URLSearchParams(x.질의 || '')) };
+        const 동작 = 이용_이름(가짜); if (!동작) continue;
+        const 시 = typeof x.시 === 'string' ? x.시 : new Date(x.시).toISOString().slice(0, 19);
+        const 갈0 = 갈래(x.ua);
+        const k = 시 + '\t' + 동작 + '\t' + (동작 === '단지 페이지 열기' && 갈0 === '사람' && !x.이음 ? '수집 추정' : 갈0);
+        모음.set(k, (모음.get(k) || 0) + x.n);
+      }
+      const 줄 = [...모음.entries()].map(([k, n]) => { const [t, a, g] = k.split('\t'); return { t, a, g, n }; });
+      const 갈 = {}; for (const x of 줄) 갈[x.g] = (갈[x.g] || 0) + x.n;
+      return { 줄, 운영자뺌: 뺀, 갈래: 갈 };
+    };
+    /* ★ 11-03 서비스DB 판(app 켜짐): 접속 기록이 app.req_log 에 쌓이므로 거기서 센다 — 옛 경로는 11-01 17:05 뒤 기록을 못 본다 */
+    if (앱.켜짐()) return res.json(await 앱.이용다시세기(이용_시(), 가르기));
+    const pool = await (require('./db').getLongPool());
     const r = await pool.request().query(`
       SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
       DECLARE @시작 DATETIME2(0) = (SELECT DATEADD(HOUR, DATEDIFF(HOUR, 0, MIN(때)) + 1, 0) FROM ops.req_log);
@@ -661,17 +679,7 @@ app.get('/api/_usage_rebuild', async (req, res) => {
                WHERE l.때 >= @시작 AND l.내부 = 0 AND l.상태 < 400 AND (l.동작 IS NOT NULL OR l.경로 LIKE '/c/%') AND ISNULL(l.동작, N'') <> N'로그인') x
        GROUP BY DATEADD(HOUR, DATEDIFF(HOUR, 0, x.때), 0), x.경로, x.질의, x.ip, x.ua;`);
     const 시작 = r.recordsets[0][0].시작;
-    const 모음 = new Map(); let 뺀 = 0;
-    for (const x of r.recordsets[1]) {
-      if (운영자인가(x.ip) || /teomoony-sbx-test/.test(x.ua || '')) { 뺀 += x.n; continue; }
-      const 가짜 = { method: 'GET', path: x.경로, query: Object.fromEntries(new URLSearchParams(x.질의 || '')) };
-      const 동작 = 이용_이름(가짜); if (!동작) continue;
-      const 시 = new Date(x.시).toISOString().slice(0, 19);
-      const 갈0 = 갈래(x.ua);
-      const k = 시 + '\t' + 동작 + '\t' + (동작 === '단지 페이지 열기' && 갈0 === '사람' && !x.이음 ? '수집 추정' : 갈0);
-      모음.set(k, (모음.get(k) || 0) + x.n);
-    }
-    const 줄 = [...모음.entries()].map(([k, n]) => { const [t, a, g] = k.split('\t'); return { t, a, g, n }; });
+    const { 줄, 운영자뺌: 뺀, 갈래: 갈 } = 가르기(r.recordsets[1]);
     const tx = new sql.Transaction(pool); await tx.begin();
     try {
       await new sql.Request(tx).input('s', sql.DateTime2(0), 시작).query('DELETE FROM ops.usage_hour WHERE 시각 >= @s');
@@ -685,7 +693,6 @@ app.get('/api/_usage_rebuild', async (req, res) => {
       }
       await tx.commit();
     } catch (e) { await tx.rollback(); throw e; }
-    const 갈 = {}; for (const x of 줄) 갈[x.g] = (갈[x.g] || 0) + x.n;
     res.json({ 시작, 줄: 줄.length, 운영자뺌: 뺀, 갈래: 갈 });
   } catch (e) { fail(res, e, '_usage_rebuild'); }
 });

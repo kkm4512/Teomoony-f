@@ -162,5 +162,38 @@ async function 질문넣기(x) {
   await q(`INSERT INTO app.ask_log (user_id, "아이디", "질문", "종류", "해석", "결과수") VALUES ($1, $2, $3, $4, $5, $6)`, [x.uid, x.u, x.q, x.k, x.h, x.n]);
 }
 
-module.exports = { 켜짐, 운영자IP목록, 운영자IP넣기, 이용넣기, 기록넣기, 기록정리, 이용현황, 접속IP, 사용자, 로그인때,
+/* ---- 이용현황 다시 세기 (11-03 사장님 ㄱㄱ — 운영자 /64 · 시험 접속을 뺀 규칙으로 지난 시간도) ----
+   server.js /api/_usage_rebuild 의 서비스DB 판. app.req_log(접속 기록 원본, 90일)로 [시작, 끝) 시간대를 다시 세어 **app.usage_hour 그 시간대만** 지우고 넣는다(한 트랜잭션).
+   시작 = 접속 기록이 시작된 다음 시(그 앞은 IP · UA 가 없어 가를 수 없어 그대로 '모름'), 끝 = 지금 시(지금 시는 실시간 셈이 계속 더하므로 손대지 않는다).
+   가르는 규칙(동작 이름 · 갈래 · 운영자)은 server.js 한 곳 — 가공(줄들) 이 { 줄: [{t, a, g, n}], ... } 를 돌려준다. */
+async function 이용다시세기(끝, 가공) {
+  const c = await pg().connect();
+  try {
+    await c.query('BEGIN'); await c.query("SET LOCAL statement_timeout = '600s'");
+    const 시작 = (await c.query(`SELECT to_char(date_trunc('hour', min("때")) + interval '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS') AS s FROM app.req_log`)).rows[0].s;
+    if (!시작 || 시작 >= 끝) { await c.query('ROLLBACK'); return { 시작, 끝, 줄: 0 }; }
+    const r = await c.query(`
+      SELECT to_char(date_trunc('hour', x."때"), 'YYYY-MM-DD"T"HH24:MI:SS') AS "시", x."경로", x."질의", x.ip, x.ua, count(*)::int AS n, max(x."이음")::int AS "이음"
+        FROM (SELECT l."때", l."경로", l."질의", l.ip, l.ua,
+                     CASE WHEN l."경로" LIKE '/c/%' AND EXISTS (SELECT 1 FROM app.req_log l2
+                            WHERE l2.ip = l.ip AND l2."때" >= l."때" AND l2."때" <= l."때" + interval '5 minutes'
+                              AND (l2."경로" = '/api/complexes/' || replace(substr(l."경로", 4, 20), '/', '')
+                                   OR l2."경로" LIKE '/api/complexes/' || replace(substr(l."경로", 4, 20), '/', '') || '/%')) THEN 1 ELSE 0 END AS "이음"
+                FROM app.req_log l
+               WHERE l."때" >= $1::timestamp AND l."때" < $2::timestamp AND NOT l."내부" AND l."상태" < 400
+                 AND (l."동작" IS NOT NULL OR l."경로" LIKE '/c/%') AND coalesce(l."동작", '') <> '로그인') x
+       GROUP BY 1, 2, 3, 4, 5`, [시작, 끝]);
+    const { 줄, ...덤 } = 가공(r.rows);
+    await c.query('DELETE FROM app.usage_hour WHERE "시각" >= $1::timestamp AND "시각" < $2::timestamp', [시작, 끝]);
+    for (let i = 0; i < 줄.length; i += 500) {
+      const v = [], p = [];
+      줄.slice(i, i + 500).forEach((x, j) => { v.push(`($${j * 4 + 1}::timestamp, $${j * 4 + 2}, $${j * 4 + 3}, $${j * 4 + 4}::int)`); p.push(x.t, x.a, x.g, x.n); });
+      await c.query(`INSERT INTO app.usage_hour ("시각", "동작", "갈래", "횟수") VALUES ${v.join(',')}`, p);
+    }
+    await c.query('COMMIT');
+    return { 시작, 끝, 줄: 줄.length, ...덤 };
+  } catch (e) { try { await c.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { c.release(); }
+}
+module.exports = { 켜짐, 이용다시세기, 운영자IP목록, 운영자IP넣기, 이용넣기, 기록넣기, 기록정리, 이용현황, 접속IP, 사용자, 로그인때,
                    문의넣기, 문의목록, 답변, 내정보, 배지, 관심넣기, 관심빼기, 알림읽음, 질문넣기 };
