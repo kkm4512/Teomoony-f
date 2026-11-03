@@ -226,7 +226,8 @@ function 이용_이름(req) {
 function 이용_동작(req) {
   if (개발) return null;   // 개발판은 공개 수치에 안 센다
   if (이용_안세는호스트.has(req.hostname)) return null;   // 이 PC 안(사장님이 PC 에서 · 제가 확인하며 여는 것) — 안 센다
-  if (운영자IP.has(진짜IP(req))) return null;          // 315: 운영자(사장님) 접속은 공개 수치에서 뺀다
+  if (운영자인가(진짜IP(req))) return null;          // 315: 운영자(사장님) 접속은 공개 수치에서 뺀다 (11-03 IPv6 는 같은 /64 주소대도)
+  if (/teomoony-sbx-test/.test(req.headers['user-agent'] || '')) return null;   // 11-03 사장님 ㄱㄱ: 제(Claude) 화면 시험 접속은 공개 수치에 안 센다
   /* ★ 2026-10-26 사장님 "나나 너는 제외해 줘" — root 토큰을 단 요청이면 IP 를 몰라도 뺀다(휴대폰처럼 IP 가 자주 바뀌는 곳) · 그 IP 도 운영자로 적는다 */
   const 토큰 = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (토큰) { const p = verifyToken(토큰); if (p && p.r === 'root') { 운영자IP더하기(req, 'root 토큰 요청'); return null; } }
@@ -248,10 +249,22 @@ function 갈래(ua) {
   return '사람';
 }
 /* 운영자 IP — root 로 로그인한 요청이 들어온 IP(계정이 root 하나라 그게 사장님). 표(ops.usage_owner_ip)와 메모리 둘 다 */
-const 운영자IP = new Set();
+/* ★ 2026-11-03 사장님 (이용현황 '사람' 에 사장님 폰 · PC 가 섞임) "ㄱㄱ" — IPv6 는 기기가 주소 뒤 절반(64비트)을 수시로 바꾼다(개인정보 보호 주소).
+     집 회선 2406:… 한 /64 에서만 주소 21개가 나왔고 그중 11개만 운영자 표에 있었다. → 운영자 IPv6 의 **앞 64비트(/64, 한 회선 · 한 기기망)** 가 같으면 운영자로 본다.
+     표(usage_owner_ip)에는 실제로 본 주소만 그대로 적는다(앞자리 규칙은 읽을 때만). IPv4 · ::1 · IPv4 섞인 주소는 지금처럼 주소가 같을 때만. */
+const 운영자IP = new Set(), 운영자앞 = new Set();
+function 앞64(ip) {
+  const a = String(ip || '').toLowerCase();
+  if (!a.includes(':') || a.includes('.') || a === '::1') return null;
+  const [l, r] = a.split('::'); const L = l ? l.split(':') : [], R = r !== undefined && r ? r.split(':') : [];
+  const 칸 = a.includes('::') ? [...L, ...Array(Math.max(0, 8 - L.length - R.length)).fill('0'), ...R] : L;
+  if (칸.length !== 8 || 칸.some(x => !/^[0-9a-f]{1,4}$/.test(x))) return null;
+  return 칸.slice(0, 4).map(x => x.replace(/^0+(?=.)/, '')).join(':');
+}
+function 운영자인가(ip) { if (!ip) return false; if (운영자IP.has(ip)) return true; const p = 앞64(ip); return !!p && 운영자앞.has(p); }
 async function 운영자IP읽기() {
   try { const ips = 앱.켜짐() ? await 앱.운영자IP목록() : (await (await getPool()).request().query('SELECT ip FROM ops.usage_owner_ip')).recordset.map(x => x.ip);
-        운영자IP.clear(); ips.forEach(ip => 운영자IP.add(ip)); }
+        운영자IP.clear(); 운영자앞.clear(); ips.forEach(ip => { 운영자IP.add(ip); const p = 앞64(ip); if (p) 운영자앞.add(p); }); }
   catch (e) { console.error('[운영자IP] 못 읽었다 —', e.message); }
 }
 운영자IP읽기(); setInterval(운영자IP읽기, 10 * 60 * 1000).unref();
@@ -259,7 +272,7 @@ function 운영자IP더하기(req, 근거) {
   if (개발) return;
   const ip = 진짜IP(req);
   if (!ip || 운영자IP.has(ip) || 이용_안세는호스트.has(req.hostname)) return;
-  운영자IP.add(ip);
+  운영자IP.add(ip); { const p = 앞64(ip); if (p) 운영자앞.add(p); }
   if (앱.켜짐()) return void 앱.운영자IP넣기(ip, 근거).catch(e => console.error('[운영자IP] 못 넣었다 —', e.message));
   getPool().then(pool => pool.request().input('ip', sql.VarChar(45), ip).input('g', sql.NVarChar(100), 근거).query(`
     IF NOT EXISTS (SELECT 1 FROM ops.usage_owner_ip WHERE ip = @ip) INSERT INTO ops.usage_owner_ip (ip, 근거) VALUES (@ip, @g);`))
@@ -607,6 +620,7 @@ app.get('/api/usage', async (req, res) => {
     /* 나라 × 갈래 — IP 수와 요청 수만(주소는 안 내보낸다) */
     const 나라표 = new Map();
     for (const x of 결.recordsets[4] || []) {
+      if (운영자인가(x.ip) || /teomoony-sbx-test/.test(x.ua || '')) continue;   /* 11-03 같은 /64 운영자 · 제 시험 접속 */
       const k = (x.나라 || '??') + '\t' + 갈래(x.ua);
       const v = 나라표.get(k) || { ip: new Set(), n: 0 }; v.ip.add(x.ip); v.n += x.n; 나라표.set(k, v);
     }
@@ -649,7 +663,7 @@ app.get('/api/_usage_rebuild', async (req, res) => {
     const 시작 = r.recordsets[0][0].시작;
     const 모음 = new Map(); let 뺀 = 0;
     for (const x of r.recordsets[1]) {
-      if (운영자IP.has(x.ip)) { 뺀 += x.n; continue; }
+      if (운영자인가(x.ip) || /teomoony-sbx-test/.test(x.ua || '')) { 뺀 += x.n; continue; }
       const 가짜 = { method: 'GET', path: x.경로, query: Object.fromEntries(new URLSearchParams(x.질의 || '')) };
       const 동작 = 이용_이름(가짜); if (!동작) continue;
       const 시 = new Date(x.시).toISOString().slice(0, 19);
@@ -706,7 +720,7 @@ app.get('/api/admin/ips', requireAuth, async (req, res) => {
        WHERE l.때 >= DATEADD(DAY, -7, SYSDATETIME()) AND l.내부 = 0
        GROUP BY l.ip ORDER BY COUNT(*) DESC
       OFFSET 0 ROWS FETCH NEXT 300 ROWS ONLY;`);
-    res.json({ 목록: r.recordset.map(x => ({ ...x, 갈래: 갈래(x.ua), ua: String(x.ua || '').slice(0, 160) })) });
+    res.json({ 목록: r.recordset.map(x => ({ ...x, 운영자: x.운영자 || (운영자인가(x.ip) ? 1 : 0), 갈래: /teomoony-sbx-test/.test(x.ua || '') ? '시험(Claude)' : 갈래(x.ua), ua: String(x.ua || '').slice(0, 160) })) });
   } catch (e) { fail(res, e, 'admin-ips'); }
 });
 
