@@ -227,7 +227,7 @@ function 이용_동작(req) {
   if (개발) return null;   // 개발판은 공개 수치에 안 센다
   if (이용_안세는호스트.has(req.hostname)) return null;   // 이 PC 안(사장님이 PC 에서 · 제가 확인하며 여는 것) — 안 센다
   if (운영자인가(진짜IP(req))) return null;          // 315: 운영자(사장님) 접속은 공개 수치에서 뺀다 (11-03 IPv6 는 같은 /64 주소대도)
-  if (/teomoony-sbx-test/.test(req.headers['user-agent'] || '')) return null;   // 11-03 사장님 ㄱㄱ: 제(Claude) 화면 시험 접속은 공개 수치에 안 센다
+  if (시험인가(진짜IP(req), req.headers['user-agent'])) return null;   // 11-03 사장님 ㄱㄱ: 제(Claude) 화면 시험 접속은 공개 수치에 안 센다
   /* ★ 2026-10-26 사장님 "나나 너는 제외해 줘" — root 토큰을 단 요청이면 IP 를 몰라도 뺀다(휴대폰처럼 IP 가 자주 바뀌는 곳) · 그 IP 도 운영자로 적는다 */
   const 토큰 = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (토큰) { const p = verifyToken(토큰); if (p && p.r === 'root') { 운영자IP더하기(req, 'root 토큰 요청'); return null; } }
@@ -244,7 +244,7 @@ function 갈래(ua) {
   if (/ClaudeBot|Claude-|anthropic|GPTBot|OAI-SearchBot|ChatGPT|PerplexityBot|Bytespider|CCBot|Amazonbot|meta-externalagent|cohere/i.test(u)) return 'AI 수집 로봇';
   if (/AhrefsBot|SemrushBot|MJ12bot|DotBot|PetalBot|BLEXBot|DataForSeoBot|SeznamBot/i.test(u)) return 'SEO 수집 로봇';
   if (/bot|spider|crawl|facebookexternalhit|kakaotalk-scrap|Slackbot|Discordbot|TelegramBot|WhatsApp|preview/i.test(u)) return '기타 로봇·미리보기';
-  if (/^(python-|curl\/|Go-http|Wget|okhttp|Java\/|node-fetch|axios)|Downloader|HeadlessChrome/i.test(u)) return '스크립트';
+  if (/^(python-|curl\/|Go-http|Wget|okhttp|Java\/|node-fetch|axios)|^node$|Downloader|HeadlessChrome/i.test(u)) return '스크립트';   // 11-03 'node' = Node 내장 fetch 기본 UA
   if (/Chrome\/(7\d|8\d|9[0-9])\./.test(u) && !/Mobile/.test(u)) return '스캐너 추정';   // 몇 해 묵은 데스크톱 크롬 흉내 — 실측 싱가포르·일본·미국 데이터센터
   return '사람';
 }
@@ -260,6 +260,13 @@ function 앞64(ip) {
   const 칸 = a.includes('::') ? [...L, ...Array(Math.max(0, 8 - L.length - R.length)).fill('0'), ...R] : L;
   if (칸.length !== 8 || 칸.some(x => !/^[0-9a-f]{1,4}$/.test(x))) return null;
   return 칸.slice(0, 4).map(x => x.replace(/^0+(?=.)/, '')).join(':');
+}
+/* 11-03: Claude(저) 의 시험 접속 — UA 에 teomoony-sbx-test 를 달거나(QA · 프록시), Anthropic 작업 환경 주소(160.79.104.0/21)에서 온 것.
+   11-01 '사람' 618건은 제 QA(그 주소의 리눅스 크롬 · curl)와 UA 'node'(제 시험 스크립트)였다. 사람 브라우저가 아니라 공개 수치에서 뺀다(접속 기록에는 그대로). */
+function 시험인가(ip, ua) {
+  if (/teomoony-sbx-test/.test(ua || '')) return true;
+  const m = /^(?:::ffff:)?160\.79\.(\d+)\.\d+$/.exec(String(ip || ''));
+  return !!m && +m[1] >= 104 && +m[1] <= 111;
 }
 function 운영자인가(ip) { if (!ip) return false; if (운영자IP.has(ip)) return true; const p = 앞64(ip); return !!p && 운영자앞.has(p); }
 async function 운영자IP읽기() {
@@ -620,7 +627,7 @@ app.get('/api/usage', async (req, res) => {
     /* 나라 × 갈래 — IP 수와 요청 수만(주소는 안 내보낸다) */
     const 나라표 = new Map();
     for (const x of 결.recordsets[4] || []) {
-      if (운영자인가(x.ip) || /teomoony-sbx-test/.test(x.ua || '')) continue;   /* 11-03 같은 /64 운영자 · 제 시험 접속 */
+      if (운영자인가(x.ip) || 시험인가(x.ip, x.ua)) continue;   /* 11-03 같은 /64 운영자 · 제 시험 접속 */
       const k = (x.나라 || '??') + '\t' + 갈래(x.ua);
       const v = 나라표.get(k) || { ip: new Set(), n: 0 }; v.ip.add(x.ip); v.n += x.n; 나라표.set(k, v);
     }
@@ -649,7 +656,7 @@ app.get('/api/_usage_rebuild', async (req, res) => {
     const 가르기 = (줄들) => {
       const 모음 = new Map(); let 뺀 = 0;
       for (const x of 줄들) {
-        if (운영자인가(x.ip) || /teomoony-sbx-test/.test(x.ua || '')) { 뺀 += x.n; continue; }
+        if (운영자인가(x.ip) || 시험인가(x.ip, x.ua)) { 뺀 += x.n; continue; }
         const 가짜 = { method: 'GET', path: x.경로, query: Object.fromEntries(new URLSearchParams(x.질의 || '')) };
         const 동작 = 이용_이름(가짜); if (!동작) continue;
         const 시 = typeof x.시 === 'string' ? x.시 : new Date(x.시).toISOString().slice(0, 19);
@@ -727,7 +734,7 @@ app.get('/api/admin/ips', requireAuth, async (req, res) => {
        WHERE l.때 >= DATEADD(DAY, -7, SYSDATETIME()) AND l.내부 = 0
        GROUP BY l.ip ORDER BY COUNT(*) DESC
       OFFSET 0 ROWS FETCH NEXT 300 ROWS ONLY;`);
-    res.json({ 목록: r.recordset.map(x => ({ ...x, 운영자: x.운영자 || (운영자인가(x.ip) ? 1 : 0), 갈래: /teomoony-sbx-test/.test(x.ua || '') ? '시험(Claude)' : 갈래(x.ua), ua: String(x.ua || '').slice(0, 160) })) });
+    res.json({ 목록: r.recordset.map(x => ({ ...x, 운영자: x.운영자 || (운영자인가(x.ip) ? 1 : 0), 갈래: 시험인가(x.ip, x.ua) ? '시험(Claude)' : 갈래(x.ua), ua: String(x.ua || '').slice(0, 160) })) });
   } catch (e) { fail(res, e, 'admin-ips'); }
 });
 

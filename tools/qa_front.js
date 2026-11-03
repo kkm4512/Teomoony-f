@@ -5,7 +5,7 @@ const 결과 = [];
 const 기록 = (뷰, 이름, ok, 말 = '') => { 결과.push({ 뷰, 이름, ok, 말 }); console.log(`${ok ? 'PASS' : 'FAIL'} [${뷰}] ${이름}${말 ? ' — ' + 말 : ''}`); };
 
 async function 판(b, vp, 뷰) {
-  const p = await b.newPage({ viewport: vp, deviceScaleFactor: 1 });
+  const p = await b.newPage({ viewport: vp, deviceScaleFactor: 1, userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 teomoony-sbx-test' });   /* 11-03 이용현황에서 빠지게 */
   const 오류 = [], 실패 = [];
   p.on('pageerror', e => 오류.push(e.message.slice(0, 160)));
   p.on('console', m => { if (m.type() === 'error' && !/favicon|ERR_BLOCKED|vworld|Failed to load resource/i.test(m.text())) 오류.push('console: ' + m.text().slice(0, 160)); });
