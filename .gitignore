@@ -8,3 +8,6 @@ node_modules/
 _backup/
 _to_delete/
 logs/
+
+# 2026-11-08: 화면 QA(tools/qa_front.js) 결과 — 문의 내용 등 화면 값이 담겨 저장소에 올리지 않는다
+qa_result.json
