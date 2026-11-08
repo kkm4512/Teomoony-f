@@ -9199,8 +9199,11 @@ app.use((err, req, res, _next) => {
      같은 와이파이의 기기가 Host: localhost 로 진단 주소(/api/_apply 등)를 열 수 있었다.
      바깥 사용자는 Cloudflare 터널(이 PC 안의 cloudflared → localhost:5173)로만 온다 — 영향 없음.
      localhost 가 ::1 로 풀리는 경우를 위해 IPv6 루프백도 같이(없으면 조용히 넘어감). */
-require('http').createServer(app).listen(PORT, '::1').on('error', e => console.log(`  (::1 은 안 열림: ${e.code})`));
-app.listen(PORT, '127.0.0.1', () => {
+/* ★ 2026-11-08 도커 판(TM_DOCKER=1): 컨테이너 안의 127.0.0.1 은 컨테이너 자신이라 바깥(포트 연결)에서 못 들어온다 → 컨테이너 안에서는 0.0.0.0.
+     그래도 "이 PC 안에서만" 은 그대로다 — compose 가 PC 쪽 문을 127.0.0.1:5173 에만 연다(deploy/docker-compose.yml web). */
+const 도커판 = require('./hosts').도커;
+if (!도커판) require('http').createServer(app).listen(PORT, '::1').on('error', e => console.log(`  (::1 은 안 열림: ${e.code})`));
+app.listen(PORT, 도커판 ? '0.0.0.0' : '127.0.0.1', () => {
   console.log(`\n  Teomoony-f  http://localhost:${PORT}  (이 PC 안에서만)\n`);
   getPool()
     .then(() => console.log('  DB 연결 OK\n'))
