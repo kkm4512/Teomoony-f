@@ -9,7 +9,7 @@ const { Pool } = require('pg');
 let pool = null;
 function pg() {
   /* 서비스DB(teomoony) 의 nm 스키마(etl/nm_build.py 가 새로 만들어 바꿔 끼운다). 3초 넘으면 끊는다 → server.js 가 적재DB 질의로 */
-  if (!pool) pool = new Pool({ host: '127.0.0.1', port: 15432, database: process.env.NORM_DB || 'teomoony', user: 'teomoony',
+  if (!pool) pool = new Pool({ host: require('./hosts').PG.host, port: require('./hosts').PG.port, database: process.env.NORM_DB || 'teomoony', user: 'teomoony',
                                password: process.env.SVC_DB_PASSWORD || '', max: 10, idleTimeoutMillis: 30000,
                                options: '-c search_path=nm,public -c statement_timeout=3000' });
   return pool;

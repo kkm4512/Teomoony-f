@@ -15,7 +15,7 @@ const 타입 = {
 let pool = null;
 function pg() {
   if (!pool) {
-    pool = new Pool({ host: '127.0.0.1', port: 15432, database: 'teomoony', user: 'teomoony', password: process.env.SVC_DB_PASSWORD || '',
+    pool = new Pool({ host: require('./hosts').PG.host, port: require('./hosts').PG.port, database: 'teomoony', user: 'teomoony', password: process.env.SVC_DB_PASSWORD || '',
                       max: 6, idleTimeoutMillis: 30000, connectionTimeoutMillis: 3000, statement_timeout: 30000, types: 타입 });
     pool.on('error', () => {});
   }

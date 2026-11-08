@@ -23,7 +23,7 @@ function 지금설정() {
 let pool = null;
 function pg() {
   if (!pool) {
-    pool = new Pool({ host: '127.0.0.1', port: 15432, database: 'teomoony', user: 'teomoony',
+    pool = new Pool({ host: require('./hosts').PG.host, port: require('./hosts').PG.port, database: 'teomoony', user: 'teomoony',
                       password: process.env.SVC_DB_PASSWORD || '', max: 20, idleTimeoutMillis: 30000,
                       connectionTimeoutMillis: 2000, statement_timeout: 3000 });   /* 11-01 10 → 20: 두 글자 목록 검색이 연결 여섯을 한꺼번에 쓴다 */
     pool.on('error', () => {});   // 끊긴 연결은 버린다 — 다음 요청이 새로 붙는다
@@ -39,7 +39,7 @@ let redis = null, redis준비 = false, 판 = 0, 판본때 = 0, 채운판 = 0;
 function rd() {
   if (!redis) {
     try {
-      redis = require('redis').createClient({ socket: { host: '127.0.0.1', port: 16379, connectTimeout: 1000,
+      redis = require('redis').createClient({ socket: { host: require('./hosts').RD.host, port: require('./hosts').RD.port, connectTimeout: 1000,
                                                        reconnectStrategy: n => Math.min(n * 500, 10000) } });
       redis.on('ready', () => { redis준비 = true; });
       redis.on('end', () => { redis준비 = false; });

@@ -16,8 +16,8 @@ function loadEnv() {
 loadEnv();
 
 const config = {
-  server: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 11433),
+  server: require('./hosts').MS ? require('./hosts').MS.host : process.env.DB_HOST || '127.0.0.1',   // 11-08 도커 판은 hosts.js
+  port: require('./hosts').MS ? require('./hosts').MS.port : Number(process.env.DB_PORT || 11433),
   user: process.env.DB_USER || 'sa',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'Teomoony',
